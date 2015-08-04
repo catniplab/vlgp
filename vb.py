@@ -33,7 +33,7 @@ def lowerbound(y, Y, rate, mu, omega, m, V, b, a):
     return lbound
 
 
-def variational(y, mu, sigma, p, omega=None, maxiter=5, inneriter=5, epsilon=np.finfo(float).eps, verbose=False):
+def variational(y, mu, sigma, p, omega=None, maxiter=5, inneriter=10, epsilon=np.finfo(float).eps, verbose=False):
     """
     :param y: (T, N), spike trains
     :param mu: (T, L), prior mean
@@ -92,6 +92,9 @@ def variational(y, mu, sigma, p, omega=None, maxiter=5, inneriter=5, epsilon=np.
     lbound.fill(np.NINF)
     lbound[0] = lowerbound(y, Y, rate, mu, omega, m, V, b, a)
 
+    if verbose:
+        print 'iteration 1, lower bound = %d' % lbound[0]
+
     # old values
     old_a = a
     old_b = b
@@ -100,6 +103,7 @@ def variational(y, mu, sigma, p, omega=None, maxiter=5, inneriter=5, epsilon=np.
 
     it = 1
     convergent = False
+
     while not convergent and it < maxiter:
         # optimize coefficients
         for _ in range(inneriter):
@@ -139,9 +143,8 @@ def variational(y, mu, sigma, p, omega=None, maxiter=5, inneriter=5, epsilon=np.
                     # update \tilde{k}_tt
                     k_ = np.nan_to_num(K[l, t, t] - 1/V[l, t, t])
                     # udpate Lambda
-                    # for n in range(N):
-                    #     a = coeffs[1+p*N:, n]
-                    #     rate[t, n] = saferate(t, n, Y, m, V, b, a)
+                    for n in range(N):
+                        rate[t, n] = saferate(t, n, Y, m, V, b, a)
                 # update V
                 mask = np.arange(T) != t
                 V[np.ix_([l], mask, mask)] = np.nan_to_num(V[np.ix_([l], mask, mask)] + \
@@ -165,14 +168,18 @@ def variational(y, mu, sigma, p, omega=None, maxiter=5, inneriter=5, epsilon=np.
         lbound[it] = lowerbound(y, Y, rate, mu, omega, m, V, b, a)
 
         if verbose:
-            print 'iteration %d' % it, ', lower bound = %d' % lbound[it]
+            print 'iteration %d' % (it + 1), ', lower bound = %d' % lbound[it]
 
         # check convergence
-        if np.abs(lbound[it] - lbound[it-1]) < epsilon*np.abs(lbound[0]):
-            convergent = True
-
-        # if np.linalg.norm(old_coeffs - coeffs) < epsilon:
+        # if np.abs(lbound[it] - lbound[it-1]) < epsilon*np.abs(lbound[0]):
         #     convergent = True
+
+        delta = np.linalg.norm(old_a - a) + np.linalg.norm(old_b - b) + np.linalg.norm(old_m - m)
+        for l in range(L):
+            delta += np.linalg.norm(old_V[l, :, :] - V[l, :, :])
+
+        if delta < epsilon:
+            convergent = True
 
         old_a = a
         old_b = b
