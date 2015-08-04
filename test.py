@@ -1,11 +1,7 @@
 __author__ = 'yuan'
 
-import numpy as np
-import matplotlib.pyplot as plt
 from vb import *
 import simulation
-from plot import *
-
 
 dt = 1.0
 T = 500
@@ -28,9 +24,6 @@ Sigma = np.zeros((L, T, T))
 for t in range(T):
     Sigma[:, t, t] = np.ones(L)
 
-
-m, V, coeffs, lbound, it = variational(y, mu, Sigma, p, maxiter=10, epsilon=1e-7)
+m, V, b, a, lbound, it = variational(y, mu, Sigma, p, maxiter=20, epsilon=1e-7, verbose=True)
 print '%d iteration(s)' % it
 print 'Lower bounds: ', lbound[:it]
-print 'Coefficients:\n', coeffs
-print 'Posterior mean:\n', m
