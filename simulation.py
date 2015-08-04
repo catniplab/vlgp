@@ -1,8 +1,6 @@
-# -*- coding: utf-8 -*-
-
 from __future__ import division
 import numpy as np
-from numpy import pi, exp, sqrt, power, log2, dot
+from numpy import pi, exp, sqrt, log2, dot
 import scipy.stats as stats
 
 
@@ -16,7 +14,7 @@ def spectral(w, b):
 
     # TODO(yuan): change b to l^2
 
-    return exp(- power(w, 2) / (4 * b)) / sqrt(b * pi) / 2
+    return 0.5 * exp(-0.25 * w * w / b) / sqrt(pi * b)
 
 
 def gpspectral(sigma, b, n, dt=1.0, seed=None):
@@ -45,12 +43,12 @@ def gpspectral(sigma, b, n, dt=1.0, seed=None):
     return sigma * n * np.fft.ifft(B, n).real, t[:n]
 
 
-def latents(L, T, sigma, b, dt=1.0, seed=None):
+def latents(L, T, std, b, dt=1.0, seed=None):
     """
     Simulate multiple Gaussian processes
     :param L: int, number of processes
     :param T: int, time length
-    :param sigma: float, standard deviation
+    :param std: float, standard deviation
     :param b: float, scale
     :param dt: float, optional, unit time interval
     :param seed: int, optional, random number seed
@@ -74,7 +72,7 @@ def latents(L, T, sigma, b, dt=1.0, seed=None):
     for l in range(L):
         B = 2 * sqrt(spectral(w, b) * dw) * exp(1j * np.random.rand(M) * 2 * pi)
         B[0] = 0
-        x[:, l] = sigma * T * np.fft.ifft(B, T).real
+        x[:, l] = std * T * np.fft.ifft(B, T).real
 
     return x, t[:T]
 
@@ -126,12 +124,12 @@ def multi_spike(gamma, x, A, B, y0=None, seed=None):
     return y
 
 
-def spikes(x, A, B, y0=None, seed=None):
+def spikes(x, a, b, y0=None, seed=None):
     """
     Simulate spike trains driven by latent processes
     :param x: (T, L), latent processes
-    :param A: (L, N), coefficients of latent
-    :param B: (1 + p*N, N), coefficients of p-step history
+    :param a: (L, N), coefficients of latent
+    :param b: (1 + p*N, N), coefficients of p-step history
     :param y0: (p, N), prehistory
     :param seed: random number seed
     :return: (T, N), spike trains
@@ -141,11 +139,11 @@ def spikes(x, A, B, y0=None, seed=None):
         np.random.seed(seed)
 
     T, L = x.shape
-    _, N = A.shape
-    rb, _ = B.shape
+    _, N = a.shape
+    rb, _ = b.shape
     p = (rb - 1)/N
 
-    y = np.empty((T, N), dtype=int)
+    y = np.empty((T, N), dtype=float)
     Y = np.zeros((T, 1 + p*N), dtype=float)
     Y[:, 0] = 1
     if y0 is not None:
@@ -153,12 +151,13 @@ def spikes(x, A, B, y0=None, seed=None):
             Y[t, 1:(p-t)*N] = y0[t:, :].flatten()
 
     for t in range(T):
-        rate = np.exp(np.dot(Y[t, :], B) + np.dot(x[t, :], A))
+        rate = np.exp(np.dot(Y[t, :], b) + np.dot(x[t, :], a))
         # y[:, t] = np.random.poisson(lambda_t)
         # truncate y to 1 if y > 1
         # it's equivalent to Bernoulli P(1) = (1 - e^-(lam_t))
         y[t, :] = stats.bernoulli.rvs(1.0 - exp(-rate))
-        Y[t+1, :] = np.roll(Y[t, :], -N)
-        Y[t+1, 1+(p-1)*N:] = y[t, :]
+        if t + 1 < T:
+            Y[t + 1, 1:] = np.roll(Y[t, 1:], -N)
+            Y[t + 1, 1 + (p - 1) * N:] = y[t, :]
 
-    return y
+    return y, Y
