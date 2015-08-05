@@ -106,8 +106,6 @@ def variational(y, mu, sigma, p, omega=None, b0=None, a0=None, maxiter=5, inneri
     old_m = np.copy(m)
     old_V = np.copy(V)
 
-    basenorm = np.linalg.norm(old_m) + np.sum(map(lambda l: np.linalg.norm(old_V[l, :, :]), range(L)))
-
     it = 1
     convergent = False
 
@@ -164,13 +162,13 @@ def variational(y, mu, sigma, p, omega=None, b0=None, a0=None, maxiter=5, inneri
             # updaterate(range(T), range(N))
 
             # optimize m[l]
-            # for _ in range(inneriter):
-            #     grad_m = np.nan_to_num(np.dot(y - rate, a[l, :]) - np.dot(omega[l, :, :], (m[:, l] - mu[:, l])))
-            #     hess_m = np.nan_to_num(-np.diag(np.dot(rate, a[l, :] * a[l, :]))) - omega[l, :, :]
-            #     # m[:, l] = m[:, l] - np.linalg.lstsq(hess_m, grad_m)[0]
-            #     delta = np.nan_to_num(np.linalg.solve(hess_m, grad_m))
-            #     m[:, l] = m[:, l] - delta
-            #     updaterate(range(T), range(N))
+            for _ in range(inneriter):
+                grad_m = np.nan_to_num(np.dot(y - rate, a[l, :]) - np.dot(omega[l, :, :], (m[:, l] - mu[:, l])))
+                hess_m = np.nan_to_num(-np.diag(np.dot(rate, a[l, :] * a[l, :]))) - omega[l, :, :]
+                # m[:, l] = m[:, l] - np.linalg.lstsq(hess_m, grad_m)[0]
+                delta = np.nan_to_num(np.linalg.solve(hess_m, grad_m))
+                m[:, l] = m[:, l] - delta
+                updaterate(range(T), range(N))
 
         # update lower bound
         lbound[it] = lowerbound(y, Y, rate, mu, omega, m, V, b, a)
@@ -180,9 +178,9 @@ def variational(y, mu, sigma, p, omega=None, b0=None, a0=None, maxiter=5, inneri
 
         # check convergence
         delta = np.linalg.norm(old_a - a) + np.linalg.norm(old_b - b) + np.linalg.norm(old_m - m) \
-                + np.sum(map(lambda l: np.linalg.norm(old_V[l, :, :] - V[l, :, :]), range(L)))
+                + np.linalg.norm(old_V - V)
 
-        if delta < epsilon * basenorm:
+        if delta < epsilon * T:
             convergent = True
 
         old_a[:] = a

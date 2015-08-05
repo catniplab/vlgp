@@ -20,7 +20,7 @@ x, ticks = simulation.latents(L, T, sigma, b)
 # simulate spike trains
 a = np.ones((L, N))  # (L, N)
 b = np.zeros((1 + p * N, N))  # (1 + p*N, N)
-b[0, :] = 0
+b[0, :] = -1
 y, Y = simulation.spikes(x, a, b)
 # print y
 # print Y
@@ -36,7 +36,7 @@ for l in range(L):
 
 # print 'Prior mean\n', mu
 # print 'Prior covariance', sigma
-
+b[0, :] = -10
 m, V, b, a, lbound, it = variational(y, mu, sigma, p, b0=b, a0=a, maxiter=50, inneriter=5, epsilon=1e-5, verbose=True)
 print '%d iteration(s)' % it
 print 'Lower bounds: ', lbound[:it]
