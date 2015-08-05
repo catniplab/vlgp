@@ -1,11 +1,13 @@
 __author__ = 'yuan'
+import matplotlib.pyplot as plt
+
 from vb import *
 import simulation
 
 dt = 1.0
-T = 1000
-b = 0.0001
-sigma = 1.0
+T = 500
+b = 1e-3
+sigma = 2.0
 p = 1
 
 L = 1
@@ -16,18 +18,35 @@ np.random.seed(0)
 x, ticks = simulation.latents(L, T, sigma, b)
 
 # simulate spike trains
-a = np.random.randn(L, N)  # (L, N)
-b = np.random.randn(1 + p * N, N)  # (1 + p*N, N)
-b[0, :] = -2
+a = np.ones((L, N))  # (L, N)
+b = np.zeros((1 + p * N, N))  # (1 + p*N, N)
+b[0, :] = 0
 y, Y = simulation.spikes(x, a, b)
 # print y
 # print Y
 
-mu = np.random.randn(T, L)
+mu = np.zeros((T, L))
+
+cov = np.empty((T, T))
+for i, j in itertools.product(range(T), range(T)):
+    cov[i, j] = simulation.sqexp(i - j, 1e-3)
 sigma = np.zeros((L, T, T))
 for l in range(L):
-    sigma[l, :, :] = np.eye(T)
+    sigma[l, :, :] = cov
 
-m, V, b, a, lbound, it = variational(y, mu, sigma, p, maxiter=20, epsilon=1e-7, verbose=True)
+# print 'Prior mean\n', mu
+# print 'Prior covariance', sigma
+
+m, V, b, a, lbound, it = variational(y, mu, sigma, p, b0=b, a0=a, maxiter=50, inneriter=5, epsilon=1e-5, verbose=True)
 print '%d iteration(s)' % it
 print 'Lower bounds: ', lbound[:it]
+# print 'Posterior mean\n', m
+print 'Posterior covariance\n', V
+# print 'beta\n', b
+# print 'alpha\n', a
+plt.plot(lbound)
+# for l in range(L):
+#     plt.figure()
+#     plt.plot(x[:, l])
+#     plt.plot(m[:, l])
+plt.show()

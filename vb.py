@@ -1,4 +1,5 @@
 from __future__ import division
+
 __author__ = 'yuan'
 import itertools
 import warnings
@@ -23,17 +24,18 @@ def lowerbound(y, Y, rate, mu, omega, m, V, b, a):
 
     _, L = mu.shape
 
-    lbound = np.sum(y * (np.dot(Y, b) + np.dot(m, a))) - rate.sum()
+    lbound = np.sum(y * (np.dot(Y, b) + np.dot(m, a)) - rate)
 
     for l in range(L):
         _, logdet = np.linalg.slogdet(V[l, :, :])  # V is positive definite. So discard the sign.
-        lbound += -0.5 * np.dot(m[:, l] - mu[:, l], np.dot(omega[l, :, :], m[:, l] - mu[:, l])) - \
-                  0.5 * np.trace(np.dot(omega[l, :, :], V[l, :, :])) + 0.5 * logdet
+        lbound += -0.5 * np.dot(m[:, l] - mu[:, l], np.dot(omega[l, :, :], m[:, l] - mu[:, l])) + \
+                  -0.5 * np.trace(np.dot(omega[l, :, :], V[l, :, :])) + 0.5 * logdet
 
     return lbound
 
 
-def variational(y, mu, sigma, p, omega=None, maxiter=5, inneriter=10, epsilon=np.finfo(float).eps, verbose=False):
+def variational(y, mu, sigma, p, omega=None, b0=None, a0=None, maxiter=5, inneriter=5, epsilon=np.finfo(float).eps,
+                verbose=False):
     """
     :param y: (T, N), spike trains
     :param mu: (T, L), prior mean
@@ -51,8 +53,9 @@ def variational(y, mu, sigma, p, omega=None, maxiter=5, inneriter=10, epsilon=np
         it: number of iterations
     """
 
-    def updaterate():
-        for t, n in itertools.product(range(T), range(N)):
+    def updaterate(t, n):
+        # rate = E(E(y|x))
+        for t, n in itertools.product(t, n):
             rate[t, n] = saferate(t, n, Y, m, V, b, a)
 
     # dimensions
@@ -69,7 +72,7 @@ def variational(y, mu, sigma, p, omega=None, maxiter=5, inneriter=10, epsilon=np
     K = omega
     m = mu
 
-    # initialize coeffs by least-squares
+    # initialize coefficients by least-squares
     Y = np.zeros((T, 1 + p * N), dtype=float)
     Y[:, 0] = 1
     for t in range(T):
@@ -78,113 +81,114 @@ def variational(y, mu, sigma, p, omega=None, maxiter=5, inneriter=10, epsilon=np
         else:
             Y[t, 1 + (p - t) * N:] = y[:t, :].flatten()
     Y_ = np.hstack((Y, m))
-    coeffs = np.linalg.lstsq(Y_, y)[0]  # least-squares solution is calculated for each column of y
+    coeffs = np.linalg.lstsq(Y_, y)[0]  # least-squares calculated for each column of y
+    # coeffs = np.zeros((1 + p*N + L, N))
 
     b = coeffs[:1 + p * N, :]
     a = coeffs[1 + p * N:, :]
+    if a0 is not None:
+        a = a0
+    if b0 is not None:
+        b = b0
 
-    # initialize rate
+    # initialize rate matrix
     rate = np.empty((T, N))
-    updaterate()
+    updaterate(range(T), range(N))
 
     # initialize lower bound
     lbound = np.empty(maxiter, dtype=float)
     lbound.fill(np.NINF)
     lbound[0] = lowerbound(y, Y, rate, mu, omega, m, V, b, a)
 
-    if verbose:
-        print 'iteration 1, lower bound = %d' % lbound[0]
-
     # old values
-    old_a = a
-    old_b = b
-    old_m = m
-    old_V = V
+    old_a = np.copy(a)
+    old_b = np.copy(b)
+    old_m = np.copy(m)
+    old_V = np.copy(V)
+
+    basenorm = np.linalg.norm(old_m) + np.sum(map(lambda l: np.linalg.norm(old_V[l, :, :]), range(L)))
 
     it = 1
     convergent = False
 
     while not convergent and it < maxiter:
         # optimize coefficients
-        for _ in range(inneriter):
-            for n in range(N):
-                # optimize b
-                grad_b = np.zeros(1 + p * N)
-                hess_b = np.zeros((1 + p * N, 1 + p * N))
-                for t in range(T):
-                    grad_b = np.nan_to_num(grad_b + (y[t, n] - rate[t, n]) * Y[t, :])
-                    hess_b = np.nan_to_num(hess_b - rate[t, n] * np.outer(Y[t, :], Y[t, :]))
-                # coeffs[:, n] = coeffs[:, n] - np.linalg.solve(hess_b, grad_b)
-                # to avoid sigular hessian
-                b[:, n] = b[:, n] - np.linalg.lstsq(hess_b, grad_b)[0]
+        # for _ in range(inneriter):
+        #     for n in range(N):
+        # optimize b
+        # grad_b = np.zeros(1 + p * N)
+        # hess_b = np.zeros((1 + p * N, 1 + p * N))
+        # for t in range(T):
+        #     grad_b = grad_b + (y[t, n] - rate[t, n]) * Y[t, :]
+        #     hess_b = hess_b - rate[t, n] * np.outer(Y[t, :], Y[t, :])
+        # b[:, n] = b[:, n] - np.linalg.lstsq(hess_b, grad_b)[0]
+        # b[:, n] = b[:, n] - np.linalg.solve(hess_b, grad_b)
+        # b[:, n] = b[:, n] - np.linalg.solve(hess_b + np.diag(0.3*np.diag(hess_b)), grad_b)
+        # updaterate(range(T), range(N))
 
-                # optimize a
-                grad_a = np.zeros(L)
-                hess_a = np.zeros((L, L))
-                for t in range(T):
-                    Vt = np.diag(V[:, t, t])
-                    w = m[t, :] + np.dot(Vt, a[:, n])
-                    # rate[t, n] = saferate(t, n, Y, m, V, b, a)
-                    grad_a = np.nan_to_num(grad_a + y[t, n] * m[t, :] - rate[t, n] * w)
-                    hess_a = np.nan_to_num(hess_a - rate[t, n] * (np.outer(w, w) + Vt))
-                a[:, n] = a[:, n] - np.linalg.lstsq(hess_a, grad_a)[0]
-
-                updaterate()
+        # optimize a
+        # grad_a = np.zeros(L)
+        # hess_a = np.zeros((L, L))
+        # for t in range(T):
+        #     Vt = np.diag(V[:, t, t])
+        #     w = m[t, :] + np.dot(Vt, a[:, n])
+        #     # rate[t, n] = saferate(t, n, Y, m, V, b, a)
+        #     grad_a = grad_a + y[t, n] * m[t, :] - rate[t, n] * w
+        #     hess_a = hess_a - rate[t, n] * (np.outer(w, w) + Vt)
+        # # a[:, n] = a[:, n] - np.linalg.lstsq(hess_a, grad_a)[0]
+        # # a[:, n] = a[:, n] - np.linalg.solve(hess_a, grad_a)
+        # a[:, n] = a[:, n] - np.linalg.solve(hess_a + np.diag(0.3*np.diag(hess_a)), grad_a)
+        # updaterate(range(T), range(N))
 
         # optimize posterior
         for l in range(L):
             # optimize V[l]
             for t in range(T):
-                k_ = K[l, t, t] - 1/V[l, t, t]  # \tilde{k}_tt
+                k_ = K[l, t, t] - 1 / V[l, t, t]  # \tilde{k}_tt
                 old_vtt = V[l, t, t]
                 # fixed point iterations
                 for _ in range(inneriter):
-                    V[l, t, t] = np.nan_to_num(1 / (omega[l, t, t] - k_ + np.dot(rate[t, :], a[l, :] * a[l, :])))
-                    # update \tilde{k}_tt
-                    k_ = np.nan_to_num(K[l, t, t] - 1/V[l, t, t])
-                    # udpate Lambda
-                    for n in range(N):
-                        rate[t, n] = saferate(t, n, Y, m, V, b, a)
+                    vtt = 1 / (omega[l, t, t] - k_ + np.dot(rate[t, :], a[l, :] * a[l, :]))
+                    V[l, t, t] = np.nan_to_num(vtt)
+                    # update rate
+                    updaterate([t], range(N))
                 # update V
-                mask = np.arange(T) != t
-                V[np.ix_([l], mask, mask)] = np.nan_to_num(V[np.ix_([l], mask, mask)] + \
-                                             (V[l, t, t] - old_vtt) * \
-                                             np.outer(V[l, t, mask], V[l, t, mask]) /\
-                                             (old_vtt*old_vtt))
-                V[l, t, mask] = V[l, mask, t] = np.nan_to_num(V[l, t, t] * V[l, t, mask] / old_vtt)
+                not_t = np.arange(T) != t
+                V[np.ix_([l], not_t, not_t)] = np.nan_to_num(V[np.ix_([l], not_t, not_t)] +
+                                                           (V[l, t, t] - old_vtt) *
+                                                           np.outer(V[l, t, not_t], V[l, t, not_t]) /
+                                                           (old_vtt * old_vtt))
+                V[l, t, not_t] = V[l, not_t, t] = np.nan_to_num(V[l, t, t] * V[l, t, not_t] / old_vtt)
                 # update k_tt
-                K[l, t, t] = np.nan_to_num(k_ + 1/V[l, t, t])
+                K[l, t, t] = np.nan_to_num(k_ + 1 / V[l, t, t])
+            # updaterate(range(T), range(N))
 
             # optimize m[l]
-            for _ in range(inneriter):
-                grad_m = np.dot(y - rate, a[l, :]) - np.dot(omega[l, :, :], (m[:, l] - mu[:, l]))
-                hess_m = -np.diag(np.dot(rate, a[l, :] * a[l, :])) - omega[l, :, :]
-                # Y[:, 1+p*N+l] = Y[:, 1+p*N+l] - np.linalg.solve(hess_m, grad_m)
-                m[:, l] = m[:, l] - np.linalg.lstsq(hess_m, grad_m)[0]
-
-            updaterate()
+            # for _ in range(inneriter):
+            #     grad_m = np.nan_to_num(np.dot(y - rate, a[l, :]) - np.dot(omega[l, :, :], (m[:, l] - mu[:, l])))
+            #     hess_m = np.nan_to_num(-np.diag(np.dot(rate, a[l, :] * a[l, :]))) - omega[l, :, :]
+            #     # m[:, l] = m[:, l] - np.linalg.lstsq(hess_m, grad_m)[0]
+            #     delta = np.nan_to_num(np.linalg.solve(hess_m, grad_m))
+            #     m[:, l] = m[:, l] - delta
+            #     updaterate(range(T), range(N))
 
         # update lower bound
         lbound[it] = lowerbound(y, Y, rate, mu, omega, m, V, b, a)
 
         if verbose:
-            print 'iteration %d' % (it + 1), ', lower bound = %d' % lbound[it]
+            print 'iteration %d' % (it + 1), ' lower bound = ', lbound[it]
 
         # check convergence
-        # if np.abs(lbound[it] - lbound[it-1]) < epsilon*np.abs(lbound[0]):
-        #     convergent = True
+        delta = np.linalg.norm(old_a - a) + np.linalg.norm(old_b - b) + np.linalg.norm(old_m - m) \
+                + np.sum(map(lambda l: np.linalg.norm(old_V[l, :, :] - V[l, :, :]), range(L)))
 
-        delta = np.linalg.norm(old_a - a) + np.linalg.norm(old_b - b) + np.linalg.norm(old_m - m)
-        for l in range(L):
-            delta += np.linalg.norm(old_V[l, :, :] - V[l, :, :])
-
-        if delta < epsilon:
+        if delta < epsilon * basenorm:
             convergent = True
 
-        old_a = a
-        old_b = b
-        old_m = m
-        old_V = V
+        old_a[:] = a
+        old_b[:] = b
+        old_m[:] = m
+        old_V[:] = V
 
         it += 1
 
@@ -195,5 +199,5 @@ def variational(y, mu, sigma, p, omega=None, maxiter=5, inneriter=10, epsilon=np
 
 
 def saferate(t, n, Y, m, V, b, a):
-    lograte = np.dot(Y[t, :], b[:, n]) + np.dot(m[t, :], a[:, n]) + 0.5 * np.dot(a[:, n] * a[:, n], V[:, t, t])
+    lograte = np.dot(Y[t, :], b[:, n]) + np.dot(m[t, :], a[:, n]) + 0.5 * np.sum(a[:, n] * a[:, n] * V[:, t, t])
     return np.nan_to_num(np.exp(lograte))

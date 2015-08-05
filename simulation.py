@@ -4,17 +4,35 @@ from numpy import pi, exp, sqrt, log2, dot
 import scipy.stats as stats
 
 
+def sqexp(t, b):
+    """Return autocorrelation.
+    k(t, b) = exp(-b * t^2)
+
+    Args:
+        t : float
+            lag.
+        b : float
+            scale.
+
+    Returns:
+        float
+            correlation.
+    """
+    return exp(- b * t*t)
+
+
 def spectral(w, b):
     """
     Spectral density of squared exponential covariance function
     :param w: float, frequency
-    :param b: float, lengthscale
+    :param l: float, lengthscale
     :return: power
     """
 
     # TODO(yuan): change b to l^2
 
     return 0.5 * exp(-0.25 * w * w / b) / sqrt(pi * b)
+    # return 0.5 * sqrt(2) * l * exp(-0.5 * w * w * l * l) / sqrt(pi)
 
 
 def gpspectral(sigma, b, n, dt=1.0, seed=None):
