@@ -25,7 +25,7 @@ def spectral(w, b):
     """
     Spectral density of squared exponential covariance function
     :param w: float, frequency
-    :param l: float, lengthscale
+    :param b: float, lengthscale
     :return: power
     """
 
@@ -33,32 +33,6 @@ def spectral(w, b):
 
     return 0.5 * exp(-0.25 * w * w / b) / sqrt(pi * b)
     # return 0.5 * sqrt(2) * l * exp(-0.5 * w * w * l * l) / sqrt(pi)
-
-
-def gpspectral(sigma, b, n, dt=1.0, seed=None):
-    """
-    Simulate univariate Gaussian process
-    :param sigma: float, standard deviation
-    :param b: float, lengthscale
-    :param n: int, number of data points
-    :param dt: float, unit time interval
-    :param seed: optional, random number seed
-    :return: (n,), process
-    """
-
-    if seed is not None:
-        np.random.seed(seed)
-
-    m = int(2 ** np.ceil(log2(n)))  # needs to be power of 2
-    t0 = m * dt
-    dw = 2 * pi / t0
-    wu = 2 * pi / dt
-    t = np.arange(0, t0, dt)
-    w = np.arange(0, wu, dw)
-
-    B = 2 * sqrt(spectral(w, b) * dw) * exp(1j * np.random.rand(m) * 2 * pi)
-    B[0] = 0
-    return sigma * n * np.fft.ifft(B, n).real, t[:n]
 
 
 def latents(L, T, std, b, dt=1.0, seed=None):
@@ -93,53 +67,6 @@ def latents(L, T, std, b, dt=1.0, seed=None):
         x[:, l] = std * T * np.fft.ifft(B, T).real
 
     return x, t[:T]
-
-
-def multi_spike(gamma, x, A, B, y0=None, seed=None):
-    """Simulate multiple spike processes driven by latent processes.
-    lam_t = exp(mu + Ax_t + sum_i^p B_i y_{t-i})
-
-    Args:
-        mu : array
-            (n, 1) background mean.
-        x : array
-            (m, N) m-variate latent GP process, length of N, increasing order of t.
-        A : array
-            (n, m) mapping x_t.
-        B : array
-            (n, n, p) mapping y_{t-1}, ..., y_{t-p}, increasing order of t, [t-p, ..., t-1].
-        y0 : array, optional
-            (n, p) starting value before time 1. 0 (default).
-        seed : int, optional
-            random number seed.
-
-    Returns:
-        array
-            (n, N) simulation.
-    """
-
-    if seed is not None:
-        np.random.seed(seed)
-    T, L = x.shape
-    _, N, p = B.shape
-    y = np.empty((T, N), dtype=int)
-    if y0 is None:
-        y0 = np.zeros((p, N), dtype=int)
-
-    for t in range(T):
-        Ax = dot(A, x[t, :])
-        sum_By = 0.0
-        for i in range(p):
-            if t - p + i >= 0:
-                sum_By += dot(B[:, :, i], y[t - p + i, :])
-            else:
-                sum_By += dot(B[:, :, i], y0[t + i, :])
-        lam_t = exp(gamma + Ax + sum_By)
-        # y[:, t] = np.random.poisson(lambda_t)
-        # truncate y to 1 if y > 1
-        # it's equivalent to Bernoulli P(=1) = (1 - e^-(lam_t))
-        y[t, :] = stats.bernoulli.rvs(1.0 - exp(- lam_t))
-    return y
 
 
 def spikes(x, a, b, y0=None, seed=None):

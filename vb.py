@@ -158,17 +158,18 @@ def variational(y, mu, sigma, p, omega=None, b0=None, a0=None, maxiter=5, inneri
                                                            (old_vtt * old_vtt))
                 V[l, t, not_t] = V[l, not_t, t] = np.nan_to_num(V[l, t, t] * V[l, t, not_t] / old_vtt)
                 # update k_tt
-                K[l, t, t] = np.nan_to_num(k_ + 1 / V[l, t, t])
-            # updaterate(range(T), range(N))
+                K[l, t, t] = k_ + 1 / V[l, t, t]
+            updaterate(range(T), range(N))
 
             # optimize m[l]
-            for _ in range(inneriter):
-                grad_m = np.nan_to_num(np.dot(y - rate, a[l, :]) - np.dot(omega[l, :, :], (m[:, l] - mu[:, l])))
-                hess_m = np.nan_to_num(-np.diag(np.dot(rate, a[l, :] * a[l, :]))) - omega[l, :, :]
-                # m[:, l] = m[:, l] - np.linalg.lstsq(hess_m, grad_m)[0]
-                delta = np.nan_to_num(np.linalg.solve(hess_m, grad_m))
-                m[:, l] = m[:, l] - delta
-                updaterate(range(T), range(N))
+            # r = 0.5
+            # for _ in range(inneriter):
+            #     grad_m = np.nan_to_num(np.dot(y - rate, a[l, :]) - np.dot(omega[l, :, :], (m[:, l] - mu[:, l])))
+            #     hess_m = np.nan_to_num(-np.diag(np.dot(rate, a[l, :] * a[l, :]))) - omega[l, :, :]
+            #     # m[:, l] = m[:, l] - np.linalg.lstsq(hess_m, grad_m)[0]
+            #     delta = np.nan_to_num(np.linalg.solve(hess_m + r * np.identity(T), grad_m))
+            #     m[:, l] = m[:, l] - delta
+            #     updaterate(range(T), range(N))
 
         # update lower bound
         lbound[it] = lowerbound(y, Y, rate, mu, omega, m, V, b, a)

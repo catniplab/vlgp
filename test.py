@@ -5,7 +5,7 @@ from vb import *
 import simulation
 
 dt = 1.0
-T = 500
+T = 100
 b = 1e-3
 sigma = 2.0
 p = 1
@@ -36,7 +36,7 @@ for l in range(L):
 
 # print 'Prior mean\n', mu
 # print 'Prior covariance', sigma
-b[0, :] = -10
+# b[0, :] = -10
 m, V, b, a, lbound, it = variational(y, mu, sigma, p, b0=b, a0=a, maxiter=50, inneriter=5, epsilon=1e-5, verbose=True)
 print '%d iteration(s)' % it
 print 'Lower bounds: ', lbound[:it]
