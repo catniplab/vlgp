@@ -3,6 +3,7 @@ from __future__ import division
 __author__ = 'yuan'
 import itertools
 import warnings
+import time
 
 import numpy as np
 
@@ -61,6 +62,8 @@ def variational(y, mu, sigma, p, omega=None, b0=None, a0=None, stepsize=5, maxit
         # rate = E(E(y|x))
         for t, n in itertools.product(t, n):
             rate[t, n] = saferate(t, n, Y, m, V, b, a)
+
+    enter = time.time()
 
     # dimensions
     T, N = y.shape
@@ -234,7 +237,9 @@ def variational(y, mu, sigma, p, omega=None, b0=None, a0=None, stepsize=5, maxit
     if it == maxiter:
         warnings.warn('not convergent', RuntimeWarning)
 
-    return m, V, b, a, lbound, it
+    exit = time.time()
+
+    return m, V, b, a, lbound, it, exit - enter
 
 
 def saferate(t, n, Y, m, V, b, a):

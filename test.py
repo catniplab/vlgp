@@ -43,7 +43,7 @@ for l in range(L):
 # print 'Prior mean\n', mu
 # print 'Prior covariance', sigma
 # b[0, :] = -10
-m, V, b, a, lbound, it = variational(y, mu, sigma, p,
+m, V, b, a, lbound, it, elapsed = variational(y, mu, sigma, p,
                                      b0=b0 + 1,
                                      a0=a0 + 1,
                                      stepsize=5, maxiter=500, inneriter=3, epsilon=1e-7, verbose=True)
@@ -53,8 +53,6 @@ print 'Lower bounds: ', lbound[:it]
 print 'covariance: %d' % np.linalg.norm(V - sigma)
 print 'beta: %d' % np.linalg.norm(b - b0)
 print 'alpha: %d' % np.linalg.norm(a - a0)
-
-
 
 plt.figure()
 plt.plot(lbound)
