@@ -18,7 +18,7 @@ def sqexp(t, b):
         float
             correlation.
     """
-    return exp(- b * t*t)
+    return exp(- b * t * t)
 
 
 def spectral(w, b):
