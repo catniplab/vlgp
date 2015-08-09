@@ -7,6 +7,11 @@ import time
 import numpy as np
 
 
+def saferate(t, n, Y, m, V, b, a):
+    lograte = np.dot(Y[t, :], b[:, n]) + np.dot(m[t, :], a[:, n]) + 0.5 * np.sum(a[:, n] * a[:, n] * V[:, t, t])
+    return np.nan_to_num(np.exp(lograte))
+
+
 def lowerbound(y, Y, mu, omega, m, V, b, a):
     """
     Calculate the lower bound without constant terms
@@ -38,9 +43,36 @@ def lowerbound(y, Y, mu, omega, m, V, b, a):
     return lbound
 
 
+def lowerbound(y, Y, rate, mu, omega, m, V, b, a):
+    """
+    Calculate the lower bound without constant terms
+    :param y: (T, N), spike trains
+    :param Y: (T, 1 + p*N), vectorized spike history
+    :param rate: (T, N), E(E(y|x))
+    :param mu: (T, L), prior mean
+    :param omega: (L, T, T), prior inverse covariances
+    :param m: (T, L), latent posterior mean
+    :param V: (L, T, T), latent posterior covariances
+    :param b: (1 + p*N, N), coefficients of y
+    :param a: (L, N), coefficients of x
+    :return lbound: lower bound
+    """
+
+    _, L = mu.shape
+    T, N = y.shape
+
+    lbound = np.sum(y * (np.dot(Y, b) + np.dot(m, a)) - rate)
+
+    for l in range(L):
+        lbound += -0.5 * np.dot(m[:, l] - mu[:, l], np.dot(omega[l, :, :], m[:, l] - mu[:, l])) + \
+                  -0.5 * np.trace(np.dot(omega[l, :, :], V[l, :, :])) + 0.5 * np.linalg.slogdet(V[l, :, :])[1]
+
+    return lbound
+
+
 def variational(y, mu, sigma, p, omega=None,
                 a0=None, b0=None, m0=None, V0=None, K0=None,
-                r0=np.finfo(float).eps, maxiter=5, inneriter=5, tol=np.finfo(float).eps,
+                r=np.finfo(float).eps, maxiter=5, inneriter=5, tol=np.finfo(float).eps,
                 verbose=False):
     """
     :param y: (T, N), spike trains
@@ -71,9 +103,7 @@ def variational(y, mu, sigma, p, omega=None,
     _, L = mu.shape
 
     # identity matrix
-    id_m = np.identity(T)
-    id_a = np.identity(L)
-    id_b = np.identity(1 + p*N)
+    hess_adj_b = r * np.identity(1 + p*N)
 
     # calculate inverse of prior covariance if not given
     if omega is None:
@@ -135,7 +165,7 @@ def variational(y, mu, sigma, p, omega=None,
 
     # initialize lower bound
     lbound = np.full(maxiter, np.NINF, dtype=float)
-    lb = lbound[0] = lowerbound(y, Y, mu, omega, m, V, b, a)
+    lbound[0] = lowerbound(y, Y, rate, mu, omega, m, V, b, a)
 
     # old values
     old_a = np.copy(a)
@@ -148,7 +178,7 @@ def variational(y, mu, sigma, p, omega=None,
     # MIN_DELTA = tol * (a.size + b.size + m.size + V.size)
     while not convergent and it < maxiter:
         # optimize coefficients
-        for n in range(N):
+        for n in np.random.permutation(N):
             # optimize b[:, n]
             for _ in range(inneriter):
                 grad_b = np.zeros(1 + p * N)
@@ -156,34 +186,11 @@ def variational(y, mu, sigma, p, omega=None,
                 for t in range(T):
                     grad_b = np.nan_to_num(grad_b + (y[t, n] - rate[t, n]) * Y[t, :])
                     hess_b = np.nan_to_num(hess_b - rate[t, n] * np.outer(Y[t, :], Y[t, :]))
-                # if np.linalg.norm(grad_b) < tol * grad_b.size:
-                #     break
-                # try:
-                #     b[:, n] = b[:, n] - np.linalg.solve(hess_b, grad_b) / grad_b.size * stepsize
-                # except np.linalg.LinAlgError:
-                #     b[:, n] = b[:, n] + grad_b / grad_b.size
-                # b[:, n] = b[:, n] - np.linalg.solve(hess_b + r * np.identity(grad_b.size) * hess_b.trace() / grad_b.size, grad_b)
-                r = r0
-                pd = False
-                while not pd:
-                    hess_ = hess_b - r * id_b
-                    try:
-                        np.linalg.cholesky(-hess_)
-                        pd = True
-                    except np.linalg.LinAlgError:
-                        pd = False
-                        r *= 10.0
-                        hess_ = hess_b - r * id_b
+                hess_ = hess_b - hess_adj_b  # diagonal of hessian of beta is possibly zero, add a negative quantity
                 b[:, n] = b[:, n] - np.linalg.solve(hess_, grad_b)
                 updaterate(range(T), [n])
 
-            # roll back if lower bound decreased
-            # lb = lowerbound(y, Y, mu, omega, m, V, b, a)
-            # if np.isnan(lb) or lb < lbound[it - 1]:
-            #     b[:, n] = old_b[:, n]
-            #     updaterate(range(T), [n])
-
-                # optimize a
+            # optimize a
             for _ in range(inneriter):
                 grad_a = np.zeros(L)
                 hess_a = np.zeros((L, L))
@@ -192,38 +199,24 @@ def variational(y, mu, sigma, p, omega=None,
                     w = m[t, :] + np.dot(Vt, a[:, n])
                     grad_a = grad_a + y[t, n] * m[t, :] - rate[t, n] * w
                     hess_a = hess_a - rate[t, n] * (np.outer(w, w) + Vt)
-                # if np.linalg.norm(grad_a) < tol * grad_a.size:
-                #     break
-                # try:
-                #     a[:, n] = a[:, n] - np.linalg.solve(hess_a, grad_a) / grad_a.size * stepsize
-                # except np.linalg.LinAlgError:
-                #     a[:, n] = a[:, n] + grad_a / grad_a.size
-                # a[:, n] = a[:, n] - np.linalg.solve(hess_a + r * np.identity(grad_a.size) * hess_a.trace() / grad_a.size, grad_a)
-                r = r0
-                pd = False
-                while not pd:
-                    hess_ = hess_a - r * id_a
-                    try:
-                        np.linalg.cholesky(-hess_)
-                        pd = True
-                    except np.linalg.LinAlgError:
-                        pd = False
-                        r *= 10.0
-                        hess_ = hess_a - r * id_a
-                a[:, n] = a[:, n] - np.linalg.solve(hess_, grad_a)
-                a[:, n] = a[:, n] / np.linalg.norm(a)
+                # lagrange multiplier
+                grad_a = grad_a - np.inner(a[:, n], grad_a) * a[:, n]
+                hess_a = hess_a - np.inner(a[:, n], grad_a)
+                a[:, n] = np.linalg.solve(hess_a, grad_a)
                 updaterate(range(T), [n])
 
-            # roll back
-            lb = lowerbound(y, Y, mu, omega, m, V, b, a)
+            # discard new alpha if it decreases the lower bound
+            lb = lowerbound(y, Y, rate, mu, omega, m, V, b, a)
             if np.isnan(lb) or lb < lbound[it - 1]:
+                # if verbose:
+                #     print 'alpha rolled back, lb = %.5f' % lb
                 a[:, n] = old_a[:, n]
                 updaterate(range(T), [n])
 
         # optimize posterior
-        for l in range(L):
+        for l in np.random.permutation(L):
             # optimize V[l]
-            for t in range(T):
+            for t in np.random.permutation(T):
                 k_ = K[l, t, t] - 1 / V[l, t, t]  # \tilde{k}_tt
                 old_vtt = V[l, t, t]
                 # fixed point iterations
@@ -238,45 +231,34 @@ def variational(y, mu, sigma, p, omega=None,
                 V[l, t, not_t] = V[l, not_t, t] = V[l, t, t] * V[l, t, not_t] / old_vtt
                 # update k_tt
                 K[l, t, t] = k_ + 1 / V[l, t, t]
-            updaterate(range(T), range(N))
+            # updaterate(range(T), range(N))
             # roll back
-            lb = lowerbound(y, Y, mu, omega, m, V, b, a)
+            lb = lowerbound(y, Y, rate, mu, omega, m, V, b, a)
             if np.isnan(lb) or lb < lbound[it - 1]:
+                # if verbose:
+                #     print 'V rolled back, lb = %.5f' % lb
                 V[l, :, :] = old_V[l, :, :]
                 updaterate(range(T), range(N))
 
             # optimize m[l]
             for _ in range(inneriter):
                 grad_m = np.nan_to_num(np.dot(y - rate, a[l, :]) - np.dot(omega[l, :, :], (m[:, l] - mu[:, l])))
-                # if np.linalg.norm(grad_m) < tol * grad_m.size:
-                #     break
                 hess_m = np.nan_to_num(-np.diag(np.dot(rate, a[l, :] * a[l, :]))) - omega[l, :, :]
-                # try:
-                #     m[:, l] = m[:, l] - np.linalg.solve(hess_m, grad_m) / grad_m.size * stepsize
-                # except np.linalg.LinAlgError:
-                #     m[:, l] = m[:, l] + grad_m / grad_m.size
-                # m[:, l] = m[:, l] - np.linalg.solve(hess_m + r * np.identity(grad_m.size) * hess_m.trace() / grad_m.size, grad_m)
-                r = r0
-                pd = False
-                while not pd:
-                    hess_ = hess_m - r * id_m
-                    try:
-                        np.linalg.cholesky(-hess_)
-                        pd = True
-                    except np.linalg.LinAlgError:
-                        pd = False
-                        r *= 10.0
-                        hess_ = hess_m - r * id_m
-                m[:, l] = m[:, l] - np.linalg.solve(hess_, grad_m)
+                # r = r0
+                # hess_ = hess_m - r * id_m
+                # m[:, l] = m[:, l] - np.linalg.solve(hess_, grad_m)
+                m[:, l] = m[:, l] - np.linalg.solve(hess_m, grad_m)
                 updaterate(range(T), range(N))
             # roll back if lower bound decreased
-            lb = lowerbound(y, Y, mu, omega, m, V, b, a)
+            lb = lowerbound(y, Y, rate, mu, omega, m, V, b, a)
             if np.isnan(lb) or lb < lbound[it - 1]:
+                # if verbose:
+                #     print 'm rolled back, lb = %.5f' % lb
                 m[:, l] = old_m[:, l]
                 updaterate(range(T), range(N))
 
         # update lower bound
-        lbound[it] = lowerbound(y, Y, mu, omega, m, V, b, a)
+        lbound[it] = lowerbound(y, Y, rate, mu, omega, m, V, b, a)
 
         # check convergence
         delta = np.linalg.norm(old_a - a) + np.linalg.norm(old_b - b) \
@@ -303,6 +285,3 @@ def variational(y, mu, sigma, p, omega=None,
     return m, V, b, a, lbound, it, stop - start
 
 
-def saferate(t, n, Y, m, V, b, a):
-    lograte = np.dot(Y[t, :], b[:, n]) + np.dot(m[t, :], a[:, n]) + 0.5 * np.sum(a[:, n] * a[:, n] * V[:, t, t])
-    return np.nan_to_num(np.exp(lograte))

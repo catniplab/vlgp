@@ -50,7 +50,7 @@ m, V, b1, a1, lbound, it, elapsed = variational(y, mu, sigma, p,
                                                 b0=np.random.randn(1 + p * N, N),
                                                 m0=mu,
                                                 V0=sigma,
-                                                r0=np.finfo(float).eps, maxiter=500, inneriter=2, tol=0.05,
+                                                r=np.finfo(float).eps, maxiter=500, inneriter=3, tol=0.05,
                                                 verbose=True)
 
 print '%d iteration(s)' % it
@@ -63,7 +63,7 @@ print 'alpha:\n', a
 
 
 plt.figure()
-plt.plot(lbound[20:])
+plt.plot(lbound[1:])
 plt.title('Lower bound (%d iterations)' % it)
 ns = 100
 for l in range(L):
