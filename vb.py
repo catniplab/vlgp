@@ -12,37 +12,6 @@ def saferate(t, n, Y, m, V, b, a):
     return np.nan_to_num(np.exp(lograte))
 
 
-def lowerbound(y, Y, mu, omega, m, V, b, a):
-    """
-    Calculate the lower bound without constant terms
-    :param y: (T, N), spike trains
-    :param Y: (T, 1 + p*N), vectorized spike history
-    :param rate: (T, N), E(E(y|x))
-    :param mu: (T, L), prior mean
-    :param omega: (L, T, T), prior inverse covariances
-    :param m: (T, L), latent posterior mean
-    :param V: (L, T, T), latent posterior covariances
-    :param b: (1 + p*N, N), coefficients of y
-    :param a: (L, N), coefficients of x
-    :return lbound: lower bound
-    """
-
-    _, L = mu.shape
-    T, N = y.shape
-
-    rate = np.empty_like(y)
-    for t, n in itertools.product(range(T), range(N)):
-        rate[t, n] = saferate(t, n, Y, m, V, b, a)
-
-    lbound = np.sum(y * (np.dot(Y, b) + np.dot(m, a)) - rate)
-
-    for l in range(L):
-        lbound += -0.5 * np.dot(m[:, l] - mu[:, l], np.dot(omega[l, :, :], m[:, l] - mu[:, l])) + \
-                  -0.5 * np.trace(np.dot(omega[l, :, :], V[l, :, :])) + 0.5 * np.linalg.slogdet(V[l, :, :])[1]
-
-    return lbound
-
-
 def lowerbound(y, Y, rate, mu, omega, m, V, b, a):
     """
     Calculate the lower bound without constant terms
@@ -104,6 +73,10 @@ def variational(y, mu, sigma, p, omega=None,
 
     # identity matrix
     hess_adj_b = r * np.identity(1 + p*N)
+    id_a = np.identity(L)
+    id_m = np.identity(T)
+    r_a = np.finfo(float).eps
+    r_m = np.finfo(float).eps
 
     # calculate inverse of prior covariance if not given
     if omega is None:
@@ -147,19 +120,9 @@ def variational(y, mu, sigma, p, omega=None,
         b = b0.copy()
 
     # construct history
-    Y = np.zeros((T, 1 + p * N), dtype=float)
-    Y[:, 0] = 1
-    for t in range(T):
-        if t - p >= 0:
-            Y[t, 1:] = y[t - p:t, :].flatten()  # vectorized by row
-        else:
-            Y[t, 1 + (p - t) * N:] = y[:t, :].flatten()
-    # Y_ = np.hstack((Y, m))
-    # coeffs = np.linalg.lstsq(Y_, y)[0]  # least-squares calculated for each column of y
-    # coeffs = np.zeros((1 + p*N + L, N))
+    Y = history(y, p)
 
-    # initialize rate matrix
-    # rate = E(E(y|x))
+    # initialize rate matrix, rate = E(E(y|x))
     rate = np.empty_like(y)
     updaterate(range(T), range(N))
 
@@ -175,11 +138,10 @@ def variational(y, mu, sigma, p, omega=None,
 
     it = 1
     convergent = False
-    # MIN_DELTA = tol * (a.size + b.size + m.size + V.size)
     while not convergent and it < maxiter:
         # optimize coefficients
-        for n in np.random.permutation(N):
-            # optimize b[:, n]
+        for n in range(N):
+            # beta
             for _ in range(inneriter):
                 grad_b = np.zeros(1 + p * N)
                 hess_b = np.zeros((1 + p * N, 1 + p * N))
@@ -190,7 +152,7 @@ def variational(y, mu, sigma, p, omega=None,
                 b[:, n] = b[:, n] - np.linalg.solve(hess_, grad_b)
                 updaterate(range(T), [n])
 
-            # optimize a
+            # alpha
             for _ in range(inneriter):
                 grad_a = np.zeros(L)
                 hess_a = np.zeros((L, L))
@@ -200,23 +162,29 @@ def variational(y, mu, sigma, p, omega=None,
                     grad_a = grad_a + y[t, n] * m[t, :] - rate[t, n] * w
                     hess_a = hess_a - rate[t, n] * (np.outer(w, w) + Vt)
                 # lagrange multiplier
-                grad_a = grad_a - np.inner(a[:, n], grad_a) * a[:, n]
-                hess_a = hess_a - np.inner(a[:, n], grad_a)
-                a[:, n] = np.linalg.solve(hess_a, grad_a)
+                grad_a_lag = grad_a - np.inner(a[:, n], grad_a) * a[:, n]
+                hess_a_lag = hess_a - np.inner(a[:, n], grad_a)
+                backup_a = a[:, n]
+                a[:, n] = a[:, n] - np.linalg.solve(hess_a_lag, grad_a_lag)
                 updaterate(range(T), [n])
-
+                lb = lowerbound(y, Y, rate, mu, omega, m, V, b, a)
+                if np.isnan(lb) or lb < lbound[it - 1]:
+                    # Newton-Raphson failed, do line search
+                    step = - np.inner(grad_a, grad_a) / np.dot(grad_a, np.dot(hess_a, grad_a))
+                    a[:, n] = backup_a + step * grad_a
+                    updaterate(range(T), [n])
             # discard new alpha if it decreases the lower bound
             lb = lowerbound(y, Y, rate, mu, omega, m, V, b, a)
             if np.isnan(lb) or lb < lbound[it - 1]:
-                # if verbose:
-                #     print 'alpha rolled back, lb = %.5f' % lb
+                if verbose:
+                    print 'alpha %d rolled back, lb = %.5f' % (n, lb)
                 a[:, n] = old_a[:, n]
                 updaterate(range(T), [n])
 
-        # optimize posterior
-        for l in np.random.permutation(L):
-            # optimize V[l]
-            for t in np.random.permutation(T):
+        # posterior
+        for l in range(L):
+            # covariance
+            for t in range(T):
                 k_ = K[l, t, t] - 1 / V[l, t, t]  # \tilde{k}_tt
                 old_vtt = V[l, t, t]
                 # fixed point iterations
@@ -235,25 +203,29 @@ def variational(y, mu, sigma, p, omega=None,
             # roll back
             lb = lowerbound(y, Y, rate, mu, omega, m, V, b, a)
             if np.isnan(lb) or lb < lbound[it - 1]:
-                # if verbose:
-                #     print 'V rolled back, lb = %.5f' % lb
+                if verbose:
+                    print 'V rolled back, lb = %.5f' % lb
                 V[l, :, :] = old_V[l, :, :]
                 updaterate(range(T), range(N))
 
-            # optimize m[l]
+            # mean
             for _ in range(inneriter):
                 grad_m = np.nan_to_num(np.dot(y - rate, a[l, :]) - np.dot(omega[l, :, :], (m[:, l] - mu[:, l])))
                 hess_m = np.nan_to_num(-np.diag(np.dot(rate, a[l, :] * a[l, :]))) - omega[l, :, :]
-                # r = r0
-                # hess_ = hess_m - r * id_m
-                # m[:, l] = m[:, l] - np.linalg.solve(hess_, grad_m)
+                backup_m = m[:, l]
                 m[:, l] = m[:, l] - np.linalg.solve(hess_m, grad_m)
                 updaterate(range(T), range(N))
+                lb = lowerbound(y, Y, rate, mu, omega, m, V, b, a)
+                if np.isnan(lb) or lb < lbound[it - 1]:
+                    # Newton-Raphson failed, do line search
+                    step = - np.inner(grad_m, grad_m) / np.dot(grad_m, np.dot(hess_m, grad_m))
+                    m[:, l] = backup_m + step * grad_m
+                    updaterate(range(T), range(N))
             # roll back if lower bound decreased
             lb = lowerbound(y, Y, rate, mu, omega, m, V, b, a)
             if np.isnan(lb) or lb < lbound[it - 1]:
-                # if verbose:
-                #     print 'm rolled back, lb = %.5f' % lb
+                if verbose:
+                    print 'm rolled back, lb = %.5f' % lb
                 m[:, l] = old_m[:, l]
                 updaterate(range(T), range(N))
 
@@ -282,6 +254,18 @@ def variational(y, mu, sigma, p, omega=None,
 
     stop = time.time()
 
-    return m, V, b, a, lbound, it, stop - start
+    return m, V, b, a, lbound[:it], it, stop - start
+
+
+def history(y, p):
+    T, N = y.shape
+    Y = np.zeros((T, 1 + p * N), dtype=float)
+    Y[:, 0] = 1
+    for t in range(T):
+        if t - p >= 0:
+            Y[t, 1:] = y[t - p:t, :].flatten()  # vectorized by row
+        else:
+            Y[t, 1 + (p - t) * N:] = y[:t, :].flatten()
+    return Y
 
 

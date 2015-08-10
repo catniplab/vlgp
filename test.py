@@ -58,33 +58,33 @@ print 'time: %.3fs' % elapsed
 print 'Lower bounds:\n', lbound[:it]
 # print 'Posterior mean\n', m
 print 'covariance:\n', V
-print 'beta:\n', b
-print 'alpha:\n', a
+print 'beta:\n', b1
+print 'alpha:\n', a1
 
 
+id = time.time()
 plt.figure()
-plt.plot(lbound[1:])
-plt.title('Lower bound (%d iterations)' % it)
+frm = 1
+plt.plot(range(frm + 1, it + 1), lbound[frm:it])
+plt.yticks([])
+plt.xlim([frm + 1, it + 1])
+title = 'Lower bound: %.2f, iteration: %d, time: %.2fs, L=%d, N=%d (%d)' % (lbound[it-1], it, elapsed, L, N, id)
+plt.title(title)
+plt.savefig('%s.png' % title)
 ns = 100
 for l in range(L):
-    # for _ in range(5):
-    #     sample = np.random.multivariate_normal(m[:, l], V[l, :, :])
-    #     plt.plot(sample, color='.8')
     plt.figure()
     z = np.random.randn(T, ns)
     lt = np.linalg.cholesky(V[l, :, :])
     s = np.dot(lt, z)
+    plt.ylim([-5, 5])
     for n in range(ns):
         plt.plot(s[:, n] + m[:, l], color='0.8')
     plt.plot(x[:, l], label='latent', color='blue')
     plt.plot(-x[:, l], label='negative latent', color='green')
     plt.plot(m[:, l], label='posterior', color='red')
     plt.legend()
-    plt.title('Latent and Posterior')
-    # plt.figure()
-    # plt.plot(-m[:, l], label='Posterior', color='red')
-    # plt.title('Posterior (neg)')
-    # plt.title('Posterior mean and latent')
-    # plt.legend()
-
+    title = 'No.%d Latent and posterior, N=%d' % (l+1, N)
+    plt.title(title)
+    plt.savefig('%s (%d).png' % (title, id))
 plt.show()
