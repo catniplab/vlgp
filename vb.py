@@ -164,6 +164,8 @@ def variational(y, mu, sigma, p, omega=None,
                 # lagrange multiplier
                 grad_a_lag = grad_a - np.inner(a[:, n], grad_a) * a[:, n]
                 hess_a_lag = hess_a - np.inner(a[:, n], grad_a)
+                if np.linalg.norm(grad_a_lag, ord=np.inf) < np.finfo(float).eps:
+                    break
                 backup_a = a[:, n]
                 a[:, n] = a[:, n] - np.linalg.solve(hess_a_lag, grad_a_lag)
                 updaterate(range(T), [n])
@@ -189,7 +191,7 @@ def variational(y, mu, sigma, p, omega=None,
                 old_vtt = V[l, t, t]
                 # fixed point iterations
                 for _ in range(inneriter):
-                    V[l, t, t] = 1 / (omega[l, t, t] - k_ + np.dot(rate[t, :], a[l, :] * a[l, :]))
+                    V[l, t, t] = 1 / (omega[l, t, t] - k_ + np.sum(rate[t, :] * a[l, :] * a[l, :]))
                     updaterate([t], range(N))
                 # update V
                 not_t = np.arange(T) != t
@@ -212,6 +214,8 @@ def variational(y, mu, sigma, p, omega=None,
             for _ in range(inneriter):
                 grad_m = np.nan_to_num(np.dot(y - rate, a[l, :]) - np.dot(omega[l, :, :], (m[:, l] - mu[:, l])))
                 hess_m = np.nan_to_num(-np.diag(np.dot(rate, a[l, :] * a[l, :]))) - omega[l, :, :]
+                if np.linalg.norm(grad_m, ord=np.inf) < np.finfo(float).eps:
+                    break
                 backup_m = m[:, l]
                 m[:, l] = m[:, l] - np.linalg.solve(hess_m, grad_m)
                 updaterate(range(T), range(N))
@@ -233,8 +237,8 @@ def variational(y, mu, sigma, p, omega=None,
         lbound[it] = lowerbound(y, Y, rate, mu, omega, m, V, b, a)
 
         # check convergence
-        delta = np.linalg.norm(old_a - a) + np.linalg.norm(old_b - b) \
-                + np.linalg.norm(old_m - m) + np.linalg.norm(old_V - V)
+        delta = max(np.max(np.abs(old_a - a)), np.max(np.abs(old_b - b)),
+                    np.max(np.abs(old_m - m)), np.max(np.abs(old_V - V)))
 
         if delta < tol:
             convergent = True

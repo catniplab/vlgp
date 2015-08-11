@@ -50,7 +50,7 @@ m, V, b1, a1, lbound, it, elapsed = variational(y, mu, sigma, p,
                                                 b0=np.random.randn(1 + p * N, N),
                                                 m0=mu,
                                                 V0=sigma,
-                                                r=np.finfo(float).eps, maxiter=500, inneriter=3, tol=0.05,
+                                                r=np.finfo(float).eps, maxiter=500, inneriter=3, tol=0.02,
                                                 verbose=True)
 
 print '%d iteration(s)' % it
@@ -68,7 +68,7 @@ frm = 1
 plt.plot(range(frm + 1, it + 1), lbound[frm:it])
 plt.yticks([])
 plt.xlim([frm + 1, it + 1])
-title = 'Lower bound: %.2f, iteration: %d, time: %.2fs, L=%d, N=%d (%d)' % (lbound[it-1], it, elapsed, L, N, id)
+title = 'Lower bound %.2f, iteration %d, time %.2fs, L=%d, N=%d (%d)' % (lbound[it-1], it, elapsed, L, N, id)
 plt.title(title)
 plt.savefig('%s.png' % title)
 ns = 100
