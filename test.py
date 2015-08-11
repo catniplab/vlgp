@@ -6,11 +6,11 @@ import simulation
 dt = 1.0
 T = 200
 l = 1e-4
-sigma = 1
+sigma = 2
 p = 1
 
 L = 1
-N = 10
+N = 3
 np.random.seed(0)
 
 # simulate latent processes
@@ -45,14 +45,15 @@ for l in range(L):
 # print 'Prior mean\n', mu
 # print 'Prior covariance', sigma
 # b[0, :] = -10
-m, V, b1, a1, lbound, it, elapsed = variational(y, mu, sigma, p,
-                                                a0=np.random.randn(L, N),
-                                                b0=np.random.randn(1 + p * N, N),
-                                                m0=mu,
-                                                V0=sigma,
-                                                r=np.finfo(float).eps, maxiter=500, inneriter=3, tol=0.02,
-                                                verbose=True)
+m, V, b1, a1, lbound, elapsed = variational(y, mu, sigma, p,
+                                            a0=None,
+                                            b0=None,
+                                            m0=mu,
+                                            V0=sigma,
+                                            r=np.finfo(float).eps, maxiter=500, inneriter=3, tol=0.01,
+                                            verbose=True)
 
+it = len(lbound)
 print '%d iteration(s)' % it
 print 'time: %.3fs' % elapsed
 print 'Lower bounds:\n', lbound[:it]
@@ -68,9 +69,9 @@ frm = 1
 plt.plot(range(frm + 1, it + 1), lbound[frm:it])
 plt.yticks([])
 plt.xlim([frm + 1, it + 1])
-title = 'Lower bound %.2f, iteration %d, time %.2fs, L=%d, N=%d (%d)' % (lbound[it-1], it, elapsed, L, N, id)
+title = 'Lower bound %.2f, iteration %d, time %.2fs, L=%d, N=%d' % (lbound[it-1], it, elapsed, L, N)
 plt.title(title)
-plt.savefig('%s.png' % title)
+plt.savefig('figure/%s[%d].png' % (title, id))
 ns = 100
 for l in range(L):
     plt.figure()
@@ -84,7 +85,7 @@ for l in range(L):
     plt.plot(-x[:, l], label='negative latent', color='green')
     plt.plot(m[:, l], label='posterior', color='red')
     plt.legend()
-    title = 'No.%d Latent and posterior, N=%d' % (l+1, N)
+    title = 'Latent %d, N = %d' % (l + 1, N)
     plt.title(title)
-    plt.savefig('%s (%d).png' % (title, id))
+    plt.savefig('figure/%s[%d].png' % (title, id))
 plt.show()
