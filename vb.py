@@ -147,98 +147,102 @@ def variational(y, mu, sigma, p, omega=None,
     m0 = m.copy()
     rate0 = rate.copy()
 
+    ra = np.ones(N)
+    rb = np.ones(N)
+    rm = np.ones(L)
+
     it = 1
     convergent = False
     while not convergent and it < maxiter:
-        ra = rb = rm = 1.0
+        # ra[:] = rb[:] = rm[:] = 1.0
         # optimize coefficients
         for n in range(N):
             # beta
-            for _ in range(inneriter):
-                grad_b = np.zeros(1 + p * N)
-                hess_b = np.zeros((1 + p * N, 1 + p * N))
-                for t in range(T):
-                    grad_b = np.nan_to_num(grad_b + (y[t, n] - rate[t, n]) * Y[t, :])
-                    hess_b = np.nan_to_num(hess_b - rate[t, n] * np.outer(Y[t, :], Y[t, :]))
-                if np.linalg.norm(grad_b, ord=np.inf) < np.finfo(float).eps:
-                    break
-                hess_ = hess_b - hess_adj_b  # Hessain of beta is negative semidefinite. Add a small negative diagonal
-                delta_b = -rb * np.linalg.solve(hess_, grad_b)
-                # if np.linalg.norm(delta_b, ord=np.inf) < np.finfo(float).eps:
-                #     break
-                b0[:, n] = b[:, n]
-                rate0[:, n] = rate[:, n]
-                predict = np.inner(grad_b, delta_b) + 0.5 * np.dot(delta_b, np.dot(hess_, delta_b))
-                b[:, n] = b[:, n] + delta_b
-                updaterate(range(T), [n])
-                lb = lowerbound(y, Y, rate, mu, omega, m, V, b, a)
-                if np.isnan(lb) or lb < lbound[it - 1]:
-                    rb *= 0.5
-                    b[:, n] = b0[:, n]
-                    rate[:, n] = rate0[:, n]
-                elif lb - lbound[it - 1] > 0.75 * predict:
-                    rb *= 2
-                    if rb > 1:
-                        rb = 1.0
+            # for _ in range(inneriter):
+            grad_b = np.zeros(1 + p * N)
+            hess_b = np.zeros((1 + p * N, 1 + p * N))
+            for t in range(T):
+                grad_b = np.nan_to_num(grad_b + (y[t, n] - rate[t, n]) * Y[t, :])
+                hess_b = np.nan_to_num(hess_b - rate[t, n] * np.outer(Y[t, :], Y[t, :]))
+            if np.linalg.norm(grad_b, ord=np.inf) < np.finfo(float).eps:
+                break
+            hess_ = hess_b - hess_adj_b  # Hessain of beta is negative semidefinite. Add a small negative diagonal
+            delta_b = -rb[n] * np.linalg.solve(hess_, grad_b)
+            # if np.linalg.norm(delta_b, ord=np.inf) < np.finfo(float).eps:
+            #     break
+            b0[:, n] = b[:, n]
+            rate0[:, n] = rate[:, n]
+            predict = np.inner(grad_b, delta_b) + 0.5 * np.dot(delta_b, np.dot(hess_, delta_b))
+            b[:, n] = b[:, n] + delta_b
+            updaterate(range(T), [n])
+            lb = lowerbound(y, Y, rate, mu, omega, m, V, b, a)
+            if np.isnan(lb) or lb < lbound[it - 1]:
+                rb[n] *= 0.5
+                b[:, n] = b0[:, n]
+                rate[:, n] = rate0[:, n]
+            elif lb - lbound[it - 1] > 0.75 * predict:
+                rb[n] *= 2
+                if rb[n] > 1:
+                    rb[n] = 1.0
 
         for n in range(N):
             # alpha
-            for _ in range(inneriter):
-                grad_a = np.zeros(L)
-                hess_a = np.zeros((L, L))
-                for t in range(T):
-                    Vt = np.diag(V[:, t, t])
-                    w = m[t, :] + np.dot(Vt, a[:, n])
-                    grad_a = grad_a + y[t, n] * m[t, :] - rate[t, n] * w
-                    hess_a = hess_a - rate[t, n] * (np.outer(w, w) + Vt)
-                # lagrange multiplier
-                grad_a_lag = grad_a - np.inner(a[:, n], grad_a) * a[:, n]
-                hess_a_lag = hess_a - np.inner(a[:, n], grad_a)
-                # If gradient is small enough, stop.
-                if np.linalg.norm(grad_a_lag, ord=np.inf) < np.finfo(float).eps:
-                    break
-                delta_a = -ra * np.linalg.solve(hess_a_lag, grad_a_lag)
-                # if np.linalg.norm(delta_a, ord=np.inf) < np.finfo(float).eps:
-                #     break
-                a0[:, n] = a[:, n]
-                rate0[:, n] = rate[:, n]
-                predict = np.inner(grad_a_lag, delta_a) + 0.5 * np.dot(delta_a, np.dot(hess_a_lag, delta_a))
-                a[:, n] = a[:, n] + delta_a
-                updaterate(range(T), [n])
-                lb = lowerbound(y, Y, rate, mu, omega, m, V, b, a)
-                if np.isnan(lb) or lb - lbound[it - 1] < 0:
-                    ra *= 0.5
-                    a[:, n] = a0[:, n]
-                    rate[:, n] = rate0[:, n]
-                elif lb - lbound[it - 1] > 0.75 * predict:
-                    ra *= 2
-                    if ra > 1:
-                        ra = 1
+            # for _ in range(inneriter):
+            grad_a = np.zeros(L)
+            hess_a = np.zeros((L, L))
+            for t in range(T):
+                Vt = np.diag(V[:, t, t])
+                w = m[t, :] + np.dot(Vt, a[:, n])
+                grad_a = grad_a + y[t, n] * m[t, :] - rate[t, n] * w
+                hess_a = hess_a - rate[t, n] * (np.outer(w, w) + Vt)
+            # lagrange multiplier
+            grad_a_lag = grad_a - np.inner(a[:, n], grad_a) * a[:, n]
+            hess_a_lag = hess_a - np.inner(a[:, n], grad_a)
+            # If gradient is small enough, stop.
+            if np.linalg.norm(grad_a_lag, ord=np.inf) < np.finfo(float).eps:
+                break
+            delta_a = -ra[n] * np.linalg.solve(hess_a_lag, grad_a_lag)
+            # if np.linalg.norm(delta_a, ord=np.inf) < np.finfo(float).eps:
+            #     break
+            a0[:, n] = a[:, n]
+            rate0[:, n] = rate[:, n]
+            predict = np.inner(grad_a_lag, delta_a) + 0.5 * np.dot(delta_a, np.dot(hess_a_lag, delta_a))
+            a[:, n] = a[:, n] + delta_a
+            updaterate(range(T), [n])
+            lb = lowerbound(y, Y, rate, mu, omega, m, V, b, a)
+            if np.isnan(lb) or lb - lbound[it - 1] < 0:
+                ra[n] *= 0.5
+                a[:, n] = a0[:, n]
+                rate[:, n] = rate0[:, n]
+            elif lb - lbound[it - 1] > 0.75 * predict:
+                ra[n] *= 2
+                if ra[n] > 1:
+                    ra[n] = 1
 
         # posterior mean
         for l in range(L):
-            for _ in range(inneriter):
-                grad_m = np.nan_to_num(np.dot(y - rate, a[l, :]) - np.dot(omega[l, :, :], (m[:, l] - mu[:, l])))
-                hess_m = np.nan_to_num(-np.diag(np.dot(rate, a[l, :] * a[l, :]))) - omega[l, :, :]
-                if np.linalg.norm(grad_m, ord=np.inf) < np.finfo(float).eps:
-                    break
-                delta_m = -rm * np.linalg.solve(hess_m, grad_m)
-                # if np.linalg.norm(delta_m, ord=np.inf) < np.finfo(float).eps:
-                #     break
-                m0[:, l] = m[:, l]
-                rate0[:] = rate
-                predict = np.inner(grad_m, delta_m) + 0.5 * np.dot(delta_m, np.dot(hess_m, delta_m))
-                m[:, l] = m[:, l] + delta_m
-                updaterate(range(T), range(N))
-                lb = lowerbound(y, Y, rate, mu, omega, m, V, b, a)
-                if np.isnan(lb) or lb < lbound[it - 1]:
-                    rm *= 0.5
-                    m[:, l] = m0[:, l]
-                    rate[:] = rate0
-                elif lb - lbound[it - 1] > 0.75 * predict:
-                    rm *= 2
-                    if rm > 1:
-                        rm = 1.0
+            # for _ in range(inneriter):
+            grad_m = np.nan_to_num(np.dot(y - rate, a[l, :]) - np.dot(omega[l, :, :], (m[:, l] - mu[:, l])))
+            hess_m = np.nan_to_num(-np.diag(np.dot(rate, a[l, :] * a[l, :]))) - omega[l, :, :]
+            if np.linalg.norm(grad_m, ord=np.inf) < np.finfo(float).eps:
+                break
+            delta_m = -rm[l] * np.linalg.solve(hess_m, grad_m)
+            # if np.linalg.norm(delta_m, ord=np.inf) < np.finfo(float).eps:
+            #     break
+            m0[:, l] = m[:, l]
+            rate0[:] = rate
+            predict = np.inner(grad_m, delta_m) + 0.5 * np.dot(delta_m, np.dot(hess_m, delta_m))
+            m[:, l] = m[:, l] + delta_m
+            updaterate(range(T), range(N))
+            lb = lowerbound(y, Y, rate, mu, omega, m, V, b, a)
+            if np.isnan(lb) or lb < lbound[it - 1]:
+                rm[l] *= 0.5
+                m[:, l] = m0[:, l]
+                rate[:] = rate0
+            elif lb - lbound[it - 1] > 0.75 * predict:
+                rm[l] *= 2
+                if rm[l] > 1:
+                    rm[l] = 1.0
 
         # posterior covariance
         for l in range(L):

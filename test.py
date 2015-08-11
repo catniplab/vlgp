@@ -10,7 +10,7 @@ sigma = 2
 p = 1
 
 L = 1
-N = 3
+N = 15
 np.random.seed(0)
 
 # simulate latent processes
@@ -50,7 +50,7 @@ m, V, b1, a1, lbound, elapsed = variational(y, mu, sigma, p,
                                             b0=None,
                                             m0=mu,
                                             V0=sigma,
-                                            r=np.finfo(float).eps, maxiter=500, inneriter=3, tol=0.01,
+                                            r=np.finfo(float).eps, maxiter=500, inneriter=3, tol=0.001,
                                             verbose=True)
 
 it = len(lbound)
