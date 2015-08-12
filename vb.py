@@ -1,7 +1,6 @@
 import itertools
 import warnings
 import time
-
 import numpy as np
 
 
@@ -335,7 +334,7 @@ def variational2(y, mu, sigma, p, omega=None,
     :param mu: (T, L), prior mean
     :param sigma: (L, T, T), prior covariance
     :param omega: (L, T, T), inverse prior covariance
-    :param p: order of autoregression
+    :param p: order of history
     :param maxiter: maximum number of iterations
     :param tol: convergence tolerance
     :return
@@ -465,27 +464,6 @@ def variational2(y, mu, sigma, p, omega=None,
     it = 1
     convergent = False
     while not convergent and it < maxiter:
-        # bias
-        grad_bias = np.dot(a, np.sum(y - rate, axis=0))
-        hess_bias = np.dot(a, np.dot(np.diag(np.sum(-rate, axis=0)), a.T))
-        if not np.all(hess_bias.diagonal() < 0):
-            hess_bias -= eps * np.identity(L)
-        delta_bias = -rbias * np.linalg.solve(hess_bias, grad_bias)
-        bias0[:] = bias
-        rate0[:] = rate
-        predict = np.inner(grad_bias, delta_bias) + 0.5 * np.inner(delta_bias, np.dot(hess_bias, delta_bias))
-        bias += delta_bias
-        updaterate(range(T), range(N))
-        lb = lowerbound()
-        if np.isnan(lb) or lb < lbound[it - 1]:
-            rbias = dec * rbias + eps
-            bias[:] = bias0[:]
-            rate[:] = rate0[:]
-        elif lb - lbound[it - 1] > thld * predict:
-            rbias *= inc
-            if rbias > 1:
-                rbias = 1.0
-
         for n in range(N):
         # for n in np.random.permutation(N):
             # beta
@@ -612,6 +590,27 @@ def variational2(y, mu, sigma, p, omega=None,
             #         print 'V[%d] failed, lb = %.5f' % (l, lb)
             #     V[l, :, :] = old_V[l, :, :]
             #     rate[:] = rate0
+
+        # bias
+        grad_bias = np.dot(a, np.sum(y - rate, axis=0))
+        hess_bias = np.dot(a, np.dot(np.diag(np.sum(-rate, axis=0)), a.T))
+        if not np.all(hess_bias.diagonal() < 0):
+            hess_bias -= eps * np.identity(L)
+        delta_bias = -rbias * np.linalg.solve(hess_bias, grad_bias)
+        bias0[:] = bias
+        rate0[:] = rate
+        predict = np.inner(grad_bias, delta_bias) + 0.5 * np.inner(delta_bias, np.dot(hess_bias, delta_bias))
+        bias += delta_bias
+        updaterate(range(T), range(N))
+        lb = lowerbound()
+        if np.isnan(lb) or lb < lbound[it - 1]:
+            rbias = dec * rbias + eps
+            bias[:] = bias0[:]
+            rate[:] = rate0[:]
+        elif lb - lbound[it - 1] > thld * predict:
+            rbias *= inc
+            if rbias > 1:
+                rbias = 1.0
 
         # update lower bound
         lbound[it] = lowerbound()

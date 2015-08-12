@@ -22,7 +22,7 @@ a = np.random.randn(L, N)  # (L, N)
 for n in range(N):
     a[:, n] /= np.linalg.norm(a[:, n])
 b = np.random.randn(1 + p * N, N)  # (1 + p*N, N)
-b[0, :] = -4
+b[0, :] = -2
 y, Y = simulation.spikes(x, a, b)
 
 # plot spikes
@@ -39,7 +39,7 @@ y, Y = simulation.spikes(x, a, b)
 mu = np.zeros((T, L))
 cov = np.empty((T, T))
 for i, j in itertools.product(range(T), range(T)):
-    cov[i, j] = 5 * simulation.sqexp(i - j, l)
+    cov[i, j] = 2 * simulation.sqexp(i - j, l)
 sigma = np.zeros((L, T, T))
 for l in range(L):
     sigma[l, :, :] = cov + np.identity(T) * 1e-7
@@ -67,10 +67,10 @@ m, V, b1, a1, bias, lbound, elapsed = variational2(y, mu, sigma, p,
 
 
 it = len(lbound)
-id = time.time()
+num= time.time()
 if not os.path.isdir('output'):
     os.mkdir('output')
-with open('output/[%d] L=%d N=%d.txt' % (id, L, N), 'w+') as logging:
+with open('output/[%d] L=%d N=%d.txt' % (num, L, N), 'w+') as logging:
     print('{} iteration(s)'.format(it), file=logging)
     print('time: {}s'.format(elapsed), file=logging)
     print('Lower bounds:\n{}'.format(lbound), file=logging)
@@ -78,6 +78,7 @@ with open('output/[%d] L=%d N=%d.txt' % (id, L, N), 'w+') as logging:
     print('Posterior covariance:\n{}'.format(V), file=logging)
     print('beta:\n{}'.format(b1), file=logging)
     print('alpha:\n{}'.format(a1), file=logging)
+    print('bias:\n{}'.format(bias), file=logging)
 
 # print '%d iteration(s)' % it
 # print 'time: %.3fs' % elapsed
@@ -92,7 +93,7 @@ frm = 1
 plt.plot(range(frm + 1, it + 1), lbound[frm:])
 plt.yticks([])
 plt.xlim([frm + 1, it + 1])
-title = '[%d] Lower bound=%.3f, iteration=%d, time=%.2fs, L=%d, N=%d' % (id, lbound[it-1], it, elapsed, L, N)
+title = '[%d] Lower bound=%.3f, iteration=%d, time=%.2fs, L=%d, N=%d' % (num, lbound[it-1], it, elapsed, L, N)
 plt.title(title)
 plt.savefig('output/{}.png'.format(title))
 ns = 100
@@ -107,7 +108,6 @@ for l in range(L):
     plt.plot(-x[:, l], label='negative latent', color='green')
     plt.plot(m[:, l], label='posterior', color='red')
     plt.legend()
-    title = '[%d] Latent %d N=%d' % (id, l + 1, N)
+    title = '[%d] Latent %d N=%d' % (num, l + 1, N)
     plt.title(title)
     plt.savefig('output/{}.png'.format(title))
-plt.show()
