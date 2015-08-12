@@ -158,9 +158,11 @@ def variational(y, mu, sigma, p, omega=None,
     it = 1
     convergent = False
     while not convergent and it < maxiter:
+        print 'step size:', rb, ra, rm
         # ra[:] = rb[:] = rm[:] = 1.0
         # optimize coefficients
         for n in range(N):
+        # for n in np.random.permutation(N):
             # beta
             # for _ in range(inneriter):
             grad_b = np.zeros(1 + p * N)
@@ -177,11 +179,12 @@ def variational(y, mu, sigma, p, omega=None,
             b0[:, n] = b[:, n]
             rate0[:, n] = rate[:, n]
             predict = np.inner(grad_b, delta_b) + 0.5 * np.dot(delta_b, np.dot(hess_, delta_b))
+            print 'predicted beta[%d] inc = %.10f' % (n, predict)
             b[:, n] = b[:, n] + delta_b
             updaterate(range(T), [n])
             lb = lowerbound(y, Y, rate, mu, omega, m, V, b, a)
             if np.isnan(lb) or lb < lbound[it - 1]:
-                rb[n] *= dec
+                rb[n] = dec * rb[n] + np.finfo(float).eps
                 b[:, n] = b0[:, n]
                 rate[:, n] = rate0[:, n]
             elif lb - lbound[it - 1] > thld * predict:
@@ -190,6 +193,7 @@ def variational(y, mu, sigma, p, omega=None,
                     rb[n] = 1.0
 
         for n in range(N):
+        # for n in np.random.permutation(N):
             # alpha
             # for _ in range(inneriter):
             grad_a = np.zeros(L)
@@ -211,11 +215,12 @@ def variational(y, mu, sigma, p, omega=None,
             a0[:, n] = a[:, n]
             rate0[:, n] = rate[:, n]
             predict = np.inner(grad_a_lag, delta_a) + 0.5 * np.dot(delta_a, np.dot(hess_a_lag, delta_a))
+            print 'predicted alpha[%d] inc = %.10f' % (n, predict)
             a[:, n] = a[:, n] + delta_a
             updaterate(range(T), [n])
             lb = lowerbound(y, Y, rate, mu, omega, m, V, b, a)
             if np.isnan(lb) or lb - lbound[it - 1] < 0:
-                ra[n] *= dec
+                ra[n] = dec * ra[n] + np.finfo(float).eps
                 a[:, n] = a0[:, n]
                 rate[:, n] = rate0[:, n]
             elif lb - lbound[it - 1] > thld * predict:
@@ -225,6 +230,7 @@ def variational(y, mu, sigma, p, omega=None,
 
         # posterior mean
         for l in range(L):
+        # for l in np.random.permutation(L):
             # for _ in range(inneriter):
             grad_m = np.nan_to_num(np.dot(y - rate, a[l, :]) - np.dot(omega[l, :, :], (m[:, l] - mu[:, l])))
             hess_m = np.nan_to_num(-np.diag(np.dot(rate, a[l, :] * a[l, :]))) - omega[l, :, :]
@@ -236,11 +242,12 @@ def variational(y, mu, sigma, p, omega=None,
             m0[:, l] = m[:, l]
             rate0[:] = rate
             predict = np.inner(grad_m, delta_m) + 0.5 * np.dot(delta_m, np.dot(hess_m, delta_m))
+            print 'predicted m[%d] inc = %.10f' % (l, predict)
             m[:, l] = m[:, l] + delta_m
             updaterate(range(T), range(N))
             lb = lowerbound(y, Y, rate, mu, omega, m, V, b, a)
             if np.isnan(lb) or lb < lbound[it - 1]:
-                rm[l] *= dec
+                rm[l] = dec * rm[l] + np.finfo(float).eps
                 m[:, l] = m0[:, l]
                 rate[:] = rate0
             elif lb - lbound[it - 1] > thld * predict:
@@ -250,12 +257,11 @@ def variational(y, mu, sigma, p, omega=None,
 
         # posterior covariance
         for l in range(L):
-            grad_V = -0.5 * np.diag(np.dot(rate, a[l, :] * a[l, :])) - 0.5 * omega[l, :, :] + 0.5 * K[l, :, :]
-            # print 'max abs gradient V[%d] = %.10f' % (l, np.max(np.abs(grad_V)))
-            # if np.linalg.norm(grad_V, ord=np.inf) < np.finfo(float).eps:
-            #     break
+        # for l in np.random.permutation(L):
+            # grad_V = -0.5 * np.diag(np.dot(rate, a[l, :] * a[l, :])) - 0.5 * omega[l, :, :] + 0.5 * K[l, :, :]
             rate0[:] = rate
             for t in range(T):
+            # for t in np.random.permutation(T):
                 k_ = K[l, t, t] - 1 / V[l, t, t]  # \tilde{k}_tt
                 old_vtt = V[l, t, t]
                 # fixed point iterations

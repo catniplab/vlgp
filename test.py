@@ -1,20 +1,21 @@
-import matplotlib.pyplot as plt
+from __future__ import print_function
 
+import matplotlib.pyplot as plt
 from vb import *
 import simulation
 
 dt = 1.0
 T = 200
 l = 1e-4
-sigma = 1
+std = 1
 p = 1
 
 L = 1
-N = 10
+N = 3
 np.random.seed(0)
 
 # simulate latent processes
-x, ticks = simulation.latents(L, T, sigma, l)
+x, ticks = simulation.latents(L, T, std, l)
 
 # simulate spike trains
 a = np.random.randn(L, N)  # (L, N)
@@ -50,10 +51,21 @@ m, V, b1, a1, lbound, elapsed = variational(y, mu, sigma, p,
                                             b0=None,
                                             m0=mu,
                                             V0=sigma,
-                                            r=np.finfo(float).eps, maxiter=500, inneriter=3, tol=0.001,
+                                            r=np.finfo(float).eps, maxiter=500, inneriter=5, tol=1e-7,
                                             verbose=True)
 
 it = len(lbound)
+id = time.time()
+with open('figure/[{}].txt'.format(id)) as logging:
+    print('{} iteration(s)'.format(it), file=logging)
+    print('time: {}s'.format(elapsed), file=logging)
+    print('Lower bounds: {}'.format(lbound), file=logging)
+    # print 'Posterior mean\n', m
+    print 'covariance:\n', V
+    print 'beta:\n', b1
+    print 'alpha:\n', a1
+
+
 print '%d iteration(s)' % it
 print 'time: %.3fs' % elapsed
 print 'Lower bounds:\n', lbound[:it]
@@ -62,16 +74,14 @@ print 'covariance:\n', V
 print 'beta:\n', b1
 print 'alpha:\n', a1
 
-
-id = time.time()
 plt.figure()
 frm = 1
 plt.plot(range(frm + 1, it + 1), lbound[frm:it])
 plt.yticks([])
 plt.xlim([frm + 1, it + 1])
-title = 'Lower bound %.2f, iteration %d, time %.2fs, L=%d, N=%d' % (lbound[it-1], it, elapsed, L, N)
+title = '[%d] Lower bound %.2f, iteration %d, time %.2fs, L=%d, N=%d' % (id, lbound[it-1], it, elapsed, L, N)
 plt.title(title)
-plt.savefig('figure/%s[%d].png' % (title, id))
+plt.savefig('figure/%s.png' % title)
 ns = 100
 for l in range(L):
     plt.figure()
@@ -84,7 +94,7 @@ for l in range(L):
     plt.plot(-x[:, l], label='negative latent', color='green')
     plt.plot(m[:, l], label='posterior', color='red')
     plt.legend()
-    title = 'Latent %d, N = %d' % (l + 1, N)
+    title = '[%d] Latent %d, N = %d' % (id, l + 1, N)
     plt.title(title)
-    plt.savefig('figure/%s[%d].png' % (title, id))
+    plt.savefig('figure/%s.png' % title)
 plt.show()
