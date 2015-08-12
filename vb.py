@@ -150,6 +150,10 @@ def variational(y, mu, sigma, p, omega=None,
     ra = np.ones(N)
     rb = np.ones(N)
     rm = np.ones(L)
+    dec = 0.5
+    inc = 1.5
+    thld = 0.75
+
 
     it = 1
     convergent = False
@@ -177,11 +181,11 @@ def variational(y, mu, sigma, p, omega=None,
             updaterate(range(T), [n])
             lb = lowerbound(y, Y, rate, mu, omega, m, V, b, a)
             if np.isnan(lb) or lb < lbound[it - 1]:
-                rb[n] *= 0.5
+                rb[n] *= dec
                 b[:, n] = b0[:, n]
                 rate[:, n] = rate0[:, n]
-            elif lb - lbound[it - 1] > 0.75 * predict:
-                rb[n] *= 2
+            elif lb - lbound[it - 1] > thld * predict:
+                rb[n] *= inc
                 if rb[n] > 1:
                     rb[n] = 1.0
 
@@ -211,13 +215,13 @@ def variational(y, mu, sigma, p, omega=None,
             updaterate(range(T), [n])
             lb = lowerbound(y, Y, rate, mu, omega, m, V, b, a)
             if np.isnan(lb) or lb - lbound[it - 1] < 0:
-                ra[n] *= 0.5
+                ra[n] *= dec
                 a[:, n] = a0[:, n]
                 rate[:, n] = rate0[:, n]
-            elif lb - lbound[it - 1] > 0.75 * predict:
-                ra[n] *= 2
+            elif lb - lbound[it - 1] > thld * predict:
+                ra[n] *= inc
                 if ra[n] > 1:
-                    ra[n] = 1
+                    ra[n] = 1.0
 
         # posterior mean
         for l in range(L):
@@ -236,11 +240,11 @@ def variational(y, mu, sigma, p, omega=None,
             updaterate(range(T), range(N))
             lb = lowerbound(y, Y, rate, mu, omega, m, V, b, a)
             if np.isnan(lb) or lb < lbound[it - 1]:
-                rm[l] *= 0.5
+                rm[l] *= dec
                 m[:, l] = m0[:, l]
                 rate[:] = rate0
-            elif lb - lbound[it - 1] > 0.75 * predict:
-                rm[l] *= 2
+            elif lb - lbound[it - 1] > thld * predict:
+                rm[l] *= inc
                 if rm[l] > 1:
                     rm[l] = 1.0
 

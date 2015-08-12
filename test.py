@@ -6,11 +6,11 @@ import simulation
 dt = 1.0
 T = 200
 l = 1e-4
-sigma = 2
+sigma = 1
 p = 1
 
 L = 1
-N = 15
+N = 10
 np.random.seed(0)
 
 # simulate latent processes
@@ -37,7 +37,7 @@ y, Y = simulation.spikes(x, a, b)
 mu = np.zeros((T, L))
 cov = np.empty((T, T))
 for i, j in itertools.product(range(T), range(T)):
-    cov[i, j] = simulation.sqexp(i - j, l)
+    cov[i, j] = 10 * simulation.sqexp(i - j, l)
 sigma = np.zeros((L, T, T))
 for l in range(L):
     sigma[l, :, :] = cov + np.identity(T) * 1e-7
@@ -78,7 +78,6 @@ for l in range(L):
     z = np.random.randn(T, ns)
     lt = np.linalg.cholesky(V[l, :, :])
     s = np.dot(lt, z)
-    plt.ylim([-5, 5])
     for n in range(ns):
         plt.plot(s[:, n] + m[:, l], color='0.8')
     plt.plot(x[:, l], label='latent', color='blue')
