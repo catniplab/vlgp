@@ -11,7 +11,7 @@ std = 1
 p = 1
 
 L = 1
-N = 5
+N = 10
 np.random.seed(0)
 
 # simulate latent processes
@@ -39,7 +39,7 @@ y, Y = simulation.spikes(x, a, b)
 mu = np.zeros((T, L))
 cov = np.empty((T, T))
 for i, j in itertools.product(range(T), range(T)):
-    cov[i, j] = 2 * simulation.sqexp(i - j, l)
+    cov[i, j] = 5 * simulation.sqexp(i - j, l)
 sigma = np.zeros((L, T, T))
 for l in range(L):
     sigma[l, :, :] = cov + np.identity(T) * 1e-7
@@ -47,15 +47,24 @@ for l in range(L):
 # print 'Prior mean\n', mu
 # print 'Prior covariance', sigma
 # b[0, :] = -10
-intercept = True
-m, V, b1, a1, lbound, elapsed = variational(y, mu, sigma, p,
-                                            a0=None,
-                                            b0=None,
-                                            m0=mu,
-                                            V0=sigma,
-                                            intercept=intercept,
-                                            r=np.finfo(float).eps, maxiter=500, inneriter=5, tol=1e-6,
-                                            verbose=True)
+# intercept = True
+# m, V, b1, a1, lbound, elapsed = variational(y, mu, sigma, p,
+#                                             a0=None,
+#                                             b0=None,
+#                                             m0=mu,
+#                                             V0=sigma,
+#                                             intercept=intercept,
+#                                             r=np.finfo(float).eps, maxiter=500, inneriter=5, tol=1e-6,
+#                                             verbose=True)
+
+m, V, b1, a1, bias, lbound, elapsed = variational2(y, mu, sigma, p,
+                                                   a0=None,
+                                                   b0=None,
+                                                   m0=mu,
+                                                   V0=sigma,
+                                                   maxiter=500, inneriter=5, tol=1e-6,
+                                                   verbose=True)
+
 
 it = len(lbound)
 id = time.time()
@@ -98,7 +107,7 @@ for l in range(L):
     plt.plot(-x[:, l], label='negative latent', color='green')
     plt.plot(m[:, l], label='posterior', color='red')
     plt.legend()
-    title = '[%d] Latent %d N=%d b0=%r' % (id, l + 1, N, intercept)
+    title = '[%d] Latent %d N=%d' % (id, l + 1, N)
     plt.title(title)
     plt.savefig('output/{}.png'.format(title))
 plt.show()
