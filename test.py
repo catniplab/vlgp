@@ -11,18 +11,20 @@ std = 1
 p = 1
 
 L = 1
-N = 10
+N = 5
 np.random.seed(0)
 
 # simulate latent processes
 x, ticks = simulation.latents(L, T, std, l)
+# mean = np.ones(x.shape)
+# x += mean
 
 # simulate spike trains
 a = np.random.randn(L, N)  # (L, N)
 for n in range(N):
     a[:, n] /= np.linalg.norm(a[:, n])
 b = np.random.randn(1 + p * N, N)  # (1 + p*N, N)
-b[0, :] = -3
+b[0, :] = -4
 y, Y = simulation.spikes(x, a, b)
 
 # plot spikes
@@ -36,7 +38,7 @@ y, Y = simulation.spikes(x, a, b)
 
 # mu = np.random.randn(T, L) + 1
 # mu = x
-mu = np.zeros((T, L))
+mu = np.ones((T, L))
 cov = np.empty((T, T))
 for i, j in itertools.product(range(T), range(T)):
     cov[i, j] = 2 * simulation.sqexp(i - j, l)
@@ -49,8 +51,9 @@ for l in range(L):
 # b[0, :] = -10
 intercept = True
 m, V, b1, a1, lbound, elapsed = variational(y, mu, sigma, p,
-                                            a0=None,
-                                            b0=None,
+                                            a0=np.random.randn(*a.shape) + 1,
+                                            b0=np.ones(b.shape),
+                                            # m0=np.random.randn(*mu.shape),
                                             m0=mu,
                                             V0=sigma,
                                             intercept=intercept,
@@ -69,6 +72,8 @@ with open('output/[%d] L=%d N=%d.txt' % (num, L, N), 'w+') as logging:
     print('Posterior covariance:\n{}'.format(V), file=logging)
     print('beta:\n{}'.format(b1), file=logging)
     print('alpha:\n{}'.format(a1), file=logging)
+    print('true likelihood: {}'.format(likelihood(y, x, a, b, intercept=intercept)), file=logging)
+    print('estimated likelihood: {}'.format(likelihood(y, m, a1, b1, intercept=intercept)), file=logging)
 
 # print '%d iteration(s)' % it
 # print 'time: %.3fs' % elapsed
