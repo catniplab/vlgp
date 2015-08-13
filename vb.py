@@ -10,18 +10,19 @@ def saferate(t, n, Y, m, V, b, a):
     return rate if rate > 0 else np.finfo(np.float).eps
 
 
-def lowerbound(y, Y, rate, mu, omega, m, V, b, a):
+def lowerbound(y, b, a, mu, omega, m, V, complete=False, Y=None, rate=None):
     """
-    Calculate the lower bound without constant terms
+    Calculate the lower bound
     :param y: (T, N), spike trains
-    :param Y: (T, 1 + p*N), vectorized spike history
-    :param rate: (T, N), E(E(y|x))
+    :param b: (1 + p*N, N), coefficients of y
+    :param a: (L, N), coefficients of x
     :param mu: (T, L), prior mean
     :param omega: (L, T, T), prior inverse covariances
     :param m: (T, L), latent posterior mean
     :param V: (L, T, T), latent posterior covariances
-    :param b: (1 + p*N, N), coefficients of y
-    :param a: (L, N), coefficients of x
+    :param complete: compute constant terms
+    :param Y: (T, 1 + p*N), vectorized spike history
+    :param rate: (T, N), E(E(y|x))
     :return lbound: lower bound
     """
 
@@ -34,12 +35,12 @@ def lowerbound(y, Y, rate, mu, omega, m, V, b, a):
         lbound += -0.5 * np.dot(m[:, l] - mu[:, l], np.dot(omega[l, :, :], m[:, l] - mu[:, l])) + \
                   -0.5 * np.trace(np.dot(omega[l, :, :], V[l, :, :])) + 0.5 * np.linalg.slogdet(V[l, :, :])[1]
 
-    return lbound
+    return lbound + 0.5 * np.sum(np.linalg.slogdet(omega)[1]) if complete else lbound
 
 
 def variational(y, mu, sigma, p, omega=None,
                 a0=None, b0=None, m0=None, V0=None, K0=None, intercept=True,
-                r=np.finfo(np.float).eps, maxiter=5, inneriter=5, tol=1e-6,
+                maxiter=5, inneriter=5, tol=1e-6,
                 verbose=False):
     """
     :param y: (T, N), spike trains
@@ -73,7 +74,7 @@ def variational(y, mu, sigma, p, omega=None,
     _, L = mu.shape
 
     # identity matrix
-    hess_adj_b = r * np.identity(intercept + p*N)
+    hess_adj_b = eps * np.identity(intercept + p*N)
 
     # calculate inverse of prior covariance if not given
     if omega is None:
@@ -133,7 +134,7 @@ def variational(y, mu, sigma, p, omega=None,
 
     # initialize lower bound
     lbound = np.full(maxiter, np.NINF)
-    lbound[0] = lowerbound(y, Y, rate, mu, omega, m, V, b, a)
+    lbound[0] = lowerbound(y, b, a, mu, omega, m, V, Y=Y, rate=rate)
 
     # old values
     old_a = a.copy()
@@ -159,9 +160,6 @@ def variational(y, mu, sigma, p, omega=None,
     convergent = False
     while not convergent and it < maxiter:
         for n in range(N):
-        # for n in np.random.permutation(N):
-            # beta
-            # for _ in range(inneriter):
             grad_b = np.zeros(intercept + p * N)
             hess_b = np.zeros((intercept + p * N, intercept + p * N))
             for t in range(T):
@@ -179,7 +177,7 @@ def variational(y, mu, sigma, p, omega=None,
             print('predicted beta[%d] inc = %.10f' % (n, predict))
             b[:, n] = b[:, n] + delta_b
             updaterate(range(T), [n])
-            lb = lowerbound(y, Y, rate, mu, omega, m, V, b, a)
+            lb = lowerbound(y, b, a, mu, omega, m, V, Y=Y, rate=rate)
             if np.isnan(lb) or lb < lbound[it - 1]:
                 rb[n] = dec * rb[n] + eps
                 b[:, n] = b0[:, n]
@@ -190,9 +188,6 @@ def variational(y, mu, sigma, p, omega=None,
                     rb[n] = 1.0
 
         for n in range(N):
-        # for n in np.random.permutation(N):
-            # alpha
-            # for _ in range(inneriter):
             grad_a = np.zeros(L)
             hess_a = np.zeros((L, L))
             for t in range(T):
@@ -215,7 +210,7 @@ def variational(y, mu, sigma, p, omega=None,
             print('predicted alpha[%d] inc = %.10f' % (n, predict))
             a[:, n] = a[:, n] + delta_a
             updaterate(range(T), [n])
-            lb = lowerbound(y, Y, rate, mu, omega, m, V, b, a)
+            lb = lowerbound(y, b, a, mu, omega, m, V, Y=Y, rate=rate)
             if np.isnan(lb) or lb - lbound[it - 1] < 0:
                 ra[n] = dec * ra[n] + eps
                 a[:, n] = a0[:, n]
@@ -227,8 +222,6 @@ def variational(y, mu, sigma, p, omega=None,
 
         # posterior mean
         for l in range(L):
-        # for l in np.random.permutation(L):
-            # for _ in range(inneriter):
             grad_m = np.nan_to_num(np.dot(y - rate, a[l, :]) - np.dot(omega[l, :, :], (m[:, l] - mu[:, l])))
             hess_m = np.nan_to_num(-np.diag(np.dot(rate, a[l, :] * a[l, :]))) - omega[l, :, :]
             # grad_m = grad_m * (1 - np.inner(a[l, :],
@@ -237,15 +230,13 @@ def variational(y, mu, sigma, p, omega=None,
             if np.linalg.norm(grad_m, ord=np.inf) < eps:
                 break
             delta_m = -rm[l] * np.linalg.solve(hess_m, grad_m)
-            # if np.linalg.norm(delta_m, ord=np.inf) < eps:
-            #     break
             m0[:, l] = m[:, l]
             rate0[:] = rate
             predict = np.inner(grad_m, delta_m) + 0.5 * np.dot(delta_m, np.dot(hess_m, delta_m))
             print('predicted m[%d] inc = %.10f' % (l, predict))
             m[:, l] = m[:, l] + delta_m
             updaterate(range(T), range(N))
-            lb = lowerbound(y, Y, rate, mu, omega, m, V, b, a)
+            lb = lowerbound(y, b, a, mu, omega, m, V, Y=Y, rate=rate)
             if np.isnan(lb) or lb < lbound[it - 1]:
                 rm[l] = dec * rm[l] + eps
                 m[:, l] = m0[:, l]
@@ -257,11 +248,8 @@ def variational(y, mu, sigma, p, omega=None,
 
         # posterior covariance
         for l in range(L):
-        # for l in np.random.permutation(L):
-            # grad_V = -0.5 * np.diag(np.dot(rate, a[l, :] * a[l, :])) - 0.5 * omega[l, :, :] + 0.5 * K[l, :, :]
             rate0[:] = rate
             for t in range(T):
-            # for t in np.random.permutation(T):
                 k_ = K[l, t, t] - 1 / V[l, t, t]  # \tilde{k}_tt
                 old_vtt = V[l, t, t]
                 # fixed point iterations
@@ -276,17 +264,9 @@ def variational(y, mu, sigma, p, omega=None,
                 V[l, t, not_t] = V[l, not_t, t] = V[l, t, t] * V[l, t, not_t] / old_vtt
                 # update k_tt
                 K[l, t, t] = k_ + 1 / V[l, t, t]
-            # updaterate(range(T), range(N))
-            # roll back
-            # lb = lowerbound(y, Y, rate, mu, omega, m, V, b, a)
-            # if np.isnan(lb) or lb < lbound[it - 1]:
-            #     if verbose:
-            #         print 'V[%d] failed, lb = %.5f' % (l, lb)
-            #     V[l, :, :] = old_V[l, :, :]
-            #     rate[:] = rate0
 
         # update lower bound
-        lbound[it] = lowerbound(y, Y, rate, mu, omega, m, V, b, a)
+        lbound[it] = lowerbound(y, b, a, mu, omega, m, V, Y=Y, rate=rate)
 
         # check convergence
         delta = max(np.max(np.abs(old_a - a)), np.max(np.abs(old_b - b)),

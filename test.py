@@ -11,7 +11,7 @@ std = 1
 p = 1
 
 L = 1
-N = 10
+N = 5
 np.random.seed(0)
 
 # simulate latent processes
@@ -22,7 +22,7 @@ a = np.random.randn(L, N)  # (L, N)
 for n in range(N):
     a[:, n] /= np.linalg.norm(a[:, n])
 b = np.random.randn(1 + p * N, N)  # (1 + p*N, N)
-b[0, :] = -2
+b[0, :] = -3
 y, Y = simulation.spikes(x, a, b)
 
 # plot spikes
@@ -47,24 +47,15 @@ for l in range(L):
 # print 'Prior mean\n', mu
 # print 'Prior covariance', sigma
 # b[0, :] = -10
-# intercept = True
-# m, V, b1, a1, lbound, elapsed = variational(y, mu, sigma, p,
-#                                             a0=None,
-#                                             b0=None,
-#                                             m0=mu,
-#                                             V0=sigma,
-#                                             intercept=intercept,
-#                                             r=np.finfo(float).eps, maxiter=500, inneriter=5, tol=1e-6,
-#                                             verbose=True)
-
-m, V, b1, a1, bias, lbound, elapsed = variational2(y, mu, sigma, p,
-                                                   a0=None,
-                                                   b0=None,
-                                                   m0=mu,
-                                                   V0=sigma,
-                                                   maxiter=500, inneriter=5, tol=1e-6,
-                                                   verbose=True)
-
+intercept = True
+m, V, b1, a1, lbound, elapsed = variational(y, mu, sigma, p,
+                                            a0=None,
+                                            b0=None,
+                                            m0=mu,
+                                            V0=sigma,
+                                            intercept=intercept,
+                                            maxiter=500, inneriter=5, tol=1e-6,
+                                            verbose=True)
 
 it = len(lbound)
 num= time.time()
@@ -78,7 +69,6 @@ with open('output/[%d] L=%d N=%d.txt' % (num, L, N), 'w+') as logging:
     print('Posterior covariance:\n{}'.format(V), file=logging)
     print('beta:\n{}'.format(b1), file=logging)
     print('alpha:\n{}'.format(a1), file=logging)
-    print('bias:\n{}'.format(bias), file=logging)
 
 # print '%d iteration(s)' % it
 # print 'time: %.3fs' % elapsed
