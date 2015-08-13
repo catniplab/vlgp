@@ -73,6 +73,12 @@ def variational(y, mu, sigma, p, omega=None,
     T, N = y.shape
     _, L = mu.shape
 
+    eyeL = np.identity(L)
+    eyeN = np.identity(N)
+    eyeT = np.identity(T)
+    oneT = np.ones(T)
+    jayT = np.ones((T, T))
+
     # identity matrix
     hess_adj_b = eps * np.identity(intercept + p*N)
 
@@ -165,8 +171,8 @@ def variational(y, mu, sigma, p, omega=None,
             for t in range(T):
                 grad_b += (y[t, n] - rate[t, n]) * Y[t, :]
                 hess_b -= rate[t, n] * np.outer(Y[t, :], Y[t, :])
-            if np.linalg.norm(grad_b, ord=np.inf) < eps:
-                break
+            # if np.linalg.norm(grad_b, ord=np.inf) < eps:
+            #     break
             hess_ = hess_b - hess_adj_b  # Hessain of beta is negative semidefinite. Add a small negative diagonal
             delta_b = -rb[n] * np.linalg.solve(hess_, grad_b)
             # if np.linalg.norm(delta_b, ord=np.inf) < eps:
@@ -199,8 +205,8 @@ def variational(y, mu, sigma, p, omega=None,
             grad_a_lag = grad_a - np.inner(a[:, n], grad_a) * a[:, n]
             hess_a_lag = hess_a - np.inner(a[:, n], grad_a)
             # If gradient is small enough, stop.
-            if np.linalg.norm(grad_a_lag, ord=np.inf) < eps:
-                break
+            # if np.linalg.norm(grad_a_lag, ord=np.inf) < eps:
+            #     break
             delta_a = -ra[n] * np.linalg.solve(hess_a_lag, grad_a_lag)
             # if np.linalg.norm(delta_a, ord=np.inf) < eps:
             #     break
@@ -224,11 +230,12 @@ def variational(y, mu, sigma, p, omega=None,
         for l in range(L):
             grad_m = np.nan_to_num(np.dot(y - rate, a[l, :]) - np.dot(omega[l, :, :], (m[:, l] - mu[:, l])))
             hess_m = np.nan_to_num(-np.diag(np.dot(rate, a[l, :] * a[l, :]))) - omega[l, :, :]
-            # grad_m = grad_m * (1 - np.inner(a[l, :],
-            #                                 np.linalg.solve(np.outer(a[l, :], a[l, :])
-            #                                                 + eps * np.identity(N), a[l, :])))
-            if np.linalg.norm(grad_m, ord=np.inf) < eps:
-                break
+            grad_m = np.dot(eyeT -
+                            np.dot(np.outer(oneT, a[l, :]),
+                                   np.linalg.solve(T * np.outer(a[l, :], a[l, :]) + T * eps * eyeN,
+                                                   np.outer(a[l, :], oneT))), grad_m)
+            # if np.linalg.norm(grad_m, ord=np.inf) < eps:
+            #     break
             delta_m = -rm[l] * np.linalg.solve(hess_m, grad_m)
             m0[:, l] = m[:, l]
             rate0[:] = rate
