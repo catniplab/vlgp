@@ -38,7 +38,7 @@ y, Y = simulation.spikes(x, a, b)
 
 # mu = np.random.randn(T, L) + 1
 # mu = x
-mu = np.ones((T, L))
+mu = 0 * np.ones((T, L))
 cov = np.empty((T, T))
 for i, j in itertools.product(range(T), range(T)):
     cov[i, j] = 2 * simulation.sqexp(i - j, l)
@@ -52,12 +52,12 @@ for l in range(L):
 intercept = True
 m, V, b1, a1, lbound, elapsed = variational(y, mu, sigma, p,
                                             a0=np.random.randn(*a.shape) + 1,
-                                            b0=np.ones(b.shape),
+                                            b0=None,
                                             # m0=np.random.randn(*mu.shape),
                                             m0=mu,
                                             V0=sigma,
                                             intercept=intercept,
-                                            maxiter=500, inneriter=5, tol=1e-6,
+                                            maxiter=500, inneriter=5, tol=1e-2,
                                             verbose=True)
 
 it = len(lbound)
@@ -74,14 +74,12 @@ with open('output/[%d] L=%d N=%d.txt' % (num, L, N), 'w+') as logging:
     print('alpha:\n{}'.format(a1), file=logging)
     print('true likelihood: {}'.format(likelihood(y, x, a, b, intercept=intercept)), file=logging)
     print('estimated likelihood: {}'.format(likelihood(y, m, a1, b1, intercept=intercept)), file=logging)
+    print('constant rate likelihood: {}'.format(np.sum(y * np.log(y.mean(axis=0)) - y.mean(axis=0))),
+          file=logging)
+    print('saturated likelihood: {}'.format(-y.sum()), file=logging)
 
-# print '%d iteration(s)' % it
-# print 'time: %.3fs' % elapsed
-# print 'Lower bounds:\n', lbound[:it]
-# # print 'Posterior mean\n', m
-# print 'covariance:\n', V
-# print 'beta:\n', b1
-# print 'alpha:\n', a1
+print(m.mean(axis=0))
+print(a1)
 
 plt.figure()
 frm = 1
