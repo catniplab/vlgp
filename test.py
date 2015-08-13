@@ -5,7 +5,7 @@ from vb import *
 import simulation
 
 dt = 1.0
-T = 200
+T = 500
 l = 1e-4
 std = 1
 p = 1
