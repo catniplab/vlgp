@@ -40,7 +40,7 @@ def lowerbound(y, b, a, mu, omega, m, V, complete=False, Y=None, rate=None):
 
 def variational(y, mu, sigma, p, omega=None,
                 a0=None, b0=None, m0=None, V0=None, K0=None, intercept=True,
-                maxiter=5, inneriter=5, tol=1e-6,
+                maxiter=5, inneriter=5, tol=1e-6, fixed=False, constraint=True,
                 verbose=False):
     """
     :param y: (T, N), spike trains
@@ -173,6 +173,8 @@ def variational(y, mu, sigma, p, omega=None,
     convergent = False
     while not convergent and it < maxiter:
         for n in range(N):
+            if fixed:
+                break;
             grad_b.fill(0)
             hess_b.fill(0)
             for t in range(T):
@@ -194,10 +196,16 @@ def variational(y, mu, sigma, p, omega=None,
                 rate[:, n] = rate0[:, n]
             elif lb - lbound[it - 1] > thld * predict:
                 rb[n] *= inc
-                if rb[n] > 1:
-                    rb[n] = 1.0
+                # if rb[n] > 1:
+                #     rb[n] = 1.0
+            # print('stepsize: {}'.format(rb))
+            # print('predicted inc: {}'.format(predict))
+            # print('actual inc: {}'.format(lb - lbound[it - 1]))
+            # print('delta: {}'.format(delta_b))
 
         for n in range(N):
+            if fixed:
+                break;
             grad_a.fill(0)
             hess_a.fill(0)
             lam_a0 = lam_a
@@ -207,15 +215,23 @@ def variational(y, mu, sigma, p, omega=None,
                 grad_a += y[t, n] * m[t, :] - rate[t, n] * w
                 hess_a -= rate[t, n] * (np.outer(w, w) + Vt)
             # lagrange multiplier
+            # grad_a_lag[:L] = grad_a + 2 * lam_a * a[:, n]
+            # grad_a_lag[L:] = np.inner(a[:, n], a[:, n]) - 1
+            # hess_a_lag[:L, :L] = hess_a + 2 * lam_a * eyeL
+            # hess_a_lag[:L, L:] = hess_a_lag[L:, :L] = 2 * a[:, n]
+            # hess_a_lag[L:, L:] = 0
             grad_a_lag[:L] = grad_a + 2 * lam_a * a[:, n]
-            grad_a_lag[L:] = np.inner(a[:, n], a[:, n]) - 1
+            grad_a_lag[L:] = np.linalg.norm(a, ord='fro') ** 2 - 1
             hess_a_lag[:L, :L] = hess_a + 2 * lam_a * eyeL
             hess_a_lag[:L, L:] = hess_a_lag[L:, :L] = 2 * a[:, n]
             hess_a_lag[L:, L:] = 0
             # If gradient is small enough, stop.
             if np.linalg.norm(grad_a_lag, ord=np.inf) < eps:
                 break
-            delta_a = -ra[n] * np.linalg.solve(hess_a_lag, grad_a_lag)
+            try:
+                delta_a = -ra[n] * np.linalg.solve(hess_a_lag, grad_a_lag)
+            except np.linalg.LinAlgError:
+                continue
             a0[:, n] = a[:, n]
             rate0[:, n] = rate[:, n]
             predict = np.inner(grad_a_lag, delta_a) + 0.5 * np.dot(delta_a, np.dot(hess_a_lag, delta_a))
@@ -231,32 +247,44 @@ def variational(y, mu, sigma, p, omega=None,
                 lam_a = lam_a0
             elif lb - lbound[it - 1] > thld * predict:
                 ra[n] *= inc
-                if ra[n] > 1:
-                    ra[n] = 1.0
+                # if ra[n] > 1:
+                #     ra[n] = 1.0
 
         # posterior mean
         for l in range(L):
             grad_m = np.dot(y - rate, a[l, :]) - np.dot(omega[l, :, :], (m[:, l] - mu[:, l]))
             hess_m = -np.diag(np.dot(rate, a[l, :] * a[l, :])) - omega[l, :, :]
-            lam_m0[:] = lam_m
-            grad_m_lag[:T] = grad_m
-            grad_m_lag[T:] = np.dot(m.sum(axis=0), a)
-            hess_m_lag[:T, :T] = hess_m
-            hess_m_lag[:T, T:] = np.dot(oneTL, a)
-            hess_m_lag[T:, :T] = hess_m_lag[:T, T:].T
-            hess_m_lag[T:, T:] = 0
-            if np.linalg.norm(grad_m_lag, ord=np.inf) < eps:
-                break
-            try:
-                delta_m = -rm[l] * np.linalg.solve(hess_m_lag, grad_m_lag)
-            except np.linalg.LinAlgError:
-                continue
-            m0[:, l] = m[:, l]
-            rate0[:] = rate
-            predict = np.inner(grad_m_lag, delta_m) + 0.5 * np.dot(delta_m, np.dot(hess_m_lag, delta_m))
-            # print('predicted m[%d] inc = %.10f' % (l, predict))
-            m[:, l] = m[:, l] + delta_m[:T]
-            lam_m += delta_m[T:]
+            if constraint:
+                lam_m0[:] = lam_m
+                grad_m_lag[:T] = grad_m + oneT * np.sum(lam_m * a[l, :])
+                grad_m_lag[T:] = np.dot(a.T, np.dot(m.T, oneT))
+                hess_m_lag[:T, :T] = hess_m
+                hess_m_lag[:T, T:] = np.outer(oneT, a[l, :])
+                hess_m_lag[T:, :T] = hess_m_lag[:T, T:].T
+                hess_m_lag[T:, T:] = 0
+                if np.linalg.norm(grad_m_lag, ord=np.inf) < eps:
+                    break
+                try:
+                    delta_m = -rm[l] * np.linalg.solve(hess_m_lag, grad_m_lag)
+                except np.linalg.LinAlgError:
+                    continue
+                m0[:, l] = m[:, l]
+                rate0[:] = rate
+                predict = np.inner(grad_m_lag, delta_m) + 0.5 * np.dot(delta_m, np.dot(hess_m_lag, delta_m))
+                # print('predicted m[%d] inc = %.10f' % (l, predict))
+                m[:, l] = m[:, l] + delta_m[:T]
+                lam_m += delta_m[T:]
+            else:
+                if np.linalg.norm(grad_m, ord=np.inf) < eps:
+                    break
+                try:
+                    delta_m = -rm[l] * np.linalg.solve(hess_m, grad_m)
+                except np.linalg.LinAlgError:
+                    continue
+                m0[:, l] = m[:, l]
+                rate0[:] = rate
+                predict = np.inner(grad_m, delta_m) + 0.5 * np.dot(delta_m, np.dot(hess_m, delta_m))
+                m[:, l] = m[:, l] + delta_m
             updaterate(range(T), range(N))
             lb = lowerbound(y, b, a, mu, omega, m, V, Y=Y, rate=rate)
             if np.isnan(lb) or lb < lbound[it - 1]:
@@ -266,8 +294,8 @@ def variational(y, mu, sigma, p, omega=None,
                 lam_m[:] = lam_m0
             elif lb - lbound[it - 1] > thld * predict:
                 rm[l] *= inc
-                if rm[l] > 1:
-                    rm[l] = 1.0
+                # if rm[l] > 1:
+                #     rm[l] = 1.0
 
         # posterior covariance
         for l in range(L):
@@ -288,12 +316,12 @@ def variational(y, mu, sigma, p, omega=None,
                 V[l, t, not_t] = V[l, not_t, t] = V[l, t, t] * V[l, t, not_t] / old_vtt
                 # update k_tt
                 K[l, t, t] = k_ + 1 / V[l, t, t]
-                lb = lowerbound(y, b, a, mu, omega, m, V, Y=Y, rate=rate)
-                if np.isnan(lb) or lb < lbound[it - 1]:
-                    # print('V[{}] decreased L.'.format(l))
-                    V[l, :, :] = Vl0
-                    K[l, t, t] = k_ + 1 / V[l, t, t]
-                    rate[t, :] = rate0[t, :]
+                # lb = lowerbound(y, b, a, mu, omega, m, V, Y=Y, rate=rate)
+                # if np.isnan(lb) or lb < lbound[it - 1]:
+                #     print('V[{}] decreased L.'.format(l))
+                    # V[l, :, :] = Vl0
+                    # K[l, t, t] = k_ + 1 / V[l, t, t]
+                    # rate[t, :] = rate0[t, :]
 
         # update lower bound
         lbound[it] = lowerbound(y, b, a, mu, omega, m, V, Y=Y, rate=rate)
@@ -309,7 +337,7 @@ def variational(y, mu, sigma, p, omega=None,
             convergent = True
 
         if verbose:
-            print('Iteration[%d]: L = %.5f, inc = %.10f' %
+            print('\nIteration[%d]: L = %.5f, inc = %.10f' %
                   (it + 1, lbound[it], lbound[it] - lbound[it - 1]))
             print('delta alpha = %.10f' % del_a)
             print('delta beta = %.10f' % del_b)
@@ -328,7 +356,7 @@ def variational(y, mu, sigma, p, omega=None,
 
     stop = time.time()
 
-    return m, V, b, a, lbound[:it], stop - start
+    return m, V, b, a, lbound[:it], stop - start, convergent
 
 
 def history(y, p, intercept):
