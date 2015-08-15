@@ -16,6 +16,7 @@ np.random.seed(0)
 
 # simulate latent processes
 x, ticks = simulation.latents(L, T, std, l)
+x -= 3
 # x[:100] +=1
 # mean = np.ones(x.shape)
 # x += mean
@@ -24,7 +25,7 @@ x, ticks = simulation.latents(L, T, std, l)
 a = np.ones((L, N))  # (L, N)
 a /= np.linalg.norm(a)
 b = 0 * np.ones((1 + p * N, N))  # (1 + p*N, N)
-b[0, :] = -2
+b[0, :] = 0
 y, Y = simulation.spikes(x, a, b)
 
 # plot spikes
@@ -58,7 +59,7 @@ m, V, b1, a1, lbound, elapsed, convergent = variational(y, mu, sigma, p,
                                                         m0=mu,
                                                         V0=sigma,
                                                         intercept=intercept,
-                                                        maxiter=200, inneriter=5, tol=1e-5,
+                                                        maxiter=200, inneriter=5, tol=1e-4,
                                                         fixed=True, constraint=False,
                                                         verbose=True)
 
@@ -73,13 +74,13 @@ with open('output/[%d] L=%d N=%d.txt' % (num, L, N), 'w+') as logging:
     print('Lower bounds:\n{}'.format(lbound), file=logging)
     print('Posterior mean:\n{}'.format(m), file=logging)
     print('Posterior covariance:\n{}'.format(V), file=logging)
-    print('beta: {}'.format(np.linalg.norm(b1 - b)), file=logging)
+    # print('beta: {}'.format(np.linalg.norm(b1 - b)), file=logging)
     print('alpha: {}'.format(np.linalg.norm(a1 - a)), file=logging)
-    print('true likelihood: {}'.format(likelihood(y, x, a, b, intercept=intercept)), file=logging)
-    print('estimated likelihood: {}'.format(likelihood(y, m, a1, b1, intercept=intercept)), file=logging)
-    print('constant rate likelihood: {}'.format(np.sum(y * np.log(y.mean(axis=0)) - y.mean(axis=0))),
-          file=logging)
-    print('saturated likelihood: {}'.format(-y.sum()), file=logging)
+    # print('true likelihood: {}'.format(likelihood(y, x, a, b, intercept=intercept)), file=logging)
+    # print('estimated likelihood: {}'.format(likelihood(y, m, a1, b1, intercept=intercept)), file=logging)
+    # print('constant rate likelihood: {}'.format(np.sum(y * np.log(y.mean(axis=0)) - y.mean(axis=0))),
+    #       file=logging)
+    # print('saturated likelihood: {}'.format(-y.sum()), file=logging)
 
 plt.figure()
 frm = 1

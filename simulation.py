@@ -1,6 +1,5 @@
-from __future__ import division
 import numpy as np
-from numpy import pi, exp, sqrt, log2, dot
+from numpy import pi, exp, sqrt, log2
 import scipy.stats as stats
 
 

@@ -2,6 +2,7 @@ import itertools
 import warnings
 import time
 import numpy as np
+from util import history
 
 
 def saferate(t, n, Y, m, V, b, a):
@@ -196,8 +197,8 @@ def variational(y, mu, sigma, p, omega=None,
                 rate[:, n] = rate0[:, n]
             elif lb - lbound[it - 1] > thld * predict:
                 rb[n] *= inc
-                # if rb[n] > 1:
-                #     rb[n] = 1.0
+                if rb[n] > 1:
+                    rb[n] = 1.0
             # print('stepsize: {}'.format(rb))
             # print('predicted inc: {}'.format(predict))
             # print('actual inc: {}'.format(lb - lbound[it - 1]))
@@ -247,8 +248,8 @@ def variational(y, mu, sigma, p, omega=None,
                 lam_a = lam_a0
             elif lb - lbound[it - 1] > thld * predict:
                 ra[n] *= inc
-                # if ra[n] > 1:
-                #     ra[n] = 1.0
+                if ra[n] > 1:
+                    ra[n] = 1.0
 
         # posterior mean
         for l in range(L):
@@ -294,8 +295,8 @@ def variational(y, mu, sigma, p, omega=None,
                 lam_m[:] = lam_m0
             elif lb - lbound[it - 1] > thld * predict:
                 rm[l] *= inc
-                # if rm[l] > 1:
-                #     rm[l] = 1.0
+                if rm[l] > 1:
+                    rm[l] = 1.0
 
         # posterior covariance
         for l in range(L):
@@ -357,18 +358,6 @@ def variational(y, mu, sigma, p, omega=None,
     stop = time.time()
 
     return m, V, b, a, lbound[:it], stop - start, convergent
-
-
-def history(y, p, intercept):
-    T, N = y.shape
-    Y = np.zeros((T, 1 + p * N), dtype=float)
-    Y[:, 0] = 1
-    for t in range(T):
-        if t - p >= 0:
-            Y[t, 1:] = y[t - p:t, :].flatten()  # vectorized by row
-        else:
-            Y[t, 1 + (p - t) * N:] = y[:t, :].flatten()
-    return Y if intercept else Y[:, 1:]
 
 
 def likelihood(y, x, a, b, intercept=True):
