@@ -84,6 +84,44 @@ def spikes(x, a, b, y0=None, seed=None):
 
     T, L = x.shape
     _, N = a.shape
+    pN, _ = b.shape
+    p = pN // N
+
+    y = np.empty((T, N), dtype=float)
+    Y = np.zeros((T, pN), dtype=float)
+    if y0 is not None:
+        for t in range(p):
+            Y[t, :(p-t)*N] = y0[t:, :].flatten()
+
+    for t in range(T):
+        rate = np.exp(np.dot(Y[t, :], b) + np.dot(x[t, :], a))
+        # y[:, t] = np.random.poisson(lambda_t)
+        # truncate y to 1 if y > 1
+        # it's equivalent to Bernoulli P(1) = (1 - e^-(lam_t))
+        y[t, :] = stats.bernoulli.rvs(1.0 - exp(-rate))
+        if t + 1 < T:
+            Y[t + 1, :] = np.roll(Y[t, :], -N)
+            Y[t + 1, (p - 1) * N:] = y[t, :]
+
+    return y, Y
+
+
+def spikes2(x, a, b, y0=None, seed=None):
+    """
+    Simulate spike trains driven by latent processes
+    :param x: (T, L), latent processes
+    :param a: (L, N), coefficients of latent
+    :param b: (1 + p*N, N), coefficients of p-step history
+    :param y0: (p, N), prehistory
+    :param seed: random number seed
+    :return: (T, N), spike trains
+    """
+
+    if seed is not None:
+        np.random.seed(seed)
+
+    T, L = x.shape
+    _, N = a.shape
     rb, _ = b.shape
     p = (rb - 1)/N
 
@@ -105,3 +143,4 @@ def spikes(x, a, b, y0=None, seed=None):
             Y[t + 1, 1 + (p - 1) * N:] = y[t, :]
 
     return y, Y
+

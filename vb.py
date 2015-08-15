@@ -158,8 +158,6 @@ def variational(y, mu, sigma, p, omega=None,
     thld = 0.75
 
     # gradient and hessian
-    grad_b = np.zeros(b.shape[0])
-    hess_b = np.zeros((grad_b.size, grad_b.size))
     grad_a = np.zeros(a.shape[0])
     hess_a = np.zeros((grad_a.size, grad_a.size))
     grad_a_lag = np.zeros(grad_a.size + 1)
@@ -176,11 +174,8 @@ def variational(y, mu, sigma, p, omega=None,
         for n in range(N):
             if fixed:
                 break;
-            grad_b.fill(0)
-            hess_b.fill(0)
-            for t in range(T):
-                grad_b += (y[t, n] - rate[t, n]) * Y[t, :]
-                hess_b -= rate[t, n] * np.outer(Y[t, :], Y[t, :])
+            grad_b = np.dot(Y.T, y[:, n] - rate[:, n])
+            hess_b = np.dot(Y.T, (Y.T * -rate[:, n]).T)
             if np.linalg.norm(grad_b, ord=np.inf) < eps:
                 break
             delta_b = -rb[n] * np.linalg.solve(hess_b, grad_b)
@@ -212,15 +207,10 @@ def variational(y, mu, sigma, p, omega=None,
             lam_a0 = lam_a
             for t in range(T):
                 Vt = np.diag(V[:, t, t])
-                w = m[t, :] + np.dot(Vt, a[:, n])
+                w = m[t, :] + V[:, t, t] * a[:, n]
                 grad_a += y[t, n] * m[t, :] - rate[t, n] * w
                 hess_a -= rate[t, n] * (np.outer(w, w) + Vt)
             # lagrange multiplier
-            # grad_a_lag[:L] = grad_a + 2 * lam_a * a[:, n]
-            # grad_a_lag[L:] = np.inner(a[:, n], a[:, n]) - 1
-            # hess_a_lag[:L, :L] = hess_a + 2 * lam_a * eyeL
-            # hess_a_lag[:L, L:] = hess_a_lag[L:, :L] = 2 * a[:, n]
-            # hess_a_lag[L:, L:] = 0
             grad_a_lag[:L] = grad_a + 2 * lam_a * a[:, n]
             grad_a_lag[L:] = np.linalg.norm(a, ord='fro') ** 2 - 1
             hess_a_lag[:L, :L] = hess_a + 2 * lam_a * eyeL

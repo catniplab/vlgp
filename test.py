@@ -1,6 +1,6 @@
-import itertools
 import os.path
 import matplotlib.pyplot as plt
+import scipy as sp
 from vb import *
 import simulation
 
@@ -11,22 +11,19 @@ std = 5
 p = 1
 
 L = 1
-N = 10
+N = 5
 np.random.seed(0)
 
 # simulate latent processes
 x, ticks = simulation.latents(L, T, std, l)
-x -= 3
-# x[:100] +=1
-# mean = np.ones(x.shape)
-# x += mean
+x -= 5
+# x = 5 * sp.special.expit(np.arange(-100, 100)).reshape((T, L)) - 10
 
 # simulate spike trains
 a = np.ones((L, N))  # (L, N)
 a /= np.linalg.norm(a)
-b = 0 * np.ones((1 + p * N, N))  # (1 + p*N, N)
-b[0, :] = 0
-y, Y = simulation.spikes(x, a, b)
+b = 0 * np.ones((p * N, N))  # (1 + p*N, N)
+y, Y = simulation.spikes2(x, a, b)
 
 # plot spikes
 plt.figure()
@@ -50,17 +47,19 @@ for l in range(L):
 # print 'Prior mean\n', mu
 # print 'Prior covariance', sigma
 # b[0, :] = -10
-intercept = True
+intercept = False
+a0 = np.abs(np.random.randn(*a.shape))
+a0 /= np.linalg.norm(a0)
 m, V, b1, a1, lbound, elapsed, convergent = variational(y, mu, sigma, p,
                                                         # a0=a + 1,
                                                         # b0=None,
-                                                        a0=a,
-                                                        b0=b,
+                                                        a0=a0,
+                                                        b0=None,
                                                         m0=mu,
                                                         V0=sigma,
                                                         intercept=intercept,
                                                         maxiter=200, inneriter=5, tol=1e-4,
-                                                        fixed=True, constraint=False,
+                                                        fixed=False, constraint=False,
                                                         verbose=True)
 
 it = len(lbound)
@@ -106,12 +105,22 @@ for l in range(L):
     plt.title(title)
     plt.savefig('output/{}.png'.format(title))
 
+plt.figure()
+title = '[%d] alpha' % num
+plt.title(title)
+# plt.legend()
 for l in range(L):
-    plt.figure()
+    plt.subplot(L, 1, l + 1)
     plt.bar(np.arange(N), a[l, :], width=0.25, color='blue', label='true')
     plt.bar(np.arange(N) + 0.25, a1[l, :], width=0.25, color='red', label='estimate')
-    plt.legend()
-    title = '[%d] alpha[%d]' % (num, l)
-    plt.title(title)
+
+plt.figure()
+title = '[%d] beta' % num
+plt.title(title)
+# plt.legend()
+for n in range(N):
+    plt.subplot(N, 1, n + 1)
+    plt.bar(np.arange(b.shape[0]), b[:, n], width=0.25, color='blue', label='true')
+    plt.bar(np.arange(b.shape[0]) + 0.25, b1[:, n], width=0.25, color='red', label='estimate')
 
 plt.show()
