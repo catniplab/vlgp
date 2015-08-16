@@ -158,9 +158,7 @@ def variational(y, mu, sigma, p, omega=None,
     thld = 0.75
 
     # gradient and hessian
-    grad_a = np.zeros(a.shape[0])
-    hess_a = np.zeros((grad_a.size, grad_a.size))
-    grad_a_lag = np.zeros(grad_a.size + 1)
+    grad_a_lag = np.zeros(L + 1)
     hess_a_lag = np.zeros((grad_a_lag.size, grad_a_lag.size))
     lam_a = lam_a0 = 0
     grad_m_lag = np.zeros(T + N)
@@ -202,14 +200,11 @@ def variational(y, mu, sigma, p, omega=None,
         for n in range(N):
             if fixed:
                 break;
-            grad_a.fill(0)
-            hess_a.fill(0)
             lam_a0 = lam_a
-            for t in range(T):
-                Vt = np.diag(V[:, t, t])
-                w = m[t, :] + V[:, t, t] * a[:, n]
-                grad_a += y[t, n] * m[t, :] - rate[t, n] * w
-                hess_a -= rate[t, n] * (np.outer(w, w) + Vt)
+            Vt = V.diagonal(axis1=1, axis2=2)
+            grad_a = np.dot(m.T, y[:, n] - rate[:, n]) - np.dot(Vt * a[:, n], rate[:, n])
+            hess_a = -np.dot(m.T + Vt * a[:, n], (rate[:, n].T * (m.T + Vt * a[:, n])).T) \
+                     - np.diag((rate[:, n].T * Vt).sum(axis=1))
             # lagrange multiplier
             grad_a_lag[:L] = grad_a + 2 * lam_a * a[:, n]
             grad_a_lag[L:] = np.linalg.norm(a, ord='fro') ** 2 - 1
