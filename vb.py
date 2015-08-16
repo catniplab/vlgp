@@ -160,7 +160,7 @@ def variational(y, mu, sigma, p, omega=None,
     # gradient and hessian
     grad_a_lag = np.zeros(L + 1)
     hess_a_lag = np.zeros((grad_a_lag.size, grad_a_lag.size))
-    lam_a = lam_a0 = 0
+    lam_a = 0
     grad_m_lag = np.zeros(T + N)
     hess_m_lag = np.zeros((grad_m_lag.size, grad_m_lag.size))
     lam_m = np.zeros(N)

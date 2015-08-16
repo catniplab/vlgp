@@ -11,7 +11,7 @@ std = 5
 p = 1
 
 L = 1
-N = 5
+N = 50
 np.random.seed(0)
 
 # simulate latent processes
