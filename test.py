@@ -5,34 +5,25 @@ from vb import *
 import simulation
 
 dt = 1.0
-T = 200
+T = 500
 l = 1e-4
 std = 5
 p = 1
 
 L = 1
-N = 50
+N = 5
 np.random.seed(0)
 
 # simulate latent processes
 x, ticks = simulation.latents(L, T, std, l)
-x -= 5
-# x = 5 * sp.special.expit(np.arange(-100, 100)).reshape((T, L)) - 10
+x[:250, :] = -5
+x[250:, :] = 0
 
 # simulate spike trains
-a = np.ones((L, N))  # (L, N)
+a = np.ones((L, N))
 a /= np.linalg.norm(a)
-b = 0 * np.ones((p * N, N))  # (1 + p*N, N)
+b = -1 * np.ones((p * N, N))
 y, Y = simulation.spikes2(x, a, b)
-
-# plot spikes
-plt.figure()
-plt.ylim(0, N)
-for n in range(N):
-    plt.vlines(np.arange(T)[y[:, n] > 0], n, n + 1, color='black')
-plt.title('Spike trains')
-plt.yticks([])
-plt.xlim([0, T])
 
 # mu = np.random.randn(T, L) + 1
 # mu = x
@@ -43,23 +34,22 @@ for i, j in itertools.product(range(T), range(T)):
 sigma = np.zeros((L, T, T))
 for l in range(L):
     sigma[l, :, :] = cov + np.identity(T) * 1e-7
+    # sigma[l, :, :] = 0.2 * np.identity(T)
 
-# print 'Prior mean\n', mu
-# print 'Prior covariance', sigma
-# b[0, :] = -10
 intercept = False
 a0 = np.abs(np.random.randn(*a.shape))
 a0 /= np.linalg.norm(a0)
 m, V, b1, a1, lbound, elapsed, convergent = variational(y, mu, sigma, p,
-                                                        # a0=a + 1,
+                                                        a0=a,
+                                                        b0=b,
+                                                        # a0=a0,
                                                         # b0=None,
-                                                        a0=a0,
-                                                        b0=None,
                                                         m0=mu,
                                                         V0=sigma,
                                                         intercept=intercept,
-                                                        maxiter=200, inneriter=5, tol=1e-4,
-                                                        fixed=False, constraint=False,
+                                                        fixa=True, fixb=True, fixm=False, fixV=False,
+                                                        constraint=False,
+                                                        maxiter=200, inneriter=5, tol=1e-6,
                                                         verbose=True)
 
 it = len(lbound)
@@ -73,7 +63,7 @@ with open('output/[%d] L=%d N=%d.txt' % (num, L, N), 'w+') as logging:
     print('Lower bounds:\n{}'.format(lbound), file=logging)
     print('Posterior mean:\n{}'.format(m), file=logging)
     print('Posterior covariance:\n{}'.format(V), file=logging)
-    # print('beta: {}'.format(np.linalg.norm(b1 - b)), file=logging)
+    print('beta: {}'.format(np.linalg.norm(b1 - b)), file=logging)
     print('alpha: {}'.format(np.linalg.norm(a1 - a)), file=logging)
     # print('true likelihood: {}'.format(likelihood(y, x, a, b, intercept=intercept)), file=logging)
     # print('estimated likelihood: {}'.format(likelihood(y, m, a1, b1, intercept=intercept)), file=logging)
@@ -98,8 +88,9 @@ for l in range(L):
     for n in range(ns):
         plt.plot(s[:, n] + m[:, l], color='0.8')
     plt.plot(x[:, l], label='latent', color='blue')
-    plt.plot(-x[:, l], label='negative latent', color='green')
+    # plt.plot(-x[:, l], label='negative latent', color='green')
     plt.plot(m[:, l], label='posterior', color='red')
+    # plt.ylim([-15, 0])
     plt.legend()
     title = '[%d] Latent %d N=%d' % (num, l + 1, N)
     plt.title(title)
@@ -113,6 +104,8 @@ for l in range(L):
     plt.subplot(L, 1, l + 1)
     plt.bar(np.arange(N), a[l, :], width=0.25, color='blue', label='true')
     plt.bar(np.arange(N) + 0.25, a1[l, :], width=0.25, color='red', label='estimate')
+plt.savefig('output/{}.png'.format(title))
+
 
 plt.figure()
 title = '[%d] beta' % num
@@ -122,5 +115,15 @@ for n in range(N):
     plt.subplot(N, 1, n + 1)
     plt.bar(np.arange(b.shape[0]), b[:, n], width=0.25, color='blue', label='true')
     plt.bar(np.arange(b.shape[0]) + 0.25, b1[:, n], width=0.25, color='red', label='estimate')
+plt.savefig('output/{}.png'.format(title))
 
-plt.show()
+# plot spikes
+plt.figure()
+plt.ylim(0, N)
+for n in range(N):
+    plt.vlines(np.arange(T)[y[:, n] > 0], n, n + 1, color='black')
+title = '[%d] Spike trains' % num
+plt.title(title)
+plt.yticks([])
+plt.xlim([0, T])
+plt.savefig('output/{}.png'.format(title))

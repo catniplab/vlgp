@@ -41,7 +41,9 @@ def lowerbound(y, b, a, mu, omega, m, V, complete=False, Y=None, rate=None):
 
 def variational(y, mu, sigma, p, omega=None,
                 a0=None, b0=None, m0=None, V0=None, K0=None, intercept=True,
-                maxiter=5, inneriter=5, tol=1e-6, fixed=False, constraint=True,
+                fixa=False, fixb=False, fixm=False, fixV=False,
+                constraint=True,
+                maxiter=5, inneriter=5, tol=1e-6,
                 verbose=False):
     """
     :param y: (T, N), spike trains
@@ -170,7 +172,7 @@ def variational(y, mu, sigma, p, omega=None,
     convergent = False
     while not convergent and it < maxiter:
         for n in range(N):
-            if fixed:
+            if fixb:
                 break;
             grad_b = np.dot(Y.T, y[:, n] - rate[:, n])
             hess_b = np.dot(Y.T, (Y.T * -rate[:, n]).T)
@@ -198,7 +200,7 @@ def variational(y, mu, sigma, p, omega=None,
             # print('delta: {}'.format(delta_b))
 
         for n in range(N):
-            if fixed:
+            if fixa:
                 break;
             lam_a0 = lam_a
             Vt = V.diagonal(axis1=1, axis2=2)
@@ -238,6 +240,8 @@ def variational(y, mu, sigma, p, omega=None,
 
         # posterior mean
         for l in range(L):
+            if fixm:
+                break
             grad_m = np.dot(y - rate, a[l, :]) - np.dot(omega[l, :, :], (m[:, l] - mu[:, l]))
             hess_m = -np.diag(np.dot(rate, a[l, :] * a[l, :])) - omega[l, :, :]
             if constraint:
@@ -285,6 +289,8 @@ def variational(y, mu, sigma, p, omega=None,
 
         # posterior covariance
         for l in range(L):
+            if fixV:
+                break
             for t in range(T):
                 rate0[t, :] = rate[t, :]
                 Vl0[:] = V[l, :, :]
