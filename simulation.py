@@ -106,12 +106,12 @@ def spikes(x, a, b, y0=None, seed=None):
     return y, Y
 
 
-def spikes2(x, a, b, y0=None, seed=None):
+def spikes2(x, a, b, c, y0=None, seed=None):
     """
     Simulate spike trains driven by latent processes
     :param x: (T, L), latent processes
     :param a: (L, N), coefficients of latent
-    :param b: (1 + p*N, N), coefficients of p-step history
+    :param b: (p*N, N), coefficients of p-step history
     :param y0: (p, N), prehistory
     :param seed: random number seed
     :return: (T, N), spike trains
@@ -122,25 +122,26 @@ def spikes2(x, a, b, y0=None, seed=None):
 
     T, L = x.shape
     _, N = a.shape
-    rb, _ = b.shape
-    p = (rb - 1)/N
+    pN, _ = b.shape
+    p = pN // N
 
-    y = np.empty((T, N), dtype=float)
-    Y = np.zeros((T, 1 + p*N), dtype=float)
-    Y[:, 0] = 1
+    y = np.zeros((T, N), dtype=float)
+    rate = y.copy()
+    Y = np.zeros((T, p*N), dtype=float)
     if y0 is not None:
         for t in range(p):
-            Y[t, 1:(p-t)*N] = y0[t:, :].flatten()
+            Y[t, :(p-t)*N] = y0[t:, :].flatten()
 
     for t in range(T):
-        rate = np.exp(np.dot(Y[t, :], b) + np.dot(x[t, :], a))
+        rate[t, :] = np.exp(np.dot(Y[t, :], b) + np.dot(x[t, :], a) + np.diag(np.dot(c.T, a)))
         # y[:, t] = np.random.poisson(lambda_t)
         # truncate y to 1 if y > 1
         # it's equivalent to Bernoulli P(1) = (1 - e^-(lam_t))
-        y[t, :] = stats.bernoulli.rvs(1.0 - exp(-rate))
+        # y[t, :] = stats.bernoulli.rvs(1.0 - exp(-rate[t, :]))
+        y[t, :] = stats.poisson.rvs(rate[t, :])
         if t + 1 < T:
-            Y[t + 1, 1:] = np.roll(Y[t, 1:], -N)
-            Y[t + 1, 1 + (p - 1) * N:] = y[t, :]
+            Y[t + 1, :] = np.roll(Y[t, :], -N)
+            Y[t + 1, (p - 1) * N:] = y[t, :]
 
-    return y, Y
+    return y, Y, rate
 
