@@ -133,12 +133,12 @@ def spikes2(x, a, b, c, y0=None, seed=None):
             Y[t, :(p-t)*N] = y0[t:, :].flatten()
 
     for t in range(T):
-        rate[t, :] = np.exp(np.dot(Y[t, :], b) + np.dot(x[t, :], a) + np.diag(np.dot(c.T, a)))
+        rate[t, :] = np.exp(np.dot(Y[t, :], b) + np.dot(x[t, :], a) + c)
         # y[:, t] = np.random.poisson(lambda_t)
         # truncate y to 1 if y > 1
         # it's equivalent to Bernoulli P(1) = (1 - e^-(lam_t))
         # y[t, :] = stats.bernoulli.rvs(1.0 - exp(-rate[t, :]))
-        y[t, :] = stats.poisson.rvs(rate[t, :])
+        y[t, :] = 1 * (stats.poisson.rvs(rate[t, :]) > 0)
         if t + 1 < T:
             Y[t + 1, :] = np.roll(Y[t, :], -N)
             Y[t + 1, (p - 1) * N:] = y[t, :]

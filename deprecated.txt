@@ -520,3 +520,26 @@ def variational2(y, mu, sigma, p, omega=None,
     stop = time.time()
 
     return m, V, b, a, bias, lbound[:it], stop - start
+
+
+# constraint on m
+                if constraint:
+                    lam_m0[l, :] = lam_m[l, :]
+                    grad_m_lag[:T] = grad_m + oneT * np.sum(lam_m * a[l, :])
+                    grad_m_lag[T:] = np.dot(a.T, np.dot(m.T, oneT))
+                    hess_m_lag[:T, :T] = hess_m
+                    hess_m_lag[:T, T:] = np.outer(oneT, a[l, :])
+                    hess_m_lag[T:, :T] = hess_m_lag[:T, T:].T
+                    hess_m_lag[T:, T:] = 0
+                    if np.linalg.norm(grad_m_lag, ord=np.inf) < eps:
+                        break
+                    try:
+                        delta_m = -rm[l] * np.linalg.solve(hess_m_lag, grad_m_lag)
+                    except np.linalg.LinAlgError:
+                        continue
+                    m0[:, l] = m[:, l]
+                    rate0[:] = rate
+                    predict = np.inner(grad_m_lag, delta_m) + 0.5 * np.dot(delta_m, np.dot(hess_m_lag, delta_m))
+                    m[:, l] = m[:, l] + delta_m[:T]
+                    lam_m[l, :] += delta_m[T:]
+                else:
