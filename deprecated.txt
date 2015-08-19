@@ -543,3 +543,67 @@ def variational2(y, mu, sigma, p, omega=None,
                     m[:, l] = m[:, l] + delta_m[:T]
                     lam_m[l, :] += delta_m[T:]
                 else:
+
+
+        # if not fixc:
+        #     grad_c = np.sum(y - rate, axis=0)
+        #     hess_c = -np.diag(np.sum(rate, axis=0))
+        #     if np.linalg.norm(grad_c, ord=np.inf) < eps:
+        #         break
+        #     try:
+        #         delta_c = -rc * np.linalg.solve(hess_c, grad_c)
+        #     except np.linalg.LinAlgError:
+        #         continue
+        #     c0[:] = c
+        #     rate0[:] = rate[:]
+        #     predict = np.inner(grad_c, delta_c) + 0.5 * np.dot(delta_c, np.dot(hess_c, delta_c))
+        #     c[:] += delta_c
+        #     updaterate(range(T), range(N))
+        #     lb = lowerbound(y, b, a, c, mu, omega, m, V, Y=Y, rate=rate)
+        #     if np.isnan(lb) or lb - lbound[it - 1] < 0:
+        #         rc *= dec
+        #         rc += eps
+        #         c[:] = c0
+        #         rate[:] = rate0[:]
+        #     elif lb - lbound[it - 1] > thld * predict:
+        #         rc *= inc
+        #         if rc > 1:
+        #             rc = 1.0
+
+
+                      elif constrain_a == 2:
+                    grad_a_lag[:L] = grad_a + 2 * a[:, n] * lam_a[:, n]
+                    grad_a_lag[L:] = np.diag(np.dot(a, a.T)) - anorm ** 2
+                    hess_a_lag[:L, :L] = hess_a + 2 * np.diag(lam_a[:, n])
+                    hess_a_lag[:L, L:] = 2 * np.diag(a[:, n] * lam_a[:, n])
+                    hess_a_lag[L:, :L] = hess_a_lag[:L, L:].T
+                    hess_a_lag[L:, L:] = 0
+                    if np.linalg.cond(hess_a_lag) > 1 / np.finfo(float).eps:
+                        hess_a_lag += eps * np.eye(L + 1)
+                    # If gradient is small enough, stop.
+                    if np.linalg.norm(grad_a_lag, ord=np.inf) < eps:
+                        break
+                    try:
+                        delta_a_lag = -ra[n] * np.linalg.solve(hess_a_lag, grad_a_lag)
+                    except np.linalg.LinAlgError as e:
+                        print('a', e)
+                        continue
+                    lam_a0[:, n] = lam_a[:, n]
+                    a0[:, n] = a[:, n]
+                    rate0[:, n] = rate[:, n]
+                    predict = np.inner(grad_a_lag, delta_a_lag) \
+                              + 0.5 * np.dot(delta_a_lag, np.dot(hess_a_lag, delta_a_lag))
+                    a[:, n] += delta_a_lag[:L]
+                    lam_a[:, n] += delta_a_lag[L:]
+                    updaterate(range(T), [n])
+                    lb = lowerbound(y, b, a, mu, omega, m, V, Y=Y, rate=rate)
+                    if np.isnan(lb) or lb - lbound[it - 1] < 0:
+                        ra[n] *= dec
+                        ra[n] += eps
+                        a[:, n] = a0[:, n]
+                        rate[:, n] = rate0[:, n]
+                        lam_a[:, n] = lam_a0[:, n]
+                    elif lb - lbound[it - 1] > thld * predict:
+                        ra[n] *= inc
+                        if ra[n] > 1:
+                            ra[n] = 1.0
