@@ -6,7 +6,6 @@ from datetime import datetime
 from vb import *
 import simulation
 
-dt = 1.0
 T = 200
 l = 1e-4
 std = 2
@@ -16,17 +15,18 @@ L = 2
 N = 50
 np.random.seed(0)
 
-high = np.log(40/T)
-low = np.log(0.1/T)
+high = np.log(25/T)
+low = np.log(5/T)
 
 # simulate latent processes
 x, ticks = simulation.latents(L, T, std, l)
 x[:T//2, 0] = high
 x[T//2:, 0] = low
-x[:, 1] = np.linspace(0, high, T)
+x[:, 1] = 2 * np.sin(np.linspace(0, 2 * np.pi * 5, T))
 
 # simulate spike trains
-a = np.random.choice([-1, 1], size=(L, N))
+a = np.empty((L, N), dtype=float)
+a[:] = np.random.choice([-1, 1], size=(L, N))
 a[1, :] = 1
 # a /= np.linalg.norm(a)
 b = np.empty((1, N))
@@ -35,28 +35,40 @@ y, Y, rate = simulation.spikes(x, a, b, intercept=True)
 
 # mu = np.random.randn(T, L) + 1
 # mu = x
-mu = 0 * np.ones((T, L))
+mu = x
+
+sigma = np.zeros((L, T, T))
+
 cov = np.empty((T, T))
 for i, j in itertools.product(range(T), range(T)):
     cov[i, j] = 10 * simulation.sqexp(i - j, 1e-2)
-sigma = np.zeros((L, T, T))
-for l in range(L):
-    sigma[l, :, :] = cov + np.identity(T) * 1e-7
-    # sigma[l, :, :] = 0.2 * np.identity(T)
+sigma[0, :, :] = cov + np.identity(T) * 1e-7
 
-a0 = np.random.randn(*a.shape)
+cov = np.empty((T, T))
+for i, j in itertools.product(range(T), range(T)):
+    cov[i, j] = 10 * simulation.sqexp(i - j, 1e-2)
+
+sigma[1, :, :] = cov + np.identity(T) * 1e-7
+
+
+a0 = a
 # a0 = np.ones(a.shape)
-a0 /= np.linalg.norm(a0) / np.sqrt(N)
-m, V, a1, b1, lbound, elapsed, convergent = variational(y, mu, sigma, 0,
-                                                        a0=a0,
-                                                        b0=None,
-                                                        m0=mu,
-                                                        V0=sigma,
-                                                        fixa=False, fixb=False, fixm=False, fixV=False,
-                                                        anorm=np.sqrt(N), intercept=True,
-                                                        constrain_m=True, aorder='l',
-                                                        maxiter=200, inneriter=5, tol=1e-4,
-                                                        verbose=True)
+# a0 /= np.linalg.norm(a0) / np.sqrt(N)
+
+control = {'maxiter': 50,
+           'inneriter': 5,
+           'tol': 1e-4,
+           'verbose': True}
+
+m, V, a1, b1, a0, b0, lbound, elapsed, convergent = variational(y, 0, mu, sigma,
+                                                                a0=a0,
+                                                                b0=None,
+                                                                m0=mu,
+                                                                V0=sigma,
+                                                                fixa=False, fixb=False, fixm=False, fixV=False,
+                                                                anorm=np.sqrt(N), intercept=True,
+                                                                constrain_m='', constrain_a='',
+                                                                control=control)
 
 it = len(lbound)
 dt = datetime.now().strftime('%Y-%m-%d %H-%M-%S')
@@ -72,6 +84,8 @@ log.create_dataset(name='true beta', data=b)
 log.create_dataset(name='true alpha', data=a)
 log.create_dataset(name='spike', data=y)
 log.create_dataset(name='latent', data=x)
+log.create_dataset(name='initial alpha', data=a0)
+log.create_dataset(name='initial beta', data=b0)
 log.create_dataset(name='posterior mean', data=m)
 log.create_dataset(name='posterior covariance', data=V)
 log.create_dataset(name='estimated alpha', data=a1)
@@ -97,7 +111,7 @@ with open('output/{}.txt'.format(dt), 'w+') as logging:
 
 pp = PdfPages('output/{}.pdf'.format(dt))
 
-fig, ax = plt.subplots(N, sharex=True)
+_, ax = plt.subplots(N, sharex=True)
 for n in range(N):
     ax[n].plot(rate[:, n])
     ax[n].axis('off')
@@ -138,7 +152,23 @@ for l in range(L):
     plt.title('Latent {}'.format(l + 1))
     plt.savefig(pp, format='pdf')
 
-fig, ax = plt.subplots(L, sharex=True)
+c = np.linalg.lstsq(m, x)[0]
+m2 = np.dot(m, c)
+ns = 500
+z = np.random.randn(ns, T, L)
+for l in range(L):
+    z[:, :, l] = np.dot(np.linalg.cholesky(V[l, :, :]), z[:, :, l].T).T + m[:, l]
+for l in range(L):
+    plt.figure()
+    for n in range(ns):
+        plt.plot(np.dot(z[n, :, :], c)[:, l], color='0.8')
+    plt.plot(x[:, l] - np.mean(x[:, l]), label='latent', color='blue')
+    plt.plot(m2[:, l], label='transformed posterior', color='red')
+    plt.legend()
+    plt.title('Latent (transformed posterior) {}'.format(l + 1))
+    plt.savefig(pp, format='pdf')
+
+_, ax = plt.subplots(L, sharex=True)
 if L == 1:
     ax = [ax]
 for l in range(L):
@@ -148,7 +178,7 @@ for l in range(L):
 plt.suptitle('alpha')
 plt.savefig(pp, format='pdf')
 
-fig, ax = plt.subplots(N, sharex=True)
+_, ax = plt.subplots(N, sharex=True)
 for n in range(N):
     ax[n].bar(np.arange(b.shape[0]), b[:, n], width=0.25, color='blue', label='true')
     ax[n].bar(np.arange(b.shape[0]) + 0.25, b1[:, n], width=0.25, color='red', label='estimate')
