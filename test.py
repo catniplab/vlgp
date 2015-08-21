@@ -5,6 +5,7 @@ import h5py
 from datetime import datetime
 from vb import *
 import simulation
+from sklearn.decomposition.factor_analysis import FactorAnalysis
 
 T = 200
 l = 1e-4
@@ -25,17 +26,27 @@ x[T//2:, 0] = low
 x[:, 1] = 2 * np.sin(np.linspace(0, 2 * np.pi * 5, T))
 
 # simulate spike trains
-a = np.empty((L, N), dtype=float)
-a[:] = np.random.choice([-1, 1], size=(L, N))
-a[1, :] = 1
-# a /= np.linalg.norm(a)
+# a = np.empty((L, N), dtype=float)
+a = np.random.rand(L, N)
+a /= np.linalg.norm(a) / np.sqrt(N)
+
 b = np.empty((1, N))
 b[0, :] = np.diag(np.dot(a.T, (a < 0) * -(high + low)))
 y, Y, rate = simulation.spikes(x, a, b, intercept=True)
 
-# mu = np.random.randn(T, L) + 1
-# mu = x
-mu = x
+
+fa = FactorAnalysis(n_components=L)
+m0 = fa.fit_transform(y)
+a0 = fa.components_
+m0 *= np.linalg.norm(a0) / np.sqrt(N)
+a0 /= np.linalg.norm(a0) / np.sqrt(N)
+
+plt.figure()
+for l in range(L):
+    plt.plot(m0[:, l])
+plt.show()
+
+mu = np.zeros_like(x)
 
 sigma = np.zeros((L, T, T))
 
@@ -51,19 +62,15 @@ for i, j in itertools.product(range(T), range(T)):
 sigma[1, :, :] = cov + np.identity(T) * 1e-7
 
 
-a0 = a
-# a0 = np.ones(a.shape)
-# a0 /= np.linalg.norm(a0) / np.sqrt(N)
-
 control = {'maxiter': 50,
-           'inneriter': 5,
-           'tol': 1e-4,
+           'fixed-point iteration': 3,
+           'tol': 1e-3,
            'verbose': True}
 
 m, V, a1, b1, a0, b0, lbound, elapsed, convergent = variational(y, 0, mu, sigma,
                                                                 a0=a0,
                                                                 b0=None,
-                                                                m0=mu,
+                                                                m0=m0,
                                                                 V0=sigma,
                                                                 fixa=False, fixb=False, fixm=False, fixV=False,
                                                                 anorm=np.sqrt(N), intercept=True,
@@ -187,3 +194,4 @@ plt.suptitle('beta')
 plt.savefig(pp, format='pdf')
 
 pp.close()
+

@@ -51,7 +51,7 @@ def lowerbound(y, b, a, mu, omega, m, V, complete=False, Y=None, rate=None):
     return lbound + 0.5 * np.sum(np.linalg.slogdet(omega)[1]) if complete else lbound
 
 default_control = {'maxiter': 200,
-                   'inneriter': 5,
+                   'fixed-point iteration': 3,
                    'tol': 1e-4,
                    'verbose': False}
 
@@ -85,7 +85,7 @@ def variational(y, p, mu, sigma, omega=None,
 
     # control
     maxiter = control['maxiter']
-    inneriter = control['inneriter']
+    fpinter = control['fixed-point iteration']
     tol = control['tol']
     verbose = control['verbose']
 
@@ -112,8 +112,8 @@ def variational(y, p, mu, sigma, omega=None,
     # read-only variables, protection from unexpected assignment
     y.setflags(write=0)
     mu.setflags(write=0)
-    sigma.setflags(write=0)
-    omega.setflags(write=0)
+    # sigma.setflags(write=0)
+    # omega.setflags(write=0)
 
     # construct history
     Y = history(y, p, intercept)
@@ -238,7 +238,8 @@ def variational(y, p, mu, sigma, omega=None,
                     lam_last_a[l] = lam_a[l]
                     last_a[l, :] = a[l, :]
                     last_rate[:] = rate[:]
-                    predict = np.inner(grad_a_lag, delta_a_lag) + 0.5 * np.dot(delta_a_lag, np.dot(hess_a_lag, delta_a_lag))
+                    predict = np.inner(grad_a_lag, delta_a_lag) \
+                              + 0.5 * np.dot(delta_a_lag, np.dot(hess_a_lag, delta_a_lag))
                     a[l, :] += delta_a_lag[:N]
                     lam_a[l] += delta_a_lag[N:]
                     updaterate(range(T), range(N))
@@ -263,8 +264,15 @@ def variational(y, p, mu, sigma, omega=None,
                         continue
                     last_a[l, :] = a[l, :]
                     last_rate[:] = rate[:]
-                    predict = np.inner(grad_a, delta_a) + 0.5 * np.dot(delta_a, np.dot(hess_a, delta_a))
                     a[l, :] += delta_a
+                    if np.linalg.norm(a[l, :]) > 0:
+                        predict = np.inner(grad_a, delta_a / np.linalg.norm(a[l, :]) * anorm) \
+                                  + 0.5 * np.dot(delta_a / np.linalg.norm(a[l, :]) * anorm,
+                                                 np.dot(hess_a, delta_a / np.linalg.norm(a[l, :]) * anorm))
+                        a[l, :] /= np.linalg.norm(a[l, :]) / anorm
+                    else:
+                        predict = np.inner(grad_a, delta_a) + 0.5 * np.dot(delta_a, np.dot(hess_a, delta_a))
+
                     updaterate(range(T), range(N))
                     lb = lowerbound(y, b, a, mu, omega, m, V, Y=Y, rate=rate)
                     if np.isnan(lb) or lb - lbound[it - 1] < 0:
@@ -276,8 +284,6 @@ def variational(y, p, mu, sigma, omega=None,
                         ra[l] *= inc
                         # if ra[l] > 1:
                         #     ra[l] = 1.0
-                    if np.linalg.norm(a[l, :]) > 0:
-                        a[l, :] /= np.linalg.norm(a[l, :]) / anorm
 
         # posterior mean
         if not fixm:
@@ -350,7 +356,7 @@ def variational(y, p, mu, sigma, omega=None,
                     k_ = K[l, t, t] - 1 / V[l, t, t]  # \tilde{k}_tt
                     old_vtt = V[l, t, t]
                     # fixed point iterations
-                    for _ in range(inneriter):
+                    for _ in range(fpinter):
                         V[l, t, t] = 1 / (omega[l, t, t] - k_ + np.sum(rate[t, :] * a[l, :] * a[l, :]))
                         updaterate([t], range(N))
                     # update V
@@ -363,10 +369,13 @@ def variational(y, p, mu, sigma, omega=None,
                     K[l, t, t] = k_ + 1 / V[l, t, t]
                     # lb = lowerbound(y, b, a, mu, omega, m, V, Y=Y, rate=rate)
                     # if np.isnan(lb) or lb < lbound[it - 1]:
-                    #     print('V[{}] decreased L.'.format(l))
-                        # V[l, :, :] = last_V
-                        # K[l, t, t] = k_ + 1 / V[l, t, t]
-                        # rate[t, :] = last_rate[t, :]
+                    #     # print('V[{}] decreased L.'.format(l))
+                    #     K[l, t, t] = k_ + 1 / V[l, t, t]
+                    #     V[l, :, :] = last_V
+                    #     rate[t, :] = last_rate[t, :]
+
+        for l in range(L):
+            sigma[l, :, :]
 
         # update lower bound
         lbound[it] = lowerbound(y, b, a, mu, omega, m, V, Y=Y, rate=rate)
