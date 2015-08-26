@@ -13,12 +13,12 @@ import numpy as np
 #             Y[t, (p - t) * N:] = y[:t, :].flatten()
 #     return Y
 
-def history(y, p, intercept=True):
-    T, N = y.shape
-    Y = np.ones((T, intercept + p * N), dtype=float)
+def history(spike, p, intercept=True):
+    T, N = spike.shape
+    regressor = np.ones((T, intercept + p * N), dtype=float)
     for t in range(T):
         if t - p >= 0:
-            Y[t, intercept:] = y[t - p:t, :].flatten()  # by row
+            regressor[t, intercept:] = spike[t - p:t, :].flatten()  # by row
         else:
-            Y[t, intercept + (p - t) * N:] = y[:t, :].flatten()
-    return Y
+            regressor[t, intercept + (p - t) * N:] = spike[:t, :].flatten()
+    return regressor
