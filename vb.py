@@ -2,6 +2,7 @@ import itertools
 import warnings
 import time
 import numpy as np
+from scipy import linalg
 from util import history
 
 
@@ -60,6 +61,7 @@ def variational(spike, p, prior_mean, prior_cov, prior_inv=None,
                 a0=None, b0=None, m0=None, V0=None, K0=None,
                 fixa=False, fixb=False, fixm=False, fixV=False, anorm=1.0, intercept=True,
                 constrain_m='lag', constrain_a='lag',
+                hyper=False,
                 control=default_control):
     """
     :param spike: (T, N), spike trains
@@ -104,7 +106,13 @@ def variational(spike, p, prior_mean, prior_cov, prior_inv=None,
     jayT = np.ones((T, T))
     oneTL = np.ones((T, L))
 
+    variance = np.ones(L)
+    scale = np.ones(L)
+
     # calculate inverse of prior covariance if not given
+
+    # TODO: chelosky decomposition
+
     if prior_inv is None:
         prior_inv = np.empty_like(prior_cov)
         for l in range(L):
@@ -196,7 +204,7 @@ def variational(spike, p, prior_mean, prior_cov, prior_inv=None,
                 if np.linalg.norm(grad_b, ord=np.inf) < eps:
                     break
                 try:
-                    delta_b = -rb[n] * np.linalg.solve(hess_b, grad_b)
+                    delta_b = -rb[n] * linalg.solve(hess_b, grad_b)
                 except np.linalg.LinAlgError as e:
                     print('beta', e)
                     continue
@@ -259,7 +267,7 @@ def variational(spike, p, prior_mean, prior_cov, prior_inv=None,
                     if np.linalg.norm(grad_a, ord=np.inf) < eps:
                         break
                     try:
-                        delta_a = -ra[l] * np.linalg.solve(hess_a, grad_a)
+                        delta_a = -ra[l] * linalg.solve(hess_a, grad_a)
                     except np.linalg.LinAlgError as e:
                         print('alpha', e)
                         continue
@@ -301,7 +309,7 @@ def variational(spike, p, prior_mean, prior_cov, prior_inv=None,
                     if np.linalg.norm(grad_m_lag, ord=np.inf) < eps:
                         break
                     try:
-                        delta_m_lag = -rm[l] * np.linalg.solve(hess_m_lag, grad_m_lag)
+                        delta_m_lag = -rm[l] * linalg.solve(hess_m_lag, grad_m_lag)
                     except np.linalg.LinAlgError as e:
                         print('post_mean', e)
                         continue
@@ -327,7 +335,7 @@ def variational(spike, p, prior_mean, prior_cov, prior_inv=None,
                     if np.linalg.norm(grad_m, ord=np.inf) < eps:
                         break
                     try:
-                        delta_m = -rm[l] * np.linalg.solve(hess_m, grad_m)
+                        delta_m = -rm[l] * linalg.solve(hess_m, grad_m)
                     except np.linalg.LinAlgError as e:
                         print('post_mean', e)
                         continue
@@ -375,8 +383,10 @@ def variational(spike, p, prior_mean, prior_cov, prior_inv=None,
                     #     post_cov[l, :, :] = last_V
                     #     rate[t, :] = last_rate[t, :]
 
-        for l in range(L):
-            prior_cov[l, :, :]
+        if hyper:
+            for l in range(L):
+                variance[l] = np.trace(linalg.solve(prior_cor[l, :, :], np.outer(post_mean - prior_mean, post_mean - prior_mean) + post_cov[l, :, :], sym_pos=True)) / T
+
 
         # update lower bound
         lbound[it] = lowerbound(spike, beta, alpha, prior_mean, prior_inv, post_mean, post_cov, regressor=regressor, frate=rate)

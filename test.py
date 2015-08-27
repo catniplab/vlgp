@@ -13,7 +13,7 @@ std = 2
 p = 1
 
 L = 2
-N = 50
+N = 10
 np.random.seed(0)
 
 high = np.log(25/T)
@@ -40,11 +40,6 @@ m0 = fa.fit_transform(y)
 a0 = fa.components_
 m0 *= np.linalg.norm(a0) / np.sqrt(N)
 a0 /= np.linalg.norm(a0) / np.sqrt(N)
-
-plt.figure()
-for l in range(L):
-    plt.plot(m0[:, l])
-plt.show()
 
 mu = np.zeros_like(x)
 
@@ -77,6 +72,10 @@ m, V, a1, b1, a0, b0, lbound, elapsed, convergent = variational(y, 0, mu, sigma,
                                                                 constrain_m='', constrain_a='',
                                                                 control=control)
 
+
+if not os.path.isdir('output'):
+    os.mkdir('output')
+
 it = len(lbound)
 dt = datetime.now().strftime('%Y-%m-%d %H-%M-%S')
 log = h5py.File('output/{}.hdf5'.format(dt), 'a')
@@ -99,8 +98,6 @@ log.create_dataset(name='estimated alpha', data=a1)
 log.create_dataset(name='estimated beta', data=b1)
 log.close()
 
-if not os.path.isdir('output'):
-    os.mkdir('output')
 with open('output/{}.txt'.format(dt), 'w+') as logging:
     print('{} iteration(s)'.format(it), file=logging)
     print('convergent: {}'.format(convergent), file=logging)
@@ -133,6 +130,11 @@ for n in range(N):
 plt.title('{} Spike trains'.format(N))
 plt.yticks(range(N))
 plt.gca().invert_yaxis()
+plt.savefig(pp, format='pdf')
+
+# plot factor analysis
+plt.figure()
+plt.plot(m0)
 plt.savefig(pp, format='pdf')
 
 # plot lowerbound
