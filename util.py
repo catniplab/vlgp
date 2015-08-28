@@ -24,29 +24,22 @@ def history(spike, p, intercept=True):
     return regressor
 
 
-def inchol(cov, tol=1e-5):
-    diag = np.ones(cov.shape[0])
-    pvec = np.arange(diag.size)
+def inchol(x, omega, tol=1e-5):
+    n = x.shape[x.ndim - 1]
+    diag = np.ones(n, dtype=float)
+    pvec = np.arange(n, dtype=int)
     i = 0
-    g = np.zeros_like(cov)
+    g = np.zeros((n, n), dtype=float)
     while np.sum(diag[i:]) > tol:
-        if i > 0:
-            jast = np.argmax(diag[i:]) + i
-            pvec[i], pvec[jast] = pvec[jast], pvec[i]
-            g[i, :i + 1], g[jast, :i + 1] = g[jast, :i + 1], g[i, :i + 1]
-        else:
-            jast = 0
-
+        jast = np.argmax(diag[i:]) + i
+        pvec[i], pvec[jast] = pvec[jast], pvec[i]
+        g[jast, :i + 1], g[i, :i + 1] = g[i, :i + 1].copy(), g[jast, :i + 1].copy()
         g[i, i] = np.sqrt(diag[jast])
-        if i < diag.size - 1:
-            newcol = cov[pvec[i + 1:], pvec[i]]
-            if i > 0:
-                g[i + 1:, i] = (newcol - np.dot(g[i + 1:, :i], g[i, :i].T)) / g[i, i]
-            else:
-                g[i + 1:, i] = newcol / g[i, i]
-
-        if i < diag.size - 1:
-            diag[i + 1:] = 1 - np.sum(np.square(g[i + 1:, :i]), axis=1)
+        g[i + 1:, i] = (np.exp(- omega * np.square(x[pvec[i + 1:]] - x[pvec[i]]))
+                        - np.dot(g[i + 1:, :i], g[i, :i].T)) / g[i, i]
+        diag[i + 1:] = 1 - np.sum(np.square(g[i + 1:, :i + 1]), axis=1)
 
         i += 1
-    return g[:, :i], pvec[:i]
+    return g, pvec, i - 1
+
+g, pvec, i = inchol(np.arange(5), 1e-4)
