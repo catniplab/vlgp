@@ -19,7 +19,7 @@ def history(spike, p, intercept=True):
     return regressor
 
 
-def inchol(n, w, tol=1e-5):
+def inchol(n, w, tol):
     """
     Incomplete Cholesky decomposition for squared exponential covariance
     :param n: size of covariance matrix (n, n)
@@ -32,7 +32,7 @@ def inchol(n, w, tol=1e-5):
     pvec = np.arange(n, dtype=int)
     i = 0
     g = np.zeros((n, n), dtype=float)
-    while np.sum(diag[i:]) > tol:
+    while diag[i:].sum() > tol:
         jast = np.argmax(diag[i:]) + i
         pvec[i], pvec[jast] = pvec[jast], pvec[i]
         g[jast, :i + 1][:], g[i, :i + 1][:] = g[i, :i + 1].copy(), g[jast, :i + 1].copy()
@@ -44,4 +44,14 @@ def inchol(n, w, tol=1e-5):
         i += 1
     return g[pvec, :i]
 
-# print(inchol(n=5, w=1e-4))
+
+def sqexpcov(n, w, var=1.0):
+    """
+    Construct square exponential covariance matrix
+    :param n: size
+    :param w: inverse of squared lengthscale
+    :param var: variance
+    :return: (n, n) covariance matrix
+    """
+    i, j = np.meshgrid(np.arange(n), np.arange(n))
+    return var * np.exp(-w * (i - j) ** 2)
