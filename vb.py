@@ -1,6 +1,5 @@
 import itertools
-import warnings
-import time
+import timeit
 import numpy as np
 from scipy import linalg
 from util import history
@@ -65,21 +64,38 @@ def variational(spike, p, prior_mean, prior_cov, prior_inv=None,
                 control=default_control):
     """
     :param spike: (T, N), spike trains
+    :param p: order of regression
     :param prior_mean: (T, L), prior mean
     :param prior_cov: (L, T, T), prior covariance
     :param prior_inv: (L, T, T), inverse prior covariance
-    :param p: order of autoregression
-    :param maxiter: maximum number of iterations
-    :param tol: convergence tolerance
-    :return
+    :param a0: (L, N), initial value of alpha
+    :param b0: (N, intercept + p * N), initial value of beta
+    :param m0: (T, L), initial value of posterior mean
+    :param V0: (L, T, T), initial value of posterior covariance
+    :param K0: (L, T, T), initial value of posterior covariance inverse
+    :param fixa: bool, switch of not optimize alpha
+    :param fixb: bool, switch of not optimize beta
+    :param fixm: bool, switch of not optimize posterior mean
+    :param fixV: bool, switch of not optimize posterior covariance
+    :param anorm: norm constraint of alpha
+    :param intercept: bool, include intercept term or not
+    :param constrain_m: 'lag' or '', use Lagrange multipliers or shifting
+    :param constrain_a: 'lag' or '', use Lagrange multipliers or scaling
+    :param hyper: optimize hyperparameters or not
+    :param control: control params
+    :return:
         post_mean: posterior mean
         post_cov: posterior covariance
-        beta: coefficients of spike
-        alpha: coefficients of x
-        lbound: lower bound sequence
-        it: number of iterations
+        beta: coefficient of regressor
+        alpha: coefficient of latent
+        a0: initial value of alpha
+        b0: initial value of beta
+        lbound: array of lower bounds
+        elapsed:
+        convergent:
     """
-    start = time.time()  # time when algorithm starts
+
+    start = timeit.default_timer()  # time when algorithm starts
 
     def updaterate(t, n):
         # rate = E(E(spike|x))
@@ -383,9 +399,9 @@ def variational(spike, p, prior_mean, prior_cov, prior_inv=None,
                     #     post_cov[l, :, :] = last_V
                     #     rate[t, :] = last_rate[t, :]
 
-        if hyper:
-            for l in range(L):
-                variance[l] = np.trace(linalg.solve(prior_cor[l, :, :], np.outer(post_mean - prior_mean, post_mean - prior_mean) + post_cov[l, :, :], sym_pos=True)) / T
+        # if hyper:
+        #     for l in range(L):
+        #         variance[l] = np.trace(linalg.solve(prior_cor[l, :, :], np.outer(post_mean - prior_mean, post_mean - prior_mean) + post_cov[l, :, :], sym_pos=True)) / T
 
 
         # update lower bound
@@ -417,9 +433,9 @@ def variational(spike, p, prior_mean, prior_cov, prior_inv=None,
 
         it += 1
 
-    if it == maxiter:
-        warnings.warn('not convergent', RuntimeWarning)
+    # if it == maxiter:
+    #     warnings.warn('not convergent', RuntimeWarning)
 
-    stop = time.time()
+    stop = timeit.default_timer()
 
-    return post_mean, post_cov, alpha, beta, a0, b0, lbound[:it], stop - start, convergent
+    return lbound[:it], post_mean, post_cov, alpha, beta, a0, b0, stop - start, convergent

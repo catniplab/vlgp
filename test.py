@@ -1,11 +1,13 @@
 import os.path
+from datetime import datetime
+
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 import h5py
-from datetime import datetime
+from sklearn.decomposition.factor_analysis import FactorAnalysis
+
 from vb import *
 import simulation
-from sklearn.decomposition.factor_analysis import FactorAnalysis
 
 T = 200
 l = 1e-4
@@ -62,7 +64,7 @@ control = {'maxiter': 50,
            'tol': 1e-3,
            'verbose': True}
 
-m, V, a1, b1, a0, b0, lbound, elapsed, convergent = variational(y, 0, mu, sigma,
+lbound, m, V, a1, b1, a0, b0, elapsed, convergent = variational(y, 0, mu, sigma,
                                                                 a0=a0,
                                                                 b0=None,
                                                                 m0=m0,
