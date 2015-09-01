@@ -1,6 +1,7 @@
 import os.path
 from datetime import datetime
-
+import numpy as np
+from scipy import linalg
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 import h5py
@@ -14,7 +15,7 @@ np.random.seed(0)
 T = 200
 l = 1e-4
 std = 2
-p = 1
+p = 0
 L = 2
 N = 20
 
@@ -31,9 +32,10 @@ x[:, 1] = 2 * np.sin(np.linspace(0, 2 * np.pi * 5, T))
 # simulate spike trains
 # a = np.empty((L, N), dtype=float)
 a = 2 * np.random.rand(L, N) - 1
-a /= np.linalg.norm(a) / np.sqrt(N)
+for l in range(L):
+    a[l, :] /= linalg.norm(a[l, :]) / np.sqrt(N)
 
-b = np.empty((1, N))
+b = np.empty((1 + p, N))
 b[0, :] = np.diag(np.dot(a.T, (a < 0) * -(high + low)))
 y, _, rate = simulation.spikes(x, a, b, intercept=True)
 
@@ -47,8 +49,8 @@ a0 /= np.linalg.norm(a0) / np.sqrt(N)
 mu = np.zeros_like(x)
 
 var = np.empty(L, dtype=float)
-var[0] = 2
-var[1] = 10
+var[0] = 3
+var[1] = 3
 w = np.empty(L, dtype=float)
 w[0] = 5e-3
 w[1] = 1e-2
@@ -69,7 +71,7 @@ lbound, m, V, a1, b1, a0, b0, elapsed, converged = variational(y, 0, mu, var, w,
                                                                fixalpha=False, fixbeta=False, fixpostmean=False,
                                                                fixpostcov=False,
                                                                normofalpha=np.sqrt(N), intercept=True,
-                                                               hyper=False,
+                                                               hyper=True,
                                                                control=control)
 
 if not os.path.isdir('output'):
