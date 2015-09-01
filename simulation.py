@@ -1,6 +1,5 @@
 import numpy as np
 from numpy import pi, exp, sqrt, log2
-import scipy.stats as stats
 
 
 def sqexp(t, scale):
@@ -61,7 +60,7 @@ def latents(L, T, std, b, dt=1.0, seed=None):
     w = np.arange(0, wu, dw)
 
     for l in range(L):
-        B = 2 * sqrt(spectral(w, b) * dw) * exp(1j * np.random.rand(M) * 2 * pi)
+        B = 2 * sqrt(spectral(w, b) * dw) * exp(1j * np.random.random(M) * 2 * pi)
         B[0] = 0
         x[:, l] = std * T * np.fft.ifft(B, T).real
 
@@ -92,7 +91,7 @@ def spikes(latent, alpha, beta, intercept=True, y0=None, seed=None):
     rate = spike.copy()
     if y0 is not None:
         for t in range(p):
-            regressor[t, intercept:(p-t)*N] = y0[t:, :].flatten()
+            regressor[t, intercept:(p - t) * N] = y0[t:, :].flatten()
 
     for t in range(T):
         rate[t, :] = np.exp(np.dot(regressor[t, :], beta) + np.dot(latent[t, :], alpha))
@@ -106,7 +105,6 @@ def spikes(latent, alpha, beta, intercept=True, y0=None, seed=None):
             regressor[t + 1, intercept + (p - 1) * N:] = spike[t, :]
 
     return spike, regressor, rate
-
 
 # def spikes2(x, a, b, c, y0=None, seed=None):
 #     """
@@ -146,4 +144,3 @@ def spikes(latent, alpha, beta, intercept=True, y0=None, seed=None):
 #             Y[t + 1, (p - 1) * N:] = y[t, :]
 #
 #     return y, Y, rate
-
