@@ -336,7 +336,7 @@ def variational(spike, p, prior_mean, prior_var, prior_w,
                 variance[l] = vl
                 print(vl)
 
-        # update lower bound
+        # store lower bound
         lbound[it] = lowerbound(spike, beta, alpha, prior_mean, prior_cov, prior_inv, post_mean, post_cov,
                                 regressor=regressor, rate=rate)
 
@@ -351,13 +351,16 @@ def variational(spike, p, prior_mean, prior_var, prior_w,
             converged = True
 
         if verbose:
-            print('\nIteration[%d]: L = %.5f, inflation = %.10f' %
-                  (it + 1, lbound[it], lbound[it] - lbound[it - 1]))
-            print('change in alpha = %.10f' % chg_alpha)
-            print('change in beta = %.10f' % chg_beta)
-            print('change in posterior mean = %.10f' % chg_post_mean)
-            print('change in posterior covariance = %.10f' % chg_post_cov)
+            print('\nIteration[{:d}]:\n'
+                  'lower bound = {:.5f}\n'
+                  'increment = {:.10f}\n'
+                  'change in alpha = {:.10f}\n'
+                  'change in beta = {:.10f}\n'
+                  'change in posterior mean = {:.10f}\n'
+                  'change in posterior covariance = {:.10f}'.format(it + 1, lbound[it], lbound[it] - lbound[it - 1],
+                                                                    chg_alpha, chg_beta, chg_post_mean, chg_post_cov))
 
+        # store current iteration
         good_alpha[:] = alpha
         good_beta[:] = beta
         good_post_mean[:] = post_mean
