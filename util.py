@@ -1,7 +1,7 @@
 import numpy as np
 
 
-def history(spike, p, intercept=True):
+def makeregressor(spike, p, intercept=True):
     """
     Construct spike regressor.
     :param spike: (T, N) spike trains

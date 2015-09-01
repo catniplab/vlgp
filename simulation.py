@@ -73,7 +73,7 @@ def spikes(latent, alpha, beta, intercept=True, y0=None, seed=None):
     Simulate spike trains driven by latent processes
     :param latent: (T, L), latent processes
     :param alpha: (L, N), coefficients of latent
-    :param beta: (1 + p*N, N), coefficients of p-step history
+    :param beta: (1 + p*N, N), coefficients of p-step makeregressor
     :param y0: (p, N), prehistory
     :param seed: random number seed
     :return: (T, N), spike trains
@@ -113,7 +113,7 @@ def spikes(latent, alpha, beta, intercept=True, y0=None, seed=None):
 #     Simulate spike trains driven by latent processes
 #     :param x: (T, L), latent processes
 #     :param a: (L, N), coefficients of latent
-#     :param b: (p*N, N), coefficients of p-step history
+#     :param b: (p*N, N), coefficients of p-step makeregressor
 #     :param y0: (p, N), prehistory
 #     :param seed: random number seed
 #     :return: (T, N), spike trains

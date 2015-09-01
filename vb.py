@@ -3,7 +3,7 @@ import timeit
 import numpy as np
 from scipy import linalg
 # from numpy import linalg
-from util import history, inchol, sqexpcov
+from util import makeregressor, inchol, sqexpcov
 
 
 def likelihood(spike, latent, alpha, beta, intercept=True):
@@ -12,7 +12,7 @@ def likelihood(spike, latent, alpha, beta, intercept=True):
     k, _ = beta.shape
     p = (k - intercept) // N
 
-    regressor = history(spike, p, intercept)
+    regressor = makeregressor(spike, p, intercept)
 
     lograte = np.dot(regressor, beta) + np.dot(latent, alpha)
     return np.sum(spike * lograte - np.exp(lograte))
@@ -36,7 +36,7 @@ def lowerbound(spike, beta, alpha, prior_mean, prior_cov, prior_inv, post_mean, 
     :param post_mean: (T, L), latent posterior mean
     :param post_cov: (L, T, T), latent posterior covariances
     :param complete: compute constant terms
-    :param regressor: (T, 1 + p*N), vectorized spike history
+    :param regressor: (T, 1 + p*N), vectorized spike makeregressor
     :param rate: (T, N), E(E(spike|x))
     :return lbound: lower bound
     """
@@ -67,8 +67,8 @@ default_control = {'maxiter': 200,
 
 
 def variational(spike, p, prior_mean, prior_var, prior_w,
-                a0=None, b0=None, m0=None, V0=None, K0=None,
-                fixa=False, fixb=False, fixm=False, fixV=False, anorm=1.0, intercept=True,
+                a0=None, b0=None, m0=None,
+                fixalpha=False, fixbeta=False, fixpostmean=False, fixpostcov=False, normofalpha=1.0, intercept=True,
                 hyper=False, inchol_tol=1e-7,
                 control=default_control):
     """
@@ -82,11 +82,11 @@ def variational(spike, p, prior_mean, prior_var, prior_w,
     :param m0: (T, L), initial value of posterior mean
     :param V0: (L, T, T), initial value of posterior covariance
     :param K0: (L, T, T), initial value of posterior covariance inverse
-    :param fixa: bool, switch of not optimize alpha
-    :param fixb: bool, switch of not optimize beta
-    :param fixm: bool, switch of not optimize posterior mean
-    :param fixV: bool, switch of not optimize posterior covariance
-    :param anorm: norm constraint of alpha
+    :param fixalpha: bool, switch of not optimize alpha
+    :param fixbeta: bool, switch of not optimize beta
+    :param fixpostmean: bool, switch of not optimize posterior mean
+    :param fixpostcov: bool, switch of not optimize posterior covariance
+    :param normofalpha: norm constraint of alpha
     :param intercept: bool, include intercept term or not
     :param hyper: optimize hyperparameters or not
     :param control: control params
@@ -122,12 +122,7 @@ def variational(spike, p, prior_mean, prior_var, prior_w,
     T, N = spike.shape
     _, L = prior_mean.shape
 
-    eyeL = np.identity(L)
-    eyeN = np.identity(N)
     eyeT = np.identity(T)
-    oneT = np.ones(T)
-    jayT = np.ones((T, T))
-    oneTL = np.ones((T, L))
 
     variance = prior_var.copy()
     w = prior_w.copy()
@@ -138,16 +133,16 @@ def variational(spike, p, prior_mean, prior_var, prior_w,
     for l in range(L):
         prior_chol[l] = inchol(T, w[l], inchol_tol)
         prior_cov[l, :, :] = sqexpcov(T, w[l], variance[l]) + eyeT * 1e-7
-        pinv = linalg.lstsq(prior_chol[l], eyeT)[0]
-        prior_inv[l, :, :] = np.dot(pinv.T, pinv) / variance[l]
-        # prior_inv[l, :, :] = linalg.inv(prior_cov[l, :, :])
+        # pinv = linalg.lstsq(prior_chol[l], eyeT)[0]
+        # prior_inv[l, :, :] = np.dot(pinv.T, pinv) / variance[l]
+        prior_inv[l, :, :] = linalg.inv(prior_cov[l, :, :])
 
     # read-only variables, protection from unexpected assignment
     spike.setflags(write=0)
     prior_mean.setflags(write=0)
 
-    # construct history
-    regressor = history(spike, p, intercept)
+    # construct makeregressor
+    regressor = makeregressor(spike, p, intercept)
     regressor.setflags(write=0)
 
     # initialize args
@@ -162,7 +157,7 @@ def variational(spike, p, prior_mean, prior_var, prior_w,
 
     if a0 is None:
         a0 = np.random.randn(L, N)
-        a0 /= linalg.norm(a0) / anorm
+        a0 /= linalg.norm(a0) / normofalpha
     alpha = a0.copy()
 
     if b0 is None:
@@ -177,48 +172,38 @@ def variational(spike, p, prior_mean, prior_var, prior_w,
     lbound = np.full(maxiter, np.NINF)
     lbound[0] = lowerbound(spike, beta, alpha, prior_mean, prior_cov, prior_inv, post_mean, post_cov, regressor=regressor, rate=rate)
 
-    # old values
-    old_a = alpha.copy()
-    old_b = beta.copy()
-    old_m = post_mean.copy()
-    old_V = post_cov.copy()
+    # valid values of parameters from previous iteration
+    good_alpha = alpha.copy()
+    good_beta = beta.copy()
+    good_post_mean = post_mean.copy()
+    good_post_cov = post_cov.copy()
 
-    # variables for recovery
+    # temporary storage for recovery
     last_b = beta.copy()
     last_a = alpha.copy()
     last_m = post_mean.copy()
     last_rate = rate.copy()
     last_V = np.empty((T, T))
 
-    ra = np.ones(N)
-    rb = np.ones(N)
-    rm = np.ones(L)
-    dec = 0.5
-    inc = 1.5
+    stepsize_alpha = np.ones(N)
+    stepsize_beta = np.ones(N)
+    stepsize_post_mean = np.ones(L)
+    deflation = 0.5
+    inflation = 1.5
     thld = 0.75
 
-    # gradient and hessian
-    grad_a_lag = np.zeros(N + 1)
-    hess_a_lag = np.zeros((grad_a_lag.size, grad_a_lag.size))
-    lam_a = np.zeros(L)
-    lam_last_a = lam_a.copy()
-
-    grad_m_lag = np.zeros(T + 1)
-    hess_m_lag = np.zeros((grad_m_lag.size, grad_m_lag.size))
-    lam_m = np.zeros(L)
-    lam_last_m = lam_m.copy()
-
+    # Optimization
     it = 1
     converged = False
     while not converged and it < maxiter:
-        if not fixb:
+        if not fixbeta:
             for n in range(N):
                 grad_b = np.dot(regressor.T, spike[:, n] - rate[:, n])
                 neg_hess_b = np.dot(regressor.T, (regressor.T * rate[:, n]).T)
                 if linalg.norm(grad_b, ord=np.inf) < eps:
                     break
                 try:
-                    delta_b = rb[n] * linalg.solve(neg_hess_b, grad_b)
+                    delta_b = stepsize_beta[n] * linalg.solve(neg_hess_b, grad_b)
                 except linalg.LinAlgError as e:
                     print('beta', e)
                     continue
@@ -229,15 +214,20 @@ def variational(spike, p, prior_mean, prior_var, prior_w,
                 updaterate(range(T), [n])
                 lb = lowerbound(spike, beta, alpha, prior_mean, prior_cov, prior_inv, post_mean, post_cov, regressor=regressor, rate=rate)
                 if np.isnan(lb) or lb < lbound[it - 1]:
-                    rb[n] = dec * rb[n] + eps
+                    # Decrease the stepsize if the lower bound decreases.
+                    # Add a small positive number to prevent becoming 0.
+                    stepsize_beta[n] *= deflation
+                    stepsize_beta[n] += eps
+                    # Recover last valid values
                     beta[:, n] = last_b[:, n]
                     rate[:, n] = last_rate[:, n]
                 elif lb - lbound[it - 1] > thld * predict:
-                    rb[n] *= inc
-                    # if rb[n] > 1:
-                    #     rb[n] = 1.0
+                    # Increase the stepsize if the real increment is more than expected.
+                    stepsize_beta[n] *= inflation
+                    # if stepsize_beta[n] > 1:
+                    #     stepsize_beta[n] = 1.0
 
-        if not fixa:
+        if not fixalpha:
             for l in range(L):
                 grad_a = np.dot((spike - rate).T, post_mean[:, l]) - np.dot(rate.T, post_cov[l, :, :].diagonal()) * alpha[l, :]
                 neg_hess_a = np.diag(np.dot(rate.T, post_mean[:, l] ** 2)
@@ -247,7 +237,7 @@ def variational(spike, p, prior_mean, prior_var, prior_w,
                 if linalg.norm(grad_a, ord=np.inf) < eps:
                     break
                 try:
-                    delta_a = ra[l] * linalg.solve(neg_hess_a, grad_a)
+                    delta_a = stepsize_alpha[l] * linalg.solve(neg_hess_a, grad_a)
                 except linalg.LinAlgError as e:
                     print('alpha', e)
                     continue
@@ -258,18 +248,19 @@ def variational(spike, p, prior_mean, prior_var, prior_w,
                 updaterate(range(T), range(N))
                 lb = lowerbound(spike, beta, alpha, prior_mean, prior_cov, prior_inv, post_mean, post_cov, regressor=regressor, rate=rate)
                 if np.isnan(lb) or lb - lbound[it - 1] < 0:
-                    ra[l] *= dec
-                    ra[l] += eps
+                    stepsize_alpha[l] *= deflation
+                    stepsize_alpha[l] += eps
                     alpha[l, :] = last_a[l, :]
                     rate[:] = last_rate[:]
                 elif lb - lbound[it - 1] > thld * predict:
-                    ra[l] *= inc
-                    # if ra[l] > 1:
-                    #     ra[l] = 1.0
-                alpha[l, :] /= linalg.norm(alpha[l, :]) / anorm
+                    stepsize_alpha[l] *= inflation
+                    # if stepsize_alpha[l] > 1:
+                    #     stepsize_alpha[l] = 1.0
+                # Scale norm
+                alpha[l, :] /= linalg.norm(alpha[l, :]) / normofalpha
 
         # posterior mean
-        if not fixm:
+        if not fixpostmean:
             for l in range(L):
                 grad_m = np.dot(spike - rate, alpha[l, :]) \
                          - linalg.solve(prior_cov[l, :, :], post_mean[:, l] - prior_mean[:, l])
@@ -277,7 +268,7 @@ def variational(spike, p, prior_mean, prior_var, prior_w,
                 if linalg.norm(grad_m, ord=np.inf) < eps:
                     break
                 try:
-                    delta_m = rm[l] * linalg.solve(neg_hess_m, grad_m)
+                    delta_m = stepsize_post_mean[l] * linalg.solve(neg_hess_m, grad_m)
                 except linalg.LinAlgError as e:
                     print('post_mean', e)
                     continue
@@ -288,18 +279,19 @@ def variational(spike, p, prior_mean, prior_var, prior_w,
                 updaterate(range(T), range(N))
                 lb = lowerbound(spike, beta, alpha, prior_mean, prior_cov, prior_inv, post_mean, post_cov, regressor=regressor, rate=rate)
                 if np.isnan(lb) or lb < lbound[it - 1]:
-                    rm[l] *= dec
-                    rm[l] += eps
+                    stepsize_post_mean[l] *= deflation
+                    stepsize_post_mean[l] += eps
                     post_mean[:, l] = last_m[:, l]
                     rate[:] = last_rate
                 elif lb - lbound[it - 1] > thld * predict:
-                    rm[l] *= inc
-                    # if rm[l] > 1:
-                    #     rm[l] = 1.0
+                    stepsize_post_mean[l] *= inflation
+                    # if stepsize_post_mean[l] > 1:
+                    #     stepsize_post_mean[l] = 1.0
+                # Shift location
                 post_mean[:, l] -= np.mean(post_mean[:, l])
 
         # posterior covariance
-        if not fixV:
+        if not fixpostcov:
             for l in range(L):
                 for t in range(T):
                     last_rate[t, :] = rate[t, :]
@@ -340,33 +332,29 @@ def variational(spike, p, prior_mean, prior_var, prior_w,
                                 regressor=regressor, rate=rate)
 
         # check convergence
-        del_a = 0.0 if fixa else np.max(np.abs(old_a - alpha))
-        del_b = 0.0 if fixb else np.max(np.abs(old_b - beta))
-        del_m = 0.0 if fixm else np.max(np.abs(old_m - post_mean))
-        del_V = 0.0 if fixV else np.max(np.abs(old_V - post_cov))
-        delta = max(del_a, del_b, del_m, del_V)
+        chg_alpha = 0.0 if fixalpha else np.max(np.abs(good_alpha - alpha))
+        chg_beta = 0.0 if fixbeta else np.max(np.abs(good_beta - beta))
+        chg_post_mean = 0.0 if fixpostmean else np.max(np.abs(good_post_mean - post_mean))
+        chg_post_cov = 0.0 if fixpostcov else np.max(np.abs(good_post_cov - post_cov))
+        change = max(chg_alpha, chg_beta, chg_post_mean, chg_post_cov)
 
-        if delta < tol:
+        if change < tol:
             converged = True
 
         if verbose:
-            print('\nIteration[%d]: L = %.5f, inc = %.10f' %
+            print('\nIteration[%d]: L = %.5f, inflation = %.10f' %
                   (it + 1, lbound[it], lbound[it] - lbound[it - 1]))
-            print('change in alpha = %.10f' % del_a)
-            print('change in beta = %.10f' % del_b)
-            # print('delta gamma = %.10f' % del_c)
-            print('change in posterior mean = %.10f' % del_m)
-            print('change in posterior covariance = %.10f' % del_V)
+            print('change in alpha = %.10f' % chg_alpha)
+            print('change in beta = %.10f' % chg_beta)
+            print('change in posterior mean = %.10f' % chg_post_mean)
+            print('change in posterior covariance = %.10f' % chg_post_cov)
 
-        old_a[:] = alpha
-        old_b[:] = beta
-        old_m[:] = post_mean
-        old_V[:] = post_cov
+        good_alpha[:] = alpha
+        good_beta[:] = beta
+        good_post_mean[:] = post_mean
+        good_post_cov[:] = post_cov
 
         it += 1
-
-    # if it == maxiter:
-    #     warnings.warn('not converged', RuntimeWarning)
 
     stop = timeit.default_timer()
 

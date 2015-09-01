@@ -56,8 +56,8 @@ lbound, m, V, a1, b1, a0, b0, elapsed, converged = variational(y, 0, mu, var, w,
                                                                 a0=a0,
                                                                 b0=None,
                                                                 m0=mu,
-                                                                fixa=False, fixb=False, fixm=False, fixV=False,
-                                                                anorm=np.sqrt(N), intercept=True,
+                                                                fixalpha=False, fixbeta=False, fixpostmean=False, fixpostcov=False,
+                                                                normofalpha=np.sqrt(N), intercept=True,
                                                                 hyper=False,
                                                                 control=control)
 
