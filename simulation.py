@@ -1,4 +1,5 @@
 import numpy as np
+from scipy import stats
 from numpy import pi, exp, sqrt, log2
 
 
@@ -89,10 +90,10 @@ def spikes(latent, alpha, beta, intercept=True, y0=None, seed=None):
 
     for t in range(T):
         rate[t, :] = np.exp(np.dot(regressor[t, :], beta) + np.dot(latent[t, :], alpha))
-        spike[t, :] = (np.random.poisson(rate[t, :], size=(1, N)) > 0) * 1
+        # spike[t, :] = (np.random.poisson(rate[t, :], size=(1, N)) > 0) * 1
         # truncate spike to 1 if spike > 1
         # it's equivalent to Bernoulli P(1) = (1 - e^-(lam_t))
-        # spike[t, :] = stats.bernoulli.rvs(1.0 - exp(-rate))
+        spike[t, :] = stats.bernoulli.rvs(1.0 - exp(-rate[t, :]))
         # spike[t, :] = 1 * (stats.poisson.rvs(rate[t, :]) > 0)
         if t + 1 < T and p != 0:
             regressor[t + 1, intercept:] = np.roll(regressor[t, intercept:], -N)
