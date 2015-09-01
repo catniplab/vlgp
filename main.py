@@ -6,7 +6,7 @@ from matplotlib.backends.backend_pdf import PdfPages
 import h5py
 from sklearn.decomposition.factor_analysis import FactorAnalysis
 
-from vb import *
+from optimization import *
 import simulation
 
 T = 200
@@ -18,13 +18,13 @@ L = 1
 N = 10
 np.random.seed(0)
 
-high = np.log(25/T)
-low = np.log(5/T)
+high = np.log(25 / T)
+low = np.log(5 / T)
 
 # simulate latent processes
 x, ticks = simulation.latents(L, T, std, l)
-x[:T//2, 0] = high
-x[T//2:, 0] = low
+x[:T // 2, 0] = high
+x[T // 2:, 0] = low
 # x[:, 1] = 2 * np.sin(np.linspace(0, 2 * np.pi * 5, T))
 
 # simulate spike trains
@@ -47,20 +47,24 @@ mu = np.zeros_like(x)
 var = np.full(L, fill_value=5.0)
 w = np.full(L, fill_value=1e-2)
 
-control = {'maxiter': 50,
+initial = {'alpha': a0,
+           'beta': None,
+           'posterior mean': mu}
+
+control = {'max iteration': 50,
            'fixed-point iteration': 3,
            'tol': 1e-3,
            'verbose': True}
 
 lbound, m, V, a1, b1, a0, b0, elapsed, converged = variational(y, 0, mu, var, w,
-                                                                a0=a0,
-                                                                b0=None,
-                                                                m0=mu,
-                                                                fixa=False, fixb=False, fixm=False, fixV=False,
-                                                                anorm=np.sqrt(N), intercept=True,
-                                                                hyper=False,
-                                                                control=control)
-
+                                                               a0=a0,
+                                                               b0=None,
+                                                               m0=mu,
+                                                               fixalpha=False, fixbeta=False, fixpostmean=False,
+                                                               fixpostcov=False,
+                                                               normofalpha=np.sqrt(N), intercept=True,
+                                                               hyper=False,
+                                                               control=control)
 
 if not os.path.isdir('output'):
     os.mkdir('output')
@@ -131,7 +135,7 @@ frm = 1
 plt.plot(range(frm + 1, it + 1), lbound[frm:])
 plt.yticks([])
 plt.xlim([frm + 1, it + 1])
-plt.title('Lower bound={:.3f}, iteration={:d}, time={:.2f}s, L={:d}, N={:d}'.format(lbound[it-1], it, elapsed, L, N))
+plt.title('Lower bound={:.3f}, iteration={:d}, time={:.2f}s, L={:d}, N={:d}'.format(lbound[it - 1], it, elapsed, L, N))
 plt.savefig(pp, format='pdf')
 
 # plot latent
@@ -182,4 +186,3 @@ plt.suptitle('beta')
 plt.savefig(pp, format='pdf')
 
 pp.close()
-
