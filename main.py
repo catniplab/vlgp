@@ -49,17 +49,17 @@ a0 /= np.linalg.norm(a0) / np.sqrt(N)
 mu = np.zeros_like(x)
 
 var = np.empty(L, dtype=float)
-var[0] = 3
-var[1] = 3
+var[0] = 5
+var[1] = 5
 w = np.empty(L, dtype=float)
-w[0] = 5e-3
-w[1] = 1e-2
+w[0] = 1e-3
+w[1] = 1e-3
 
 initial = {'alpha': a0,
            'beta': None,
            'posterior mean': mu}
 
-control = {'max iteration': 50,
+control = {'max iteration': 100,
            'fixed-point iteration': 3,
            'tol': 1e-4,
            'verbose': True}
@@ -71,7 +71,7 @@ lbound, m, V, a1, b1, a0, b0, elapsed, converged = variational(y, 0, mu, var, w,
                                                                fixalpha=False, fixbeta=False, fixpostmean=False,
                                                                fixpostcov=False,
                                                                normofalpha=np.sqrt(N), intercept=True,
-                                                               hyper=True,
+                                                               hyper=False,
                                                                control=control)
 
 if not os.path.isdir('output'):
