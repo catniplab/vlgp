@@ -1,6 +1,7 @@
 import os.path
 from datetime import datetime
-
+import numpy as np
+from scipy import linalg
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 import h5py
@@ -9,43 +10,50 @@ from sklearn.decomposition.factor_analysis import FactorAnalysis
 from optimization import *
 import simulation
 
+np.random.seed(0)
+
 T = 200
 l = 1e-4
 std = 2
-p = 1
-
-L = 1
-N = 10
-np.random.seed(0)
+p = 0
+L = 2
+N = 20
 
 high = np.log(25 / T)
 low = np.log(5 / T)
 
 # simulate latent processes
-x, ticks = simulation.latents(L, T, std, l)
+# x, ticks = simulation.latents(L, T, std, l)
+x = np.empty((T, L), dtype=float)
 x[:T // 2, 0] = high
 x[T // 2:, 0] = low
-# x[:, 1] = 2 * np.sin(np.linspace(0, 2 * np.pi * 5, T))
+x[:, 1] = 2 * np.sin(np.linspace(0, 2 * np.pi * 5, T))
 
 # simulate spike trains
 # a = np.empty((L, N), dtype=float)
-a = np.random.rand(L, N)
-a /= np.linalg.norm(a) / np.sqrt(N)
+a = 2 * np.random.rand(L, N) - 1
+for l in range(L):
+    a[l, :] /= linalg.norm(a[l, :]) / np.sqrt(N)
 
-b = np.empty((1, N))
+b = np.empty((1 + p, N))
 b[0, :] = np.diag(np.dot(a.T, (a < 0) * -(high + low)))
 y, _, rate = simulation.spikes(x, a, b, intercept=True)
 
 fa = FactorAnalysis(n_components=L)
 m0 = fa.fit_transform(y)
 a0 = fa.components_
+# a0 = np.random.randn(L, N)
 m0 *= np.linalg.norm(a0) / np.sqrt(N)
 a0 /= np.linalg.norm(a0) / np.sqrt(N)
 
 mu = np.zeros_like(x)
 
-var = np.full(L, fill_value=5.0)
-w = np.full(L, fill_value=1e-2)
+var = np.empty(L, dtype=float)
+var[0] = 3
+var[1] = 3
+w = np.empty(L, dtype=float)
+w[0] = 5e-3
+w[1] = 1e-2
 
 initial = {'alpha': a0,
            'beta': None,
@@ -53,17 +61,17 @@ initial = {'alpha': a0,
 
 control = {'max iteration': 50,
            'fixed-point iteration': 3,
-           'tol': 1e-3,
+           'tol': 1e-4,
            'verbose': True}
 
 lbound, m, V, a1, b1, a0, b0, elapsed, converged = variational(y, 0, mu, var, w,
                                                                a0=a0,
                                                                b0=None,
-                                                               m0=mu,
+                                                               m0=m0,
                                                                fixalpha=False, fixbeta=False, fixpostmean=False,
                                                                fixpostcov=False,
                                                                normofalpha=np.sqrt(N), intercept=True,
-                                                               hyper=False,
+                                                               hyper=True,
                                                                control=control)
 
 if not os.path.isdir('output'):
@@ -100,6 +108,7 @@ with open('output/{}.txt'.format(dt), 'w+') as logging:
     print('beta: {}'.format(np.linalg.norm(b1 - b)), file=logging)
     print('alpha: {}'.format(np.linalg.norm(a1 - a)), file=logging)
     print('alpha norm: {}'.format(np.linalg.norm(a1)), file=logging)
+    print('m mean: {}'.format(np.mean(m)), file=logging)
     print('true likelihood: {}'.format(likelihood(y, x, a, b, intercept=True)), file=logging)
     print('estimated likelihood: {}'.format(likelihood(y, m, a1, b1, intercept=True)), file=logging)
     print('constant rate likelihood: {}'.format(np.sum(y * np.log(y.mean(axis=0)) - y.mean(axis=0))), file=logging)
@@ -125,9 +134,9 @@ plt.gca().invert_yaxis()
 plt.savefig(pp, format='pdf')
 
 # plot factor analysis
-# plt.figure()
-# plt.plot(m0)
-# plt.savefig(pp, format='pdf')
+plt.figure()
+plt.plot(m0)
+plt.savefig(pp, format='pdf')
 
 # plot lowerbound
 plt.figure()
@@ -153,23 +162,23 @@ for l in range(L):
     plt.title('Latent {}'.format(l + 1))
     plt.savefig(pp, format='pdf')
 
-# c = np.linalg.lstsq(m, x)[0]
-# m2 = np.dot(m, c)
-# ns = 500
+c = np.linalg.lstsq(m, x)[0]
+m2 = np.dot(m, c)
+ns = 500
 # z = np.random.randn(ns, T, L)
 # for l in range(L):
 #     z[:, :, l] = np.dot(np.linalg.cholesky(V[l, :, :]), z[:, :, l].T).T + m[:, l]
-# for l in range(L):
-#     plt.figure()
+for l in range(L):
+    plt.figure()
 #     # for n in range(ns):
 #     #     plt.plot(np.dot(z[n, :, :], c)[:, l], color='0.8')
-#     plt.plot(x[:, l] - np.mean(x[:, l]), label='latent', color='blue')
-#     plt.plot(m2[:, l], label='transformed posterior', color='red')
-#     plt.legend()
-#     plt.title('Latent (transformed posterior) {}'.format(l + 1))
-#     plt.savefig(pp, format='pdf')
+    plt.plot(x[:, l] - np.mean(x[:, l]), label='latent', color='blue')
+    plt.plot(m2[:, l], label='transformed posterior', color='red')
+    plt.legend()
+    plt.title('Latent (transformed posterior) {}'.format(l + 1))
+    plt.savefig(pp, format='pdf')
 
-_, *ax = plt.subplots(L, sharex=True)
+_, ax = plt.subplots(L, sharex=True)
 for l in range(L):
     ax[l].bar(np.arange(N), a[l, :], width=0.25, color='blue', label='true')
     ax[l].bar(np.arange(N) + 0.25, a1[l, :], width=0.25, color='red', label='estimate')
@@ -186,3 +195,4 @@ plt.suptitle('beta')
 plt.savefig(pp, format='pdf')
 
 pp.close()
+
