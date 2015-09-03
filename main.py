@@ -59,7 +59,7 @@ initial = {'alpha': a0,
            'beta': None,
            'posterior mean': mu}
 
-control = {'max iteration': 100,
+control = {'max iteration': 50,
            'fixed-point iteration': 3,
            'tol': 1e-4,
            'verbose': True}
