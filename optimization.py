@@ -45,20 +45,15 @@ def lowerbound(spike, beta, alpha, prior_mean, prior_cov, prior_inv, post_mean, 
     """
 
     _, L = prior_mean.shape
-    T, N = spike.shape
-    eyeT = np.identity(T)
+    # T, N = spike.shape
 
     lbound = np.sum(spike * (np.dot(regressor, beta) + np.dot(post_mean, alpha)) - rate)
 
     for l in range(L):
-        # lbound += -0.5 * np.dot(post_mean[:, l] - prior_mean[:, l],
-        #                         np.dot(prior_inv[l, :, :], post_mean[:, l] - prior_mean[:, l])) \
-        #           - 0.5 * np.trace(np.dot(prior_inv[l, :, :], post_cov[l, :, :])) \
-        #           + 0.5 * np.linalg.slogdet(post_cov[l, :, :] + eyeT)[1]
         lbound += -0.5 * np.dot(post_mean[:, l] - prior_mean[:, l],
-                                linalg.solve(prior_cov[l, :, :] + eyeT, post_mean[:, l] - prior_mean[:, l])) \
-                  - 0.5 * np.trace(linalg.solve(prior_cov[l, :, :] + eyeT, post_cov[l, :, :])) \
-                  + 0.5 * np.linalg.slogdet(post_cov[l, :, :] + eyeT)[1]
+                                linalg.lstsq(prior_cov[l, :, :], post_mean[:, l] - prior_mean[:, l])[0]) \
+                  - 0.5 * np.trace(linalg.lstsq(prior_cov[l, :, :], post_cov[l, :, :])[0]) \
+                  + 0.5 * np.linalg.slogdet(post_cov[l, :, :])[1]
 
     return lbound
 
@@ -327,42 +322,6 @@ def variational(spike, p, prior_mean, prior_var, prior_w,
                                     np.mat(linalg.lstsq(bchol.T,
                                                         linalg.lstsq(bchol, wsqrt * np.mat(prior_cov[l, :, :]))[0])[0])
                 updaterate(range(T), range(N))
-
-        # if hyper and it % 5 == 0:
-        #     last_prior_cov[:] = prior_cov
-        #     last_prior_inv[:] = prior_inv
-        #     for l in range(L):
-        #         new_var = variance[l] * (np.dot(post_mean[:, l] - prior_mean[:, l],
-        #                                         np.dot(prior_inv[l, :, :], post_mean[:, l] - prior_mean[:, l]))
-        #                                  + np.trace(np.dot(prior_inv[l, :, :], post_cov[l, :, :]))) / T
-        #         # prior_cov[l, :, :] *= new_var / variance[l]
-        #         # prior_inv[l, :, :] *= variance[l] / new_var
-        #         # lb = lowerbound(spike, beta, alpha, prior_mean, prior_cov, prior_inv, post_mean, post_cov,
-        #         #                 regressor=regressor, rate=rate)
-        #         # if np.isnan(lb) or lb < lbound[it - 1]:
-        #         #     print('new variance failed')
-        #         #     prior_cov[l, :, :] = last_prior_cov
-        #         #     prior_inv[l, :, :] = last_prior_inv
-        #         # else:
-        #         variance[l] = new_var
-        #         d = post_mean[:, l] - prior_mean[:, l]
-        #         amat = np.mat(prior_inv[l, :, :]) * np.mat(prior_cov[l, :, :] * bmat) * np.mat(prior_inv[l, :, :])
-        #         grad_w = (np.inner(d, np.dot(amat, d)) + np.trace(np.dot(amat, post_cov[l, :, :])) -
-        #                   np.trace(np.dot(prior_inv[l, :, :], prior_cov[l, :, :] * bmat))) / 2
-        #         w[l] += stepsize_w[l] * grad_w
-        #
-        #         print('Hyper[{}] = {}, {}'.format(l, variance[l], w[l]))
-        #
-        #         prior_cov[l, :, :] = sqexpcov(T, w[l], variance[l])
-        #         U, s, Vh = linalg.svd(prior_cov[l, :, :])
-        #         prior_inv[l, :, :] = np.dot(Vh.T, np.dot(np.diag(np.nan_to_num(np.abs(1/s))), U.T))
-        #         lb = lowerbound(spike, beta, alpha, prior_mean, prior_cov, prior_inv, post_mean, post_cov,
-        #                         regressor=regressor, rate=rate)
-        #         if np.isnan(lb) or lb < lbound[it - 1]:
-        #             print('new hyper failed')
-        #             prior_cov[l, :, :] = last_prior_cov[l, :, :]
-        #             prior_inv[l, :, :] = last_prior_inv[l, :, :]
-        #             stepsize_w[l] *= 0.5
 
         # store lower bound
         lbound[it] = lowerbound(spike, beta, alpha, prior_mean, prior_cov, prior_inv, post_mean, post_cov,
