@@ -51,9 +51,10 @@ def lowerbound(spike, beta, alpha, prior_mean, prior_cov, prior_inv, post_mean, 
 
     for l in range(L):
         lbound += -0.5 * np.dot(post_mean[:, l] - prior_mean[:, l],
-                                linalg.lstsq(prior_cov[l, :, :], post_mean[:, l] - prior_mean[:, l])[0]) \
-                  - 0.5 * np.trace(linalg.lstsq(prior_cov[l, :, :], post_cov[l, :, :])[0]) \
-                  + 0.5 * np.linalg.slogdet(post_cov[l, :, :])[1]
+                                linalg.lstsq(prior_cov[l, :, :], post_mean[:, l] - prior_mean[:, l])[0]) - \
+                  0.5 * np.trace(linalg.lstsq(prior_cov[l, :, :], post_cov[l, :, :])[0]) + \
+                  0.5 * np.linalg.slogdet(post_cov[l, :, :])[1] - \
+                  0.5 * np.linalg.slogdet(prior_cov[l, :, :])[1]
 
     return lbound
 
@@ -124,7 +125,7 @@ def variational(spike, p, prior_mean, prior_var, prior_w,
 
     # hyperparameters
     variance = prior_var.copy()
-    w = prior_w.copy()
+    scale = prior_w.copy()
 
     i, j = np.meshgrid(np.arange(T), np.arange(T))
     bmat = -(i - j) ** 2
@@ -133,17 +134,10 @@ def variational(spike, p, prior_mean, prior_var, prior_w,
     prior_cov = np.empty(shape=(L, T, T))
     prior_inv = np.empty(shape=(L, T, T))
     for l in range(L):
-        prior_chol[l] = inchol(T, w[l], inchol_tol)
-        # prior_cov[l, :, :] = sqexpcov(T, w[l], variance[l]) + eyeT * 1e-7
-        # cor = sqexpcov(T, w[l], 1)
-        prior_cov[l, :, :] = variance[l] * sqexpcov(T, w[l], 1)
+        prior_chol[l] = inchol(T, scale[l], inchol_tol)
+        prior_cov[l, :, :] = variance[l] * sqexpcov(T, scale[l], 1)
         U, s, Vh = linalg.svd(prior_cov[l, :, :])
-        # prior_inv[l, :, :] = np.dot(Vh.T, np.dot(np.diag(np.nan_to_num(np.abs(1/s))), U.T)) / variance[l]
         prior_inv[l, :, :] = np.dot(Vh.T, np.dot(np.diag(np.nan_to_num(np.abs(1/s))), U.T))
-        # prior_inv[l, :, :] = linalg.pinv2(prior_cov[l, :, :])
-        # pinv = linalg.lstsq(prior_chol[l], eyeT)[0]
-        # prior_inv[l, :, :] = np.dot(pinv.T, pinv) / variance[l]
-        # prior_inv[l, :, :] = linalg.inv(prior_cov[l, :, :])
 
     # read-only variables, protection from unexpected assignment
     spike.setflags(write=0)
@@ -186,20 +180,19 @@ def variational(spike, p, prior_mean, prior_var, prior_w,
     good_beta = beta.copy()
     good_post_mean = post_mean.copy()
     good_post_cov = post_cov.copy()
+    good_variance = variance.copy()
+    good_scale = scale.copy()
 
     # temporary storage for recovery
     last_b = np.empty_like(beta)
     last_a = np.empty_like(alpha)
     last_m = np.empty_like(post_mean)
     last_rate = np.empty_like(rate)
-    last_V = np.empty_like(post_cov)
-    last_prior_cov = np.empty_like(prior_cov)
-    last_prior_inv = np.empty_like(prior_inv)
 
     stepsize_alpha = np.ones(N)
     stepsize_beta = np.ones(N)
     stepsize_post_mean = np.ones(L)
-    stepsize_w = np.ones(L)
+    stepsize_scale = np.ones(L)
     deflation = 0.5
     inflation = 1.5
     thld = 0.75
@@ -327,12 +320,27 @@ def variational(spike, p, prior_mean, prior_var, prior_w,
         lbound[it] = lowerbound(spike, beta, alpha, prior_mean, prior_cov, prior_inv, post_mean, post_cov,
                                 regressor=regressor, rate=rate)
 
+        if hyper and it % 10 == 0:
+            for l in range(L):
+                d = post_mean[:, l] - prior_mean[:, l]
+                cor = prior_cov[l, :, :] / variance[l]
+                variance[l] = (np.dot(d, linalg.lstsq(cor, d)[0]) + np.trace(linalg.lstsq(cor, post_cov[l, :, :])[0])) / T
+                d = post_mean[:, l] - prior_mean[:, l]
+                amat = linalg.lstsq(prior_cov[l, :, :], prior_cov[l, :, :] * bmat)[0]
+                grad_scale = (np.dot(d, np.dot(amat, linalg.lstsq(prior_cov[l, :, :], d)[0])) +
+                              np.trace(np.dot(amat, linalg.lstsq(prior_cov[l, :, :], post_cov[l, :, :])[0]) - amat)) * scale[l]
+                scale[l] = np.exp(np.log(scale[l]) + 0.01 * grad_scale)
+                prior_cov[l, :, :] = sqexpcov(T, scale[l], variance[l])
+            print(variance, scale)
+
         # check convergence
         chg_alpha = 0.0 if fixalpha else np.max(np.abs(good_alpha - alpha))
         chg_beta = 0.0 if fixbeta else np.max(np.abs(good_beta - beta))
         chg_post_mean = 0.0 if fixpostmean else np.max(np.abs(good_post_mean - post_mean))
         chg_post_cov = 0.0 if fixpostcov else np.max(np.abs(good_post_cov - post_cov))
-        change = max(chg_alpha, chg_beta, chg_post_mean, chg_post_cov)
+        chg_variance = np.max(np.abs(good_variance - variance)) if hyper else 0.0
+        chg_scale = np.max(np.abs(good_scale - scale)) if hyper else 0.0
+        change = max(chg_alpha, chg_beta, chg_post_mean, chg_post_cov, chg_variance, chg_scale)
 
         if change < tol:
             converged = True
@@ -352,6 +360,8 @@ def variational(spike, p, prior_mean, prior_var, prior_w,
         good_beta[:] = beta
         good_post_mean[:] = post_mean
         good_post_cov[:] = post_cov
+        good_variance[:] = variance
+        good_scale[:] = scale
 
         it += 1
 

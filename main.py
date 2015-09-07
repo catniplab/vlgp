@@ -71,7 +71,7 @@ lbound, m, V, a1, b1, a0, b0, elapsed, converged = variational(y, 0, mu, var, w,
                                                                fixalpha=False, fixbeta=False, fixpostmean=False,
                                                                fixpostcov=False,
                                                                normofalpha=np.sqrt(N), intercept=True,
-                                                               hyper=False,
+                                                               hyper=True,
                                                                control=control)
 
 if not os.path.isdir('output'):
