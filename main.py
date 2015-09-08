@@ -14,7 +14,7 @@ np.random.seed(0)
 
 T = 200
 l = 1e-4
-std = 2
+std = 1
 p = 0
 L = 2
 N = 20
@@ -28,6 +28,8 @@ x = np.empty((T, L), dtype=float)
 x[:T // 2, 0] = high
 x[T // 2:, 0] = low
 x[:, 1] = 2 * np.sin(np.linspace(0, 2 * np.pi * 5, T))
+for l in range(L):
+    x[:, l] -= np.mean(x[:, l])
 
 # simulate spike trains
 # a = np.empty((L, N), dtype=float)
@@ -36,7 +38,8 @@ for l in range(L):
     a[l, :] /= linalg.norm(a[l, :]) / np.sqrt(N)
 
 b = np.empty((1 + p, N))
-b[0, :] = np.diag(np.dot(a.T, (a < 0) * -(high + low)))
+# b[0, :] = np.diag(np.dot(a.T, (a < 0) * -(high + low)))
+b[0, :] = low
 y, _, rate = simulation.spikes(x, a, b, intercept=True)
 
 fa = FactorAnalysis(n_components=L)

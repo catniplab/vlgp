@@ -1,6 +1,6 @@
 import itertools
 import timeit
-
+# import matplotlib.pyplot as plt
 import numpy as np
 from scipy import linalg
 
@@ -65,7 +65,7 @@ default_control = {'maxiter': 200,
                    'verbose': False}
 
 
-def variational(spike, p, prior_mean, prior_var, prior_w,
+def variational(spike, p, prior_mean, prior_var, prior_scale,
                 a0=None, b0=None, m0=None,
                 fixalpha=False, fixbeta=False, fixpostmean=False, fixpostcov=False, normofalpha=1.0, intercept=True,
                 hyper=False, inchol_tol=1e-7,
@@ -75,7 +75,7 @@ def variational(spike, p, prior_mean, prior_var, prior_w,
     :param p: order of regression
     :param prior_mean: (T, L), prior mean
     :param prior_var: (L,), prior variance
-    :param prior_w: (L,), prior inverse of squared lengthscale
+    :param prior_scale: (L,), prior inverse of squared lengthscale
     :param a0: (L, N), initial value of alpha
     :param b0: (N, intercept + p * N), initial value of beta
     :param m0: (T, L), initial value of posterior mean
@@ -125,7 +125,7 @@ def variational(spike, p, prior_mean, prior_var, prior_w,
 
     # hyperparameters
     variance = prior_var.copy()
-    scale = prior_w.copy()
+    scale = prior_scale.copy()
 
     i, j = np.meshgrid(np.arange(T), np.arange(T))
     bmat = -(i - j) ** 2
@@ -196,6 +196,8 @@ def variational(spike, p, prior_mean, prior_var, prior_w,
     deflation = 0.5
     inflation = 1.5
     thld = 0.75
+
+    # plt.figure()
 
     # Optimization
     it = 1
@@ -320,18 +322,36 @@ def variational(spike, p, prior_mean, prior_var, prior_w,
         lbound[it] = lowerbound(spike, beta, alpha, prior_mean, prior_cov, prior_inv, post_mean, post_cov,
                                 regressor=regressor, rate=rate)
 
-        if hyper and it % 10 == 0:
+        if hyper and it % 5 == 0:
             for l in range(L):
                 d = post_mean[:, l] - prior_mean[:, l]
                 cor = prior_cov[l, :, :] / variance[l]
-                variance[l] = (np.dot(d, linalg.lstsq(cor, d)[0]) + np.trace(linalg.lstsq(cor, post_cov[l, :, :])[0])) / T
-                d = post_mean[:, l] - prior_mean[:, l]
-                amat = linalg.lstsq(prior_cov[l, :, :], prior_cov[l, :, :] * bmat)[0]
-                grad_scale = (np.dot(d, np.dot(amat, linalg.lstsq(prior_cov[l, :, :], d)[0])) +
-                              np.trace(np.dot(amat, linalg.lstsq(prior_cov[l, :, :], post_cov[l, :, :])[0]) - amat)) * scale[l]
-                scale[l] = np.exp(np.log(scale[l]) + 0.01 * grad_scale)
+
+                # U, s, Vh = linalg.svd(cor)
+                # inv = np.dot(Vh.T, np.dot(np.diag(np.nan_to_num(np.abs(1/s))), U.T))
+
+                # variance[l] = (np.dot(d, np.dot(inv, d)) +
+                #                np.trace(np.dot(inv, post_cov[l, :, :]))) / T
+                # variance[l] = np.abs((np.dot(d, linalg.solve(cor, d)) + np.trace(linalg.solve(cor, post_cov[l, :, :]))) / T)
+                #
+                # variance[l] = (np.dot(d, linalg.lstsq(cor, d)[0]) +
+                #                np.trace(linalg.lstsq(cor, post_cov[l, :, :])[0])) / T
+
+                variance[l] = (np.dot(d.T, d) +
+                               np.trace(linalg.lstsq(cor, post_cov[l, :, :])[0])) / T
+
+                print('d.T * d', np.dot(d.T, d))
+                print('S inv d', np.dot(d, linalg.lstsq(cor, d)[0]))
+                print('S inv V', np.trace(linalg.lstsq(cor, post_cov[l, :, :])[0]))
+                # amat = linalg.solve(prior_cov[l, :, :], prior_cov[l, :, :] * bmat)
+                # grad_scale = (np.dot(d, np.dot(amat, linalg.solve(prior_cov[l, :, :], d))) +
+                #               np.trace(np.dot(amat, linalg.solve(prior_cov[l, :, :], post_cov[l, :, :])) - amat)) * scale[l]
+                # scale[l] = np.exp(np.log(scale[l]) + 0.01 * grad_scale)
                 prior_cov[l, :, :] = sqexpcov(T, scale[l], variance[l])
             print(variance, scale)
+
+        # plt.plot(post_mean)
+        # plt.draw()
 
         # check convergence
         chg_alpha = 0.0 if fixalpha else np.max(np.abs(good_alpha - alpha))
