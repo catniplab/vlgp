@@ -2,7 +2,7 @@ import os.path
 from datetime import datetime
 import numpy as np
 from scipy import linalg
-import pylab as plt
+from pylab import figure, vlines, subplots, savefig, plot, yticks, xlim, ylim, suptitle, legend, title, gca
 from matplotlib.backends.backend_pdf import PdfPages
 import h5py
 from sklearn.decomposition.factor_analysis import FactorAnalysis
@@ -52,15 +52,11 @@ a0 /= np.linalg.norm(a0) / np.sqrt(N)
 mu = np.zeros_like(x)
 
 var = np.empty(L, dtype=float)
-var[0] = 11
-var[1] = 12
+var[0] = 5
+var[1] = 5
 w = np.empty(L, dtype=float)
 w[0] = 1e-3
 w[1] = 1e-3
-
-initial = {'alpha': a0,
-           'beta': None,
-           'posterior mean': mu}
 
 control = {'max iteration': 50,
            'fixed-point iteration': 3,
@@ -119,51 +115,51 @@ with open('output/{}.txt'.format(dt), 'w+') as logging:
 
 pp = PdfPages('output/{}.pdf'.format(dt))
 
-_, ax = plt.subplots(N, sharex=True)
+_, ax = subplots(N, sharex=True)
 for n in range(N):
     ax[n].plot(rate[:, n])
     ax[n].axis('off')
-plt.suptitle('Firing rates')
-plt.savefig(pp, format='pdf')
+suptitle('Firing rates')
+savefig(pp, format='pdf')
 
 # plot spike trains
-plt.figure()
-plt.ylim(0, N)
+figure()
+ylim(0, N)
 for n in range(N):
-    plt.vlines(np.arange(T)[y[:, n] > 0], n, n + 1, color='black')
-plt.title('{} Spike trains'.format(N))
-plt.yticks(range(N))
-plt.gca().invert_yaxis()
-plt.savefig(pp, format='pdf')
+    vlines(np.arange(T)[y[:, n] > 0], n, n + 1, color='black')
+title('{} Spike trains'.format(N))
+yticks(range(N))
+gca().invert_yaxis()
+savefig(pp, format='pdf')
 
 # plot factor analysis
-plt.figure()
-plt.plot(m0)
-plt.savefig(pp, format='pdf')
+figure()
+plot(m0)
+savefig(pp, format='pdf')
 
 # plot lowerbound
-plt.figure()
+figure()
 frm = 1
-plt.plot(range(frm + 1, it + 1), lbound[frm:])
-plt.yticks([])
-plt.xlim([frm + 1, it + 1])
-plt.title('Lower bound={:.3f}, iteration={:d}, time={:.2f}s, L={:d}, N={:d}'.format(lbound[it - 1], it, elapsed, L, N))
-plt.savefig(pp, format='pdf')
+plot(range(frm + 1, it + 1), lbound[frm:])
+yticks([])
+xlim([frm + 1, it + 1])
+title('Lower bound={:.3f}, iteration={:d}, time={:.2f}s, L={:d}, N={:d}'.format(lbound[it - 1], it, elapsed, L, N))
+savefig(pp, format='pdf')
 
 # plot latent
 ns = 500
 for l in range(L):
-    plt.figure()
+    figure()
     # z = np.random.randn(T, ns)
     # lt = np.linalg.cholesky(V[l, :, :])
     # s = np.dot(lt, z)
     # for n in range(ns):
-    #     plt.plot(s[:, n] + m[:, l], color='0.8')
-    plt.plot(x[:, l] - np.mean(x[:, l]), label='latent', color='blue')
-    plt.plot(m[:, l], label='posterior', color='red')
-    plt.legend()
-    plt.title('Latent {}'.format(l + 1))
-    plt.savefig(pp, format='pdf')
+    #     plot(s[:, n] + m[:, l], color='0.8')
+    plot(x[:, l] - np.mean(x[:, l]), label='latent', color='blue')
+    plot(m[:, l], label='posterior', color='red')
+    legend()
+    title('Latent {}'.format(l + 1))
+    savefig(pp, format='pdf')
 
 c = np.linalg.lstsq(m, x)[0]
 m2 = np.dot(m, c)
@@ -172,30 +168,30 @@ ns = 500
 # for l in range(L):
 #     z[:, :, l] = np.dot(np.linalg.cholesky(V[l, :, :]), z[:, :, l].T).T + m[:, l]
 for l in range(L):
-    plt.figure()
+    figure()
 #     # for n in range(ns):
-#     #     plt.plot(np.dot(z[n, :, :], c)[:, l], color='0.8')
-    plt.plot(x[:, l] - np.mean(x[:, l]), label='latent', color='blue')
-    plt.plot(m2[:, l], label='transformed posterior', color='red')
-    plt.legend()
-    plt.title('Latent (transformed posterior) {}'.format(l + 1))
-    plt.savefig(pp, format='pdf')
+#     #     plot(np.dot(z[n, :, :], c)[:, l], color='0.8')
+    plot(x[:, l] - np.mean(x[:, l]), label='latent', color='blue')
+    plot(m2[:, l], label='transformed posterior', color='red')
+    legend()
+    title('Latent (transformed posterior) {}'.format(l + 1))
+    savefig(pp, format='pdf')
 
-_, ax = plt.subplots(L, sharex=True)
+_, ax = subplots(L, sharex=True)
 for l in range(L):
     ax[l].bar(np.arange(N), a[l, :], width=0.25, color='blue', label='true')
     ax[l].bar(np.arange(N) + 0.25, a1[l, :], width=0.25, color='red', label='estimate')
     ax[l].axis('off')
-plt.suptitle('alpha')
-plt.savefig(pp, format='pdf')
+suptitle('alpha')
+savefig(pp, format='pdf')
 
-_, ax = plt.subplots(N, sharex=True)
+_, ax = subplots(N, sharex=True)
 for n in range(N):
     ax[n].bar(np.arange(b.shape[0]), b[:, n], width=0.25, color='blue', label='true')
     ax[n].bar(np.arange(b.shape[0]) + 0.25, b1[:, n], width=0.25, color='red', label='estimate')
     ax[n].axis('off')
-plt.suptitle('beta')
-plt.savefig(pp, format='pdf')
+suptitle('beta')
+savefig(pp, format='pdf')
 
 pp.close()
 

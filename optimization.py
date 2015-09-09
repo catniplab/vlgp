@@ -1,6 +1,5 @@
 import itertools
 import timeit
-# import matplotlib.pyplot as plt
 import numpy as np
 from scipy import linalg
 
@@ -191,6 +190,7 @@ def variational(spike, p, prior_mean, prior_var, prior_scale,
     last_a = np.empty_like(alpha)
     last_m = np.empty_like(post_mean)
     last_rate = np.empty_like(rate)
+    last_V = np.empty_like(post_cov)
 
     stepsize_alpha = np.ones(N)
     stepsize_beta = np.ones(N)
@@ -311,15 +311,27 @@ def variational(spike, p, prior_mean, prior_var, prior_scale,
         # posterior covariance
         if not fixpostcov:
             for l in range(L):
+                last_rate[:] = rate
+                last_V[l, :] = post_cov[l, :]
                 w = np.dot(rate, alpha[l, :] ** 2)
                 wsqrt = np.mat(np.diag(np.sqrt(w)))
                 bmat = eyeT + wsqrt * np.mat(prior_cov[l, :, :]) * wsqrt
-                bchol = linalg.cholesky(bmat, lower=True)
+                # bchol = linalg.cholesky(bmat, lower=True)
+                # post_cov[l, :, :] = prior_cov[l, :, :] - \
+                #                     np.mat(prior_cov[l, :, :]) * wsqrt * \
+                #                     np.mat(linalg.lstsq(bchol.T,
+                #                                         linalg.lstsq(bchol, wsqrt * np.mat(prior_cov[l, :, :]))[0])[0])
                 post_cov[l, :, :] = prior_cov[l, :, :] - \
                                     np.mat(prior_cov[l, :, :]) * wsqrt * \
-                                    np.mat(linalg.lstsq(bchol.T,
-                                                        linalg.lstsq(bchol, wsqrt * np.mat(prior_cov[l, :, :]))[0])[0])
+                                    np.mat(linalg.solve(bmat, wsqrt * np.mat(prior_cov[l, :, :])))
                 updaterate(range(T), range(N))
+                lb = lowerbound(spike, beta, alpha, prior_mean, prior_cov, prior_inv, post_mean, post_cov,
+                                regressor=regressor, rate=rate)
+                if np.isnan(lb) or lb < lbound[it - 1]:
+                    if verbose:
+                        print('posterior covariance[{}] failed'.format(l))
+                    rate[:] = last_rate
+                    post_cov[l, :] = last_V[l, :]
 
         # store lower bound
         lbound[it] = lowerbound(spike, beta, alpha, prior_mean, prior_cov, prior_inv, post_mean, post_cov,
