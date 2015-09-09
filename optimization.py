@@ -66,7 +66,7 @@ default_control = {'maxiter': 200,
 
 
 def variational(spike, p, prior_mean, prior_var, prior_scale,
-                a0=None, b0=None, m0=None,
+                a0=None, b0=None, m0=None, V0=None,
                 fixalpha=False, fixbeta=False, fixpostmean=False, fixpostcov=False, normofalpha=1.0, intercept=True,
                 hyper=False, inchol_tol=1e-7,
                 control=default_control):
@@ -154,8 +154,11 @@ def variational(spike, p, prior_mean, prior_var, prior_scale,
     else:
         post_mean = m0.copy()
 
-    post_cov = prior_cov.copy()
-    post_inv = prior_inv.copy()
+    if V0 is None:
+        post_cov = prior_cov.copy()
+    else:
+        post_cov = V0.copy()
+    # post_inv = prior_inv.copy()
 
     if a0 is None:
         a0 = np.random.randn(L, N)
@@ -387,4 +390,4 @@ def variational(spike, p, prior_mean, prior_var, prior_scale,
 
     stop = timeit.default_timer()
 
-    return lbound[:it], post_mean, post_cov, alpha, beta, a0, b0, stop - start, converged
+    return lbound[:it], post_mean, post_cov, alpha, beta, variance, scale, a0, b0, stop - start, converged

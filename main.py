@@ -2,7 +2,7 @@ import os.path
 from datetime import datetime
 import numpy as np
 from scipy import linalg
-import matplotlib.pyplot as plt
+import pylab as plt
 from matplotlib.backends.backend_pdf import PdfPages
 import h5py
 from sklearn.decomposition.factor_analysis import FactorAnalysis
@@ -52,8 +52,8 @@ a0 /= np.linalg.norm(a0) / np.sqrt(N)
 mu = np.zeros_like(x)
 
 var = np.empty(L, dtype=float)
-var[0] = 5
-var[1] = 5
+var[0] = 11
+var[1] = 12
 w = np.empty(L, dtype=float)
 w[0] = 1e-3
 w[1] = 1e-3
@@ -67,15 +67,15 @@ control = {'max iteration': 50,
            'tol': 1e-4,
            'verbose': True}
 
-lbound, m, V, a1, b1, a0, b0, elapsed, converged = variational(y, 0, mu, var, w,
-                                                               a0=a0,
-                                                               b0=None,
-                                                               m0=m0,
-                                                               fixalpha=False, fixbeta=False, fixpostmean=False,
-                                                               fixpostcov=False,
-                                                               normofalpha=np.sqrt(N), intercept=True,
-                                                               hyper=True,
-                                                               control=control)
+lbound, m, V, a1, b1, new_var, new_scale, a0, b0, elapsed, converged = variational(y, 0, mu, var, w,
+                                                                                   a0=a0,
+                                                                                   b0=None,
+                                                                                   m0=m0,
+                                                                                   fixalpha=False, fixbeta=False, fixpostmean=False,
+                                                                                   fixpostcov=False,
+                                                                                   normofalpha=np.sqrt(N), intercept=True,
+                                                                                   hyper=True,
+                                                                                   control=control)
 
 if not os.path.isdir('output'):
     os.mkdir('output')
