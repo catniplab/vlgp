@@ -52,9 +52,10 @@ def lowerbound(spike, beta, alpha, prior_mean, prior_var, prior_cor, post_mean, 
         lbound += -0.5 * np.dot(post_mean[:, l] - prior_mean[:, l],
                                 linalg.lstsq(prior_cor[l, :, :] * prior_var[l],
                                              post_mean[:, l] - prior_mean[:, l])[0]) - \
-                  0.5 * np.trace(linalg.lstsq(prior_cor[l, :, :] * prior_var[l], post_cov[l, :, :])[0]) + \
-                  0.5 * np.linalg.slogdet(post_cov[l, :, :])[1] - \
-                  0.5 * np.linalg.slogdet(prior_cor[l, :, :] * prior_var[l])[1]
+                  0.5 * np.trace(linalg.lstsq(prior_cor[l, :, :] * prior_var[l], post_cov[l, :, :])[0]) - \
+                  0.5 * np.linalg.slogdet(linalg.lstsq(prior_cor[l, :, :] * prior_var[l], post_cov[l, :, :])[0])[1]
+                  # 0.5 * np.linalg.slogdet(post_cov[l, :, :])[1] - \
+                  # 0.5 * np.linalg.slogdet(prior_cor[l, :, :] * prior_var[l])[1]
 
     return lbound
 
@@ -359,6 +360,16 @@ def variational(spike, p, prior_mean, var, scale,
                 d = post_mean[:, l] - prior_mean[:, l]
                 candidate = (np.dot(d, linalg.lstsq(prior_cor[l, :, :], d)[0]) +
                              np.trace(linalg.lstsq(prior_cor[l, :, :], post_cov[l, :, :])[0])) / T
+                if candidate < 0:
+                    print(linalg.eigvals(prior_cor[l, :, :]))
+                    w, v = linalg.eigh(prior_cor[l, :, :])
+                    invw = np.zeros_like(w)
+                    invw[np.ma.masked_greater(w, 10 * eps).mask] = 1 / w[np.ma.masked_greater(w, 10 * eps).mask]
+                    print(invw)
+                    invs = np.dot(v, np.dot(np.diag(invw), v))
+                    print('S inverse * m', np.dot(d, np.dot(invs, d)))
+                    print('trace of S inverse * V', np.trace(np.dot(invs, post_cov[l, :, :])))
+
                 prior_var[l] = candidate if candidate > 0 else prior_var[l] / 2
 
                 # print('d.T * d', np.dot(d.T, d))
