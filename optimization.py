@@ -27,39 +27,6 @@ def saferate(t, n, regressor, post_mean, post_cov, beta, alpha):
     return rate if rate > 0 else np.finfo(np.float).eps
 
 
-def lowerbound(spike, beta, alpha, prior_mean, prior_var, prior_cor, post_mean, post_cov, regressor=None, rate=None):
-    """
-    Calculate the lower bound
-    :param prior_var:
-    :param spike: (T, N), spike trains
-    :param beta: (1 + p*N, N), coefficients of spike
-    :param alpha: (L, N), coefficients of x
-    :param prior_mean: (T, L), prior mean
-    :param post_mean: (T, L), latent posterior mean
-    :param post_cov: (L, T, T), latent posterior covariances
-    :param complete: compute constant terms
-    :param regressor: (T, 1 + p*N), vectorized spike makeregressor
-    :param rate: (T, N), E(E(spike|x))
-    :return lbound: lower bound
-    """
-
-    _, L = prior_mean.shape
-    T, N = spike.shape
-
-    lbound = np.sum(spike * (np.dot(regressor, beta) + np.dot(post_mean, alpha)) - rate)
-
-    for l in range(L):
-        lbound += -0.5 * np.dot(post_mean[:, l] - prior_mean[:, l],
-                                linalg.lstsq(prior_cor[l, :, :] * prior_var[l],
-                                             post_mean[:, l] - prior_mean[:, l])[0]) - \
-                  0.5 * np.trace(linalg.lstsq(prior_cor[l, :, :] * prior_var[l], post_cov[l, :, :])[0]) - \
-                  0.5 * np.linalg.slogdet(linalg.lstsq(prior_cor[l, :, :] * prior_var[l], post_cov[l, :, :])[0])[1]
-                  # 0.5 * np.linalg.slogdet(post_cov[l, :, :])[1] - \
-                  # 0.5 * np.linalg.slogdet(prior_cor[l, :, :] * prior_var[l])[1]
-
-    return lbound
-
-
 def variational(spike, p, prior_mean, var, scale,
                 a0=None, b0=None, m0=None, V0=None,
                 guardV=True, guardSigma=True,
@@ -97,7 +64,33 @@ def variational(spike, p, prior_mean, var, scale,
         converged:
     """
 
-    start = timeit.default_timer()  # time when algorithm starts
+    def lowerbound():
+        lb = np.sum(spike * (np.dot(regressor, beta) + np.dot(post_mean, alpha)) - rate)
+
+        for l in range(L):
+            d = post_mean[:, l] - prior_mean[:, l]
+            w = np.diag(np.dot(rate, alpha[l, :] ** 2))
+            wsqrt = np.mat(np.sqrt(w))
+            bmat = eyeT + wsqrt * np.mat(prior_cor[l, :, :] * prior_var[l]) * wsqrt
+            v_div_sigma = eyeT - np.dot(wsqrt, linalg.solve(bmat, np.dot(wsqrt, prior_cor[l, :, :] * prior_var[l])))
+            # sigma_div_v = eyeT + np.dot(prior_cor[l, :, :] * prior_var[l], np.diag(w))
+            # logdet = 2 * np.sum(np.log(np.diag(linalg.cholesky(sigma_div_v))))
+
+            lb += -0.5 * np.dot(d, np.dot(linalg.pinvh(prior_cor[l, :, :] * prior_var[l]), d)) + \
+                  -0.5 * np.trace(v_div_sigma) + \
+                  -0.5 * np.linalg.slogdet(eyeT + np.dot(prior_cor[l, :, :] * prior_var[l], w))[1]
+
+            # lb += -0.5 * np.dot(post_mean[:, l] - prior_mean[:, l],
+            #                     linalg.lstsq(prior_cor[l, :, :] * prior_var[l],
+            #                                  post_mean[:, l] - prior_mean[:, l])[0]) + \
+
+                # 0.5 * np.linalg.slogdet(np.dot(linalg.pinvh(prior_cor[l, :, :] * prior_var[l]), post_cov[l, :, :]))[1]
+                # 0.5 * np.trace(linalg.lstsq(prior_cor[l, :, :] * prior_var[l], post_cov[l, :, :])[0]) + \
+                # 0.5 * np.linalg.slogdet(linalg.lstsq(prior_cor[l, :, :] * prior_var[l], post_cov[l, :, :])[0])[1]
+                # 0.5 * np.linalg.slogdet(post_cov[l, :, :])[1] - \
+                # 0.5 * np.linalg.slogdet(prior_cor[l, :, :] * prior_var[l])[1]
+
+        return lb
 
     def updaterate(rows, cols):
         # rate = E(E(spike|x))
@@ -171,10 +164,13 @@ def variational(spike, p, prior_mean, var, scale,
     rate = np.empty_like(spike)
     updaterate(range(T), range(N))
 
+    wforv = np.empty_like(post_cov)
+    for l in range(L):
+        wforv[l] = np.dot(rate, alpha[l, :] ** 2)
+
     # initialize lower bound
     lbound = np.full(maxiter + 1, np.NINF)
-    lbound[0] = lowerbound(spike, beta, alpha, prior_mean, prior_var, prior_cor, post_mean, post_cov,
-                           regressor=regressor, rate=rate)
+    lbound[0] = lowerbound()
 
     # valid values of parameters from previous iteration
     good_alpha = alpha.copy()
@@ -200,14 +196,15 @@ def variational(spike, p, prior_mean, var, scale,
     stepsize_scale = scale.copy() * 0.1
     deflation = 0.5
     inflation = 1.5
-    thld = 0.1
+    thld = 0.05
 
     # plt.figure()
 
     # Optimization
     it = 1
     converged = False
-    while converged < 2 and it <= maxiter:
+    start = timeit.default_timer()  # time when algorithm starts
+    while not converged and it <= maxiter:
         if verbose:
             print('\nIteration[{:d}]'.format(it))
         goodLB = lbound[it - 1]
@@ -226,18 +223,17 @@ def variational(spike, p, prior_mean, var, scale,
                 last_rate[:, n] = rate[:, n]
                 beta[:, n] += delta_b
                 updaterate(range(T), [n])
-                lb = lowerbound(spike, beta, alpha, prior_mean, prior_var, prior_cor, post_mean, post_cov,
-                                regressor=regressor, rate=rate)
+                lb = lowerbound()
                 if np.isnan(lb) or lb < goodLB:
                     # Decrease the stepsize if the lower bound decreases.
                     # Add a small positive number to prevent becoming 0.
                     stepsize_beta[n] *= deflation
                     stepsize_beta[n] += eps
                     # Recover last valid values
-                    beta[:, n] = last_b[:, n]
-                    rate[:, n] = last_rate[:, n]
+                    # beta[:, n] = last_b[:, n]
+                    # rate[:, n] = last_rate[:, n]
                 else:
-                    if lb - goodLB > thld * goodLB:
+                    if lb - goodLB > thld * np.abs(goodLB):
                         # Increase the stepsize if the real increment is more than expected.
                         stepsize_beta[n] *= inflation
                         # if stepsize_beta[n] > 1:
@@ -264,15 +260,14 @@ def variational(spike, p, prior_mean, var, scale,
                 alpha[l, :] += delta_a
                 alpha[l, :] /= linalg.norm(alpha[l, :]) / normofalpha
                 updaterate(range(T), range(N))
-                lb = lowerbound(spike, beta, alpha, prior_mean, prior_var, prior_cor, post_mean, post_cov,
-                                regressor=regressor, rate=rate)
+                lb = lowerbound()
                 if np.isnan(lb) or lb < goodLB:
                     stepsize_alpha[l] *= deflation
                     stepsize_alpha[l] += eps
-                    alpha[l, :] = last_a[l, :]
-                    rate[:] = last_rate[:]
+                    # alpha[l, :] = last_a[l, :]
+                    # rate[:] = last_rate[:]
                 else:
-                    if lb - goodLB > thld * goodLB:
+                    if lb - goodLB > thld * np.abs(goodLB):
                         stepsize_alpha[l] *= inflation
                         # if stepsize_alpha[l] > 1:
                         #     stepsize_alpha[l] = 1.0
@@ -283,41 +278,29 @@ def variational(spike, p, prior_mean, var, scale,
             for l in range(L):
                 # grad_m = np.dot(spike - rate, alpha[l, :]) \
                 #          - linalg.lstsq(prior_cor[l, :, :] * prior_var[l], post_mean[:, l] - prior_mean[:, l])[0]
-                w = np.dot(rate, alpha[l, :] ** 2)
-                wsqrt = np.mat(np.diag(np.sqrt(w)))
+                w = np.diag(np.dot(rate, alpha[l, :] ** 2))
+                wsqrt = np.mat(np.sqrt(w))
                 d = np.mat(post_mean[:, l] - prior_mean[:, l]).T
                 bmat = eyeT + wsqrt * np.mat(prior_cor[l, :, :] * prior_var[l]) * wsqrt
-                # bchol = linalg.cholesky(bmat, lower=True)
-                # hinv = prior_cor[l, :, :] * prior_var[l] - \
-                #        np.mat(prior_cor[l, :, :] * prior_var[l]) * wsqrt * \
-                #        np.mat(linalg.lstsq(bchol.T,
-                #                            linalg.lstsq(bchol,
-                #                                         wsqrt * np.mat(prior_cor[l, :, :] * prior_var[l]))[0])[0])
-                # delta_m = stepsize_post_mean[l] * (np.mat(hinv) * np.mat(np.dot(spike - rate, alpha[l, :])).T - d +
-                #                                    np.mat(prior_cor[l, :, :] * prior_var[l]) * wsqrt *
-                #                                    np.mat(linalg.lstsq(bchol.T, linalg.lstsq(bchol, wsqrt * d)[0])[0]))
-
                 hinv = prior_cor[l, :, :] * prior_var[l] - \
                        np.mat(prior_cor[l, :, :] * prior_var[l]) * wsqrt * \
-                       np.mat(linalg.lstsq(bmat, wsqrt * np.mat(prior_cor[l, :, :] * prior_var[l]))[0])
+                       np.mat(linalg.solve(bmat, wsqrt * np.mat(prior_cor[l, :, :] * prior_var[l])))
                 delta_m = stepsize_post_mean[l] * (np.mat(hinv) * np.mat(np.dot(spike - rate, alpha[l, :])).T - d +
                                                    np.mat(prior_cor[l, :, :] * prior_var[l]) * wsqrt *
-                                                   np.mat(linalg.lstsq(bmat, wsqrt * d)[0]))
-
+                                                   np.mat(linalg.solve(bmat, wsqrt * d)))
                 last_m[:, l] = post_mean[:, l]
                 last_rate[:] = rate
                 post_mean[:, l] += delta_m.flat
                 post_mean[:, l] -= np.mean(post_mean[:, l])
                 updaterate(range(T), range(N))
-                lb = lowerbound(spike, beta, alpha, prior_mean, prior_var, prior_cor, post_mean, post_cov,
-                                regressor=regressor, rate=rate)
+                lb = lowerbound()
                 if np.isnan(lb) or lb < goodLB:
                     stepsize_post_mean[l] *= deflation
                     stepsize_post_mean[l] += eps
-                    post_mean[:, l] = last_m[:, l]
-                    rate[:] = last_rate
+                    # post_mean[:, l] = last_m[:, l]
+                    # rate[:] = last_rate
                 else:
-                    if lb - goodLB > thld * goodLB:
+                    if lb - goodLB > thld * np.abs(goodLB):
                         stepsize_post_mean[l] *= inflation
                         # if stepsize_post_mean[l] > 1:
                         #     stepsize_post_mean[l] = 1.0
@@ -328,23 +311,16 @@ def variational(spike, p, prior_mean, var, scale,
             for l in range(L):
                 last_rate[:] = rate
                 last_V[l, :] = post_cov[l, :]
-                w = np.dot(rate, alpha[l, :] ** 2)
-                wsqrt = np.mat(np.diag(np.sqrt(w)))
+                w = np.diag(np.dot(rate, alpha[l, :] ** 2))
+                wsqrt = np.mat(np.sqrt(w))
                 bmat = eyeT + wsqrt * np.mat(prior_cor[l, :, :] * prior_var[l]) * wsqrt
-                # bchol = linalg.cholesky(bmat, lower=True)
-                # post_cov[l, :, :] = prior_cor[l, :, :] * prior_var[l] - \
-                #                     np.mat(prior_cor[l, :, :] * prior_var[l]) * wsqrt * \
-                #                     np.mat(linalg.lstsq(bchol.T,
-                #                                         linalg.lstsq(bchol,
-                #                                                      wsqrt * np.mat(prior_cor[l, :, :] *
-                #                                                                     prior_var[l]))[0])[0])
                 post_cov[l, :, :] = prior_cor[l, :, :] * prior_var[l] - \
-                                    np.mat(prior_cor[l, :, :] * prior_var[l]) * wsqrt * \
-                                    np.mat(linalg.lstsq(bmat, wsqrt * np.mat(prior_cor[l, :, :] * prior_var[l]))[0])
+                                    np.dot(prior_cor[l, :, :] * prior_var[l],
+                                           np.dot(wsqrt,
+                                                  linalg.solve(bmat, np.dot(wsqrt, prior_cor[l, :, :] * prior_var[l]))))
                 updaterate(range(T), range(N))
                 if guardV:
-                    lb = lowerbound(spike, beta, alpha, prior_mean, prior_var, prior_cor, post_mean, post_cov,
-                                    regressor=regressor, rate=rate)
+                    lb = lowerbound()
                     if np.isnan(lb) or lb < goodLB:
                         if verbose:
                             print('posterior covariance[{}] caused decrease'.format(l))
@@ -356,19 +332,24 @@ def variational(spike, p, prior_mean, var, scale,
         if hyper and it % 5 == 0:
             for l in range(L):
                 last_var[l] = prior_var[l]
-
                 d = post_mean[:, l] - prior_mean[:, l]
-                candidate = (np.dot(d, linalg.lstsq(prior_cor[l, :, :], d)[0]) +
-                             np.trace(linalg.lstsq(prior_cor[l, :, :], post_cov[l, :, :])[0])) / T
-                if candidate < 0:
-                    print(linalg.eigvals(prior_cor[l, :, :]))
-                    w, v = linalg.eigh(prior_cor[l, :, :])
-                    invw = np.zeros_like(w)
-                    invw[np.ma.masked_greater(w, 10 * eps).mask] = 1 / w[np.ma.masked_greater(w, 10 * eps).mask]
-                    print(invw)
-                    invs = np.dot(v, np.dot(np.diag(invw), v))
-                    print('S inverse * m', np.dot(d, np.dot(invs, d)))
-                    print('trace of S inverse * V', np.trace(np.dot(invs, post_cov[l, :, :])))
+                w = np.diag(np.dot(rate, alpha[l, :] ** 2))
+                wsqrt = np.mat(np.sqrt(w))
+                bmat = eyeT + wsqrt * np.mat(prior_cor[l, :, :] * prior_var[l]) * wsqrt
+                v_div_sigma = eyeT - np.dot(wsqrt, linalg.solve(bmat, np.dot(wsqrt, prior_cor[l, :, :] * prior_var[l])))
+
+                candidate = (np.dot(d, np.dot(linalg.pinvh(prior_cor[l, :, :]), d)) +
+                             np.trace(v_div_sigma * prior_var[l])) / T
+
+                # if candidate < 0:
+                #     print(linalg.eigvals(prior_cor[l, :, :]))
+                #     w, v = linalg.eigh(prior_cor[l, :, :])
+                #     invw = np.zeros_like(w)
+                #     invw[np.ma.masked_greater(w, 10 * eps).mask] = 1 / w[np.ma.masked_greater(w, 10 * eps).mask]
+                #     print(invw)
+                #     invs = np.dot(v, np.dot(np.diag(invw), v))
+                #     print('S inverse * m', np.dot(d, np.dot(invs, d)))
+                #     print('trace of S inverse * V', np.trace(np.dot(invs, post_cov[l, :, :])))
 
                 prior_var[l] = candidate if candidate > 0 else prior_var[l] / 2
 
@@ -377,10 +358,9 @@ def variational(spike, p, prior_mean, var, scale,
                 # print('S inv V', np.trace(linalg.lstsq(cor, post_cov[l, :, :])[0]))
 
                 if verbose:
-                    print('prior variance[{:d}] -> {:.5f}'.format(l, prior_var[l]))
+                    print('prior variance[{:d}]: {:.5f} -> {:.5f}'.format(l, last_var[l], prior_var[l]))
                 if guardSigma:
-                    lb = lowerbound(spike, beta, alpha, prior_mean, prior_var, prior_cor, post_mean, post_cov,
-                                    regressor=regressor, rate=rate)
+                    lb = lowerbound()
                     if np.isnan(lb) or lb < goodLB:
                         if verbose:
                             print('prior variance[{:d}] caused decrease'.format(l))
@@ -388,37 +368,43 @@ def variational(spike, p, prior_mean, var, scale,
                     else:
                         goodLB = lb
 
-            for l in range(L):
-                last_scale[l] = prior_scale[l]
-                last_cor[l, :] = prior_cor[l, :]
+            for _ in range(fpinter):
+                for l in range(L):
+                    last_scale[l] = prior_scale[l]
+                    last_cor[l, :] = prior_cor[l, :]
 
-                d = post_mean[:, l] - prior_mean[:, l]
-                amat = linalg.lstsq(prior_cor[l, :, :], prior_cor[l, :, :] * logcor)[0]
-                grad_scale = (np.dot(d, np.dot(amat, linalg.lstsq(prior_cor[l, :, :] * prior_var[l], d)[0])) +
-                              np.trace(np.dot(amat,
-                                              linalg.lstsq(prior_cor[l, :, :] * prior_var[l],
-                                                           post_cov[l, :, :])[0]) - amat)) * prior_scale[l]
-                prior_scale[l] = np.exp(np.log(prior_scale[l]) + stepsize_scale[l] * grad_scale)
-                prior_cor[l, :, :] = sqexpcov(T, prior_scale[l], 1.0)
-                if verbose:
-                    print('prior scale[{:d}] -> {:.5f}'.format(l, prior_scale[l]))
-                lb = lowerbound(spike, beta, alpha, prior_mean, prior_var, prior_cor, post_mean, post_cov,
-                                regressor=regressor, rate=rate)
-                if np.isnan(lb) or lb < goodLB:
+                    d = post_mean[:, l] - prior_mean[:, l]
+                    w = np.diag(np.dot(rate, alpha[l, :] ** 2))
+                    wsqrt = np.mat(np.sqrt(w))
+                    bmat = eyeT + wsqrt * np.mat(prior_cor[l, :, :] * prior_var[l]) * wsqrt
+                    v_div_sigma = eyeT - wsqrt * np.mat(linalg.solve(bmat, wsqrt * np.mat(prior_cor[l, :, :] * prior_var[l])))
+                    amat = np.dot(linalg.pinvh(prior_cor[l, :, :]), prior_cor[l, :, :] * logcor)
+                    # grad_scale = (np.dot(d, np.dot(amat, linalg.lstsq(prior_cor[l, :, :] * prior_var[l], d)[0])) +
+                    #               np.trace(np.dot(amat,
+                    #                               linalg.lstsq(prior_cor[l, :, :] * prior_var[l],
+                    #                                            post_cov[l, :, :])[0]) - amat)) * prior_scale[l]
+                    d_div_sigma = np.dot(linalg.pinvh(prior_cor[l, :, :] * prior_var[l]), d)
+                    grad_scale = (np.dot(d_div_sigma, np.dot(prior_cor[l, :, :] * prior_var[l] * logcor, d_div_sigma)) +
+                                  np.trace(np.dot(amat, v_div_sigma) - amat)) * prior_scale[l]
+                    prior_scale[l] = np.exp(np.log(prior_scale[l]) + stepsize_scale[l] * grad_scale)
+                    prior_cor[l, :, :] = sqexpcov(T, prior_scale[l], 1.0)
                     if verbose:
-                        print('prior scale[{:d}] caused decrease'.format(l))
-                    prior_scale[l] = last_scale[l]
-                    prior_cor[l, :] = last_cor[l, :]
-                    stepsize_scale[l] *= deflation
-                    stepsize_scale[l] += eps
-                else:
-                    if lb - goodLB > thld * goodLB:
-                        stepsize_scale[l] *= inflation
-                    goodLB = lb
+                        print('prior scale[{:d}]: {:.5f} -> {:.5f}'.format(l, last_scale[l], prior_scale[l]))
+                    lb = lowerbound()
+                    if np.isnan(lb) or lb < goodLB:
+                        if verbose:
+                            print('prior scale[{:d}] caused decrease'.format(l))
+                        prior_scale[l] = last_scale[l]
+                        prior_cor[l, :] = last_cor[l, :]
+                        stepsize_scale[l] *= deflation
+                        stepsize_scale[l] += eps
+                    else:
+                        if lb - goodLB > thld * np.abs(goodLB):
+                            stepsize_scale[l] *= inflation
+                        goodLB = lb
 
         # store lower bound
-        lbound[it] = lowerbound(spike, beta, alpha, prior_mean, prior_var, prior_cor, post_mean, post_cov,
-                                regressor=regressor, rate=rate)
+        lbound[it] = lowerbound()
 
         # plt.plot(post_mean)
         # plt.draw()
@@ -432,10 +418,9 @@ def variational(spike, p, prior_mean, var, scale,
         chg_scale = np.max(np.abs(good_scale - prior_scale)) if hyper else 0.0
         change = max(chg_alpha, chg_beta, chg_post_mean, chg_post_cov, chg_variance, chg_scale)
 
-        if change < tol:
-            converged += 1
-        else:
-            converged = 0
+        # if change < tol:
+        if np.abs(lbound[it] - lbound[it - 1]) < tol * np.abs(lbound[it - 1]):
+            converged = True
 
         if verbose:
             print('lower bound = {:.5f}\n'
@@ -455,7 +440,7 @@ def variational(spike, p, prior_mean, var, scale,
         good_post_mean[:] = post_mean
         good_post_cov[:] = post_cov
         good_var[:] = prior_var
-        good_scale[:] = scale
+        good_scale[:] = prior_scale
 
         it += 1
 
