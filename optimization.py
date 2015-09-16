@@ -31,7 +31,7 @@ def variational(spike, p, prior_mean, var, scale,
                 a0=None, b0=None, m0=None, V0=None,
                 guardV=True, guardSigma=True,
                 fixalpha=False, fixbeta=False, fixpostmean=False, fixpostcov=False, normofalpha=1.0, intercept=True,
-                hyper=False, inchol_tol=1e-7,
+                hyper=False,
                 control=None):
     """
     :param spike: (T, N), spike trains
@@ -230,8 +230,8 @@ def variational(spike, p, prior_mean, var, scale,
                     stepsize_beta[n] *= deflation
                     stepsize_beta[n] += eps
                     # Recover last valid values
-                    # beta[:, n] = last_b[:, n]
-                    # rate[:, n] = last_rate[:, n]
+                    beta[:, n] = last_b[:, n]
+                    rate[:, n] = last_rate[:, n]
                 else:
                     if lb - goodLB > thld * np.abs(goodLB):
                         # Increase the stepsize if the real increment is more than expected.
@@ -264,8 +264,8 @@ def variational(spike, p, prior_mean, var, scale,
                 if np.isnan(lb) or lb < goodLB:
                     stepsize_alpha[l] *= deflation
                     stepsize_alpha[l] += eps
-                    # alpha[l, :] = last_a[l, :]
-                    # rate[:] = last_rate[:]
+                    alpha[l, :] = last_a[l, :]
+                    rate[:] = last_rate[:]
                 else:
                     if lb - goodLB > thld * np.abs(goodLB):
                         stepsize_alpha[l] *= inflation
@@ -297,8 +297,8 @@ def variational(spike, p, prior_mean, var, scale,
                 if np.isnan(lb) or lb < goodLB:
                     stepsize_post_mean[l] *= deflation
                     stepsize_post_mean[l] += eps
-                    # post_mean[:, l] = last_m[:, l]
-                    # rate[:] = last_rate
+                    post_mean[:, l] = last_m[:, l]
+                    rate[:] = last_rate
                 else:
                     if lb - goodLB > thld * np.abs(goodLB):
                         stepsize_post_mean[l] *= inflation
