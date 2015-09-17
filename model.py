@@ -98,6 +98,7 @@ def train(spike, p, prior_mean, prior_var, prior_scale,
             bmat = bmatrix(l)
             post_cov[l, :, :] = prior_cov(l) - np.dot(prior_cov(l), np.dot(wsqrt, np.dot(linalg.solve(bmat, wsqrt),
                                                                                          prior_cov(l))))
+        updaterate(range(T), range(N))
 
     ###################################################
 

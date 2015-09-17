@@ -15,7 +15,7 @@ np.random.seed(0)
 T = 200
 l = 1e-4
 std = 1
-p = 0
+p = 1
 L = 2
 N = 20
 
@@ -37,9 +37,10 @@ a = 2 * np.random.rand(L, N) - 1
 for l in range(L):
     a[l, :] /= linalg.norm(a[l, :]) / np.sqrt(N)
 
-b = np.empty((1 + p, N))
-# b[0, :] = np.diag(np.dot(a.T, (a < 0) * -(high + low)))
+b = np.empty((1 + p * N, N))  # (1 + p)N * N matrix
 b[0, :] = low
+b[1:, :] = -np.identity(N)
+
 y, _, rate = simulation.spikes(x, a, b, intercept=True)
 
 fa = FactorAnalysis(n_components=L)
