@@ -55,3 +55,15 @@ def sqexpcov(n, w, var=1.0):
     """
     i, j = np.meshgrid(np.arange(n), np.arange(n))
     return var * np.exp(-w * (i - j) ** 2)
+
+
+def likelihood(spike, latent, alpha, beta, intercept=True):
+    T, N = spike.shape
+    L, _ = latent.shape
+    k, _ = beta.shape
+    p = (k - intercept) // N
+
+    regressor = makeregressor(spike, p, intercept)
+
+    lograte = np.dot(regressor, beta) + np.dot(latent, alpha)
+    return np.sum(spike * lograte - np.exp(lograte))

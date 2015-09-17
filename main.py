@@ -1,13 +1,13 @@
 import os.path
 from datetime import datetime
-import numpy as np
-from scipy import linalg
+
 from pylab import figure, vlines, subplots, savefig, plot, yticks, xlim, ylim, suptitle, legend, title, gca
 from matplotlib.backends.backend_pdf import PdfPages
 import h5py
 from sklearn.decomposition.factor_analysis import FactorAnalysis
 
-from optimization import *
+from model import *
+from util import likelihood
 import simulation
 
 np.random.seed(0)
@@ -60,18 +60,22 @@ w[1] = 1e-3
 
 control = {'max iteration': 50,
            'fixed-point iteration': 3,
-           'tol': 1e-4,
+           'tol': 1e-5,
            'verbose': True}
 
-lbound, m, V, a1, b1, new_var, new_scale, a0, b0, elapsed, converged = variational(y, 0, mu, var, w,
-                                                                                   a0=a0,
-                                                                                   b0=None,
-                                                                                   m0=m0,
-                                                                                   fixalpha=False, fixbeta=False, fixpostmean=False,
-                                                                                   fixpostcov=False,
-                                                                                   normofalpha=np.sqrt(N), intercept=True,
-                                                                                   hyper=True,
-                                                                                   control=control)
+lbound, m1, V1, a1, b1, new_var, new_scale, a0, b0, elapsed, converged = train(y, 0, mu, var, w,
+                                                                               a0=a0,
+                                                                               b0=None,
+                                                                               m0=m0,
+                                                                               V0=None,
+                                                                               guardV=False, guardSigma=False,
+                                                                               fixalpha=False, fixbeta=False,
+                                                                               fixpostmean=False,
+                                                                               fixpostcov=False,
+                                                                               normofalpha=np.sqrt(N),
+                                                                               intercept=True,
+                                                                               hyper=True,
+                                                                               control=control)
 
 if not os.path.isdir('output'):
     os.mkdir('output')
@@ -91,8 +95,8 @@ log.create_dataset(name='spike', data=y)
 log.create_dataset(name='latent', data=x)
 log.create_dataset(name='initial alpha', data=a0)
 log.create_dataset(name='initial beta', data=b0)
-log.create_dataset(name='posterior mean', data=m)
-log.create_dataset(name='posterior covariance', data=V)
+log.create_dataset(name='posterior mean', data=m1)
+log.create_dataset(name='posterior covariance', data=V1)
 log.create_dataset(name='estimated alpha', data=a1)
 log.create_dataset(name='estimated beta', data=b1)
 log.close()
@@ -102,14 +106,14 @@ with open('output/{}.txt'.format(dt), 'w+') as logging:
     print('converged: {}'.format(converged), file=logging)
     print('time: {}s'.format(elapsed), file=logging)
     print('Lower bounds:\n{}'.format(lbound), file=logging)
-    print('Posterior mean:\n{}'.format(m), file=logging)
-    print('Posterior covariance:\n{}'.format(V), file=logging)
+    print('Posterior mean:\n{}'.format(m1), file=logging)
+    print('Posterior covariance:\n{}'.format(V1), file=logging)
     print('beta: {}'.format(np.linalg.norm(b1 - b)), file=logging)
     print('alpha: {}'.format(np.linalg.norm(a1 - a)), file=logging)
     print('alpha norm: {}'.format(np.linalg.norm(a1)), file=logging)
-    print('m mean: {}'.format(np.mean(m)), file=logging)
+    print('location of posterior mean: {}'.format(np.mean(m1)), file=logging)
     print('true likelihood: {}'.format(likelihood(y, x, a, b, intercept=True)), file=logging)
-    print('estimated likelihood: {}'.format(likelihood(y, m, a1, b1, intercept=True)), file=logging)
+    print('estimated likelihood: {}'.format(likelihood(y, m1, a1, b1, intercept=True)), file=logging)
     print('constant rate likelihood: {}'.format(np.sum(y * np.log(y.mean(axis=0)) - y.mean(axis=0))), file=logging)
     print('saturated likelihood: {}'.format(-y.sum()), file=logging)
 
@@ -156,21 +160,21 @@ for l in range(L):
     # for n in range(ns):
     #     plot(s[:, n] + m[:, l], color='0.8')
     plot(x[:, l] - np.mean(x[:, l]), label='latent', color='blue')
-    plot(m[:, l], label='posterior', color='red')
+    plot(m1[:, l], label='posterior', color='red')
     legend()
     title('Latent {}'.format(l + 1))
     savefig(pp, format='pdf')
 
-c = np.linalg.lstsq(m, x)[0]
-m2 = np.dot(m, c)
+rotate = np.linalg.lstsq(m1, x)[0]
+m2 = np.dot(m1, rotate)
 ns = 500
 # z = np.random.randn(ns, T, L)
 # for l in range(L):
 #     z[:, :, l] = np.dot(np.linalg.cholesky(V[l, :, :]), z[:, :, l].T).T + m[:, l]
 for l in range(L):
     figure()
-#     # for n in range(ns):
-#     #     plot(np.dot(z[n, :, :], c)[:, l], color='0.8')
+    #     # for n in range(ns):
+    #     #     plot(np.dot(z[n, :, :], rotate)[:, l], color='0.8')
     plot(x[:, l] - np.mean(x[:, l]), label='latent', color='blue')
     plot(m2[:, l], label='transformed posterior', color='red')
     legend()
@@ -194,4 +198,3 @@ suptitle('beta')
 savefig(pp, format='pdf')
 
 pp.close()
-
