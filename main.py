@@ -6,7 +6,9 @@ from matplotlib.backends.backend_pdf import PdfPages
 import h5py
 from sklearn.decomposition.factor_analysis import FactorAnalysis
 
-from model import *
+
+# from model import *
+from chol import *
 from util import likelihood
 import simulation
 
@@ -39,7 +41,7 @@ for l in range(L):
 
 b = np.empty((1 + p * N, N))  # (1 + p)N * N matrix
 b[0, :] = low
-b[1:, :] = -np.identity(N)
+b[1:, :] = -10 * np.identity(N)
 
 y, _, rate = simulation.spikes(x, a, b, intercept=True)
 
@@ -61,21 +63,19 @@ w[1] = 1e-3
 
 control = {'max iteration': 50,
            'fixed-point iteration': 3,
-           'tol': 1e-5,
+           'tol': 1e-4,
            'verbose': True}
 
-lbound, m1, V1, a1, b1, new_var, new_scale, a0, b0, elapsed, converged = train(y, 0, mu, var, w,
+lbound, m1, a1, b1, new_var, new_scale, a0, b0, elapsed, converged = train(y, 0, var, w,
                                                                                a0=a0,
                                                                                b0=None,
                                                                                m0=m0,
-                                                                               V0=None,
-                                                                               guardV=False, guardSigma=False,
+                                                                           normofalpha=np.sqrt(N),
                                                                                fixalpha=False, fixbeta=False,
                                                                                fixpostmean=False,
                                                                                fixpostcov=False,
-                                                                               normofalpha=np.sqrt(N),
-                                                                               intercept=True,
-                                                                               hyper=True,
+                                                                           hyper=False,
+                                                                           kchol=9,
                                                                                control=control)
 
 if not os.path.isdir('output'):
@@ -97,7 +97,7 @@ log.create_dataset(name='latent', data=x)
 log.create_dataset(name='initial alpha', data=a0)
 log.create_dataset(name='initial beta', data=b0)
 log.create_dataset(name='posterior mean', data=m1)
-log.create_dataset(name='posterior covariance', data=V1)
+# log.create_dataset(name='posterior covariance', data=V1)
 log.create_dataset(name='estimated alpha', data=a1)
 log.create_dataset(name='estimated beta', data=b1)
 log.close()
@@ -108,7 +108,7 @@ with open('output/{}.txt'.format(dt), 'w+') as logging:
     print('time: {}s'.format(elapsed), file=logging)
     print('Lower bounds:\n{}'.format(lbound), file=logging)
     print('Posterior mean:\n{}'.format(m1), file=logging)
-    print('Posterior covariance:\n{}'.format(V1), file=logging)
+    # print('Posterior covariance:\n{}'.format(V1), file=logging)
     print('beta: {}'.format(np.linalg.norm(b1 - b)), file=logging)
     print('alpha: {}'.format(np.linalg.norm(a1 - a)), file=logging)
     print('alpha norm: {}'.format(np.linalg.norm(a1)), file=logging)
@@ -182,20 +182,20 @@ for l in range(L):
     title('Latent (transformed posterior) {}'.format(l + 1))
     savefig(pp, format='pdf')
 
-_, ax = subplots(L, sharex=True)
-for l in range(L):
-    ax[l].bar(np.arange(N), a[l, :], width=0.25, color='blue', label='true')
-    ax[l].bar(np.arange(N) + 0.25, a1[l, :], width=0.25, color='red', label='estimate')
-    ax[l].axis('off')
-suptitle('alpha')
-savefig(pp, format='pdf')
-
-_, ax = subplots(N, sharex=True)
-for n in range(N):
-    ax[n].bar(np.arange(b.shape[0]), b[:, n], width=0.25, color='blue', label='true')
-    ax[n].bar(np.arange(b.shape[0]) + 0.25, b1[:, n], width=0.25, color='red', label='estimate')
-    ax[n].axis('off')
-suptitle('beta')
-savefig(pp, format='pdf')
+# _, ax = subplots(L, sharex=True)
+# for l in range(L):
+#     ax[l].bar(np.arange(N), a[l, :], width=0.25, color='blue', label='true')
+#     ax[l].bar(np.arange(N) + 0.25, a1[l, :], width=0.25, color='red', label='estimate')
+#     ax[l].axis('off')
+# suptitle('alpha')
+# savefig(pp, format='pdf')
+#
+# _, ax = subplots(N, sharex=True)
+# for n in range(N):
+#     ax[n].bar(np.arange(b.shape[0]), b[:, n], width=0.25, color='blue', label='true')
+#     ax[n].bar(np.arange(b.shape[0]) + 0.25, b1[:, n], width=0.25, color='red', label='estimate')
+#     ax[n].axis('off')
+# suptitle('beta')
+# savefig(pp, format='pdf')
 
 pp.close()

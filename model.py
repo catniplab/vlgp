@@ -376,7 +376,9 @@ def train(spike, p, prior_mean, prior_var, prior_scale,
                     grad_scale = (np.dot(isd, np.dot(prior_cov(l) * logcor, isd)) +
                                   np.trace(np.dot(amat, isv) - amat)) * prior_scale[l]
                     prior_scale[l] = np.exp(np.log(prior_scale[l]) + stepsize_scale[l] * grad_scale)
+                    delta_scale = prior_scale[l] - grad_scale
                     prior_cor[l, :, :] = sqexpcov(T, prior_scale[l], 1.0)
+                    predicted = thld * np.inner(grad_scale, delta_scale)
                     if verbose:
                         print('prior scale[{:d}]: {:.5f} -> {:.5f}'.format(l, last_scale[l], prior_scale[l]))
                     lb = elbo()
@@ -388,7 +390,7 @@ def train(spike, p, prior_mean, prior_var, prior_scale,
                         stepsize_scale[l] *= deflation
                         stepsize_scale[l] += eps
                     else:
-                        if lb - goodLB > thld * np.abs(goodLB):
+                        if lb - goodLB > predicted:
                             stepsize_scale[l] *= inflation
                         goodLB = lb
 
