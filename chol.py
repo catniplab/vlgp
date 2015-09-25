@@ -31,12 +31,8 @@ def inchol(n, omega, k):
 
         g[i, i] = np.sqrt(diagG[jast])
         newAcol = np.exp(- omega * (x[pvec[i + 1:]] - x[pvec[i]]) ** 2)
-        g[i + 1:, i] = (newAcol -
-                        np.dot(g[i + 1:, :i], g[i, :i].T)) / g[i, i]
-        # else:
-        #     g[i + 1:, i] = newAcol / g[i, i]
+        g[i + 1:, i] = (newAcol - np.dot(g[i + 1:, :i], g[i, :i].T)) / g[i, i]
         diagG[i + 1:] = 1 - np.sum((g[i + 1:, :i + 1]) ** 2, axis=1)
-        print(diagG)
 
         i += 1
     return g[pvec, :]
@@ -88,8 +84,8 @@ def train(spike, p, prior_var, prior_scale, a0=None, b0=None, m0=None, normofalp
             trace = (T - np.trace(GTWG) + np.trace(np.dot(GTWG, linalg.solve(eyek + GTWG, GTWG))))
             lndet = np.linalg.slogdet(eyek - GTWG + np.dot(GTWG, linalg.solve(eyek + GTWG, GTWG)))[1]
 
-            lb += -0.5 * np.inner(mdivS, mdivS) - 0.5 * trace + 0.5 * lndet
-            # lb += -0.5 * T + 0.5 * lndet
+            # lb += -0.5 * np.inner(mdivS, mdivS) - 0.5 * trace + 0.5 * lndet
+            lb += -0.5 * T + 0.5 * lndet
 
         return lb
 
@@ -193,7 +189,7 @@ def train(spike, p, prior_var, prior_scale, a0=None, b0=None, m0=None, normofalp
     last_a = np.empty_like(alpha)
     last_m = np.empty_like(post_mean)
     last_var = np.empty_like(prior_var)
-    new_scale = np.empty_like(prior_scale)
+    new_scale = np.ones_like(prior_scale)
 
     stepsize_alpha = np.ones(N)
     stepsize_beta = np.ones(N)
@@ -317,6 +313,7 @@ def train(spike, p, prior_var, prior_scale, a0=None, b0=None, m0=None, normofalp
             updatedV()
 
         if hyper and it % 5 == 0:
+            direction_w[:] = 1.1
             eta = regressor.dot(beta) + post_mean.dot(alpha)
             lam = np.exp(eta + 0.5 * dV.dot(alpha ** 2))
             for l in range(L):
@@ -341,11 +338,12 @@ def train(spike, p, prior_var, prior_scale, a0=None, b0=None, m0=None, normofalp
 
             for _ in range(fpinter):
                 for l in range(L):
-                    print('direction:', l, direction_w[l])
-                    print('new w:', prior_scale[l] * direction_w[l])
                     new_scale[l] = prior_scale[l] * direction_w[l]
                     if verbose:
                         print('prior scale[{:d}]: {:.5f} -> {:.5f}'.format(l, prior_scale[l], new_scale[l]))
+                    # print('old', prior_scale)
+                    # print('d', direction_w)
+                    # print('new', new_scale)
                     lb = elbo2(new_scale)
                     if np.isnan(lb) or lb < goodLB:
                         if verbose:
