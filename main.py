@@ -6,18 +6,16 @@ from matplotlib.backends.backend_pdf import PdfPages
 import h5py
 from sklearn.decomposition.factor_analysis import FactorAnalysis
 
-
-# from model import *
 from chol import *
 from util import likelihood
 import simulation
 
 np.random.seed(0)
 
-T = 200
-l = 1e-4
+T = 5000
+w = 1e-4
 std = 1
-p = 1
+p = 0
 L = 2
 N = 20
 
@@ -25,7 +23,7 @@ high = np.log(25 / T)
 low = np.log(5 / T)
 
 # simulate latent processes
-# x, ticks = simulation.latents(L, T, std, l)
+# x, ticks = simulation.latents(L, T, std, w)
 x = np.empty((T, L), dtype=float)
 x[:T // 2, 0] = high
 x[T // 2:, 0] = low
@@ -34,14 +32,12 @@ for l in range(L):
     x[:, l] -= np.mean(x[:, l])
 
 # simulate spike trains
-# a = np.empty((L, N), dtype=float)
 a = 2 * np.random.rand(L, N) - 1
 for l in range(L):
     a[l, :] /= linalg.norm(a[l, :]) / np.sqrt(N)
 
-b = np.empty((1 + p * N, N))  # (1 + p)N * N matrix
+b = np.empty((1 + p*N, N))
 b[0, :] = low
-b[1:, :] = -10 * np.identity(N)
 
 y, _, rate = simulation.spikes(x, a, b, intercept=True)
 
@@ -55,11 +51,11 @@ a0 /= np.linalg.norm(a0) / np.sqrt(N)
 mu = np.zeros_like(x)
 
 var = np.empty(L, dtype=float)
-var[0] = 5
-var[1] = 5
+var[0] = 3
+var[1] = 3
 w = np.empty(L, dtype=float)
-w[0] = 1e-3
-w[1] = 1e-3
+w[0] = 1e-6
+w[1] = 1e-5
 
 control = {'max iteration': 50,
            'fixed-point iteration': 3,
@@ -67,16 +63,15 @@ control = {'max iteration': 50,
            'verbose': True}
 
 lbound, m1, a1, b1, new_var, new_scale, a0, b0, elapsed, converged = train(y, 0, var, w,
-                                                                               a0=a0,
-                                                                               b0=None,
-                                                                               m0=m0,
+                                                                           a0=a0,
+                                                                           b0=None,
+                                                                           m0=m0,
                                                                            normofalpha=np.sqrt(N),
-                                                                               fixalpha=False, fixbeta=False,
-                                                                               fixpostmean=False,
-                                                                               fixpostcov=False,
-                                                                           hyper=False,
-                                                                           kchol=9,
-                                                                               control=control)
+                                                                           fixalpha=False, fixbeta=False,
+                                                                           fixpostmean=False,
+                                                                           hyper=True,
+                                                                           kchol=50,
+                                                                           control=control)
 
 if not os.path.isdir('output'):
     os.mkdir('output')
