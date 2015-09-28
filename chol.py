@@ -217,9 +217,9 @@ def train(spike, p, prior_var, prior_scale, a0=None, b0=None, m0=None, normofalp
     # temporary storage for recovery
     last_b = np.empty_like(beta)
     last_a = np.empty_like(alpha)
-    last_m = np.empty_like(post_mean)
+    new_m = post_mean.copy()
     last_var = np.empty_like(prior_var)
-    new_scale = np.ones_like(prior_scale)
+    new_scale = prior_scale.copy()
     new_chol = prior_chol.copy()
 
     stepsize_alpha = np.ones(N)
@@ -255,7 +255,7 @@ def train(spike, p, prior_var, prior_scale, a0=None, b0=None, m0=None, normofalp
                 except linalg.LinAlgError as e:
                     print('beta', e)
                     continue
-                last_b[:, n] = beta[:, n]
+                # last_b[:, n] = beta[:, n]
                 beta[:, n] += delta_b
                 # updateV()
                 lb = elbo(spike, regressor,  post_mean, alpha, beta, prior_chol, v)
@@ -292,7 +292,7 @@ def train(spike, p, prior_var, prior_scale, a0=None, b0=None, m0=None, normofalp
                 except linalg.LinAlgError as e:
                     print('alpha', e)
                     continue
-                last_a[l, :] = alpha[l, :]
+                # last_a[l, :] = alpha[l, :]
                 alpha[l, :] += delta_a
                 alpha[l, :] /= linalg.norm(alpha[l, :]) / normofalpha
                 # updateV()
@@ -326,25 +326,24 @@ def train(spike, p, prior_var, prior_scale, a0=None, b0=None, m0=None, normofalp
                 delta_m = u2 - G.dot(np.dot((w * G).T, u2)) + \
                           G.dot(GTWG.dot(linalg.solve(eyek + GTWG, np.dot((w * G).T, u2))))
 
-                last_m[:, l] = post_mean[:, l]
-                post_mean[:, l] += delta_m
-                post_mean[:, l] -= np.mean(post_mean[:, l])
+                new_m[:, l] = post_mean[:, l]
+                new_m[:, l] += delta_m
+                new_m[:, l] -= np.mean(new_m[:, l])
                 # updateV()
-                lb = elbo(spike, regressor,  post_mean, alpha, beta, prior_chol, v)
+                lb = elbo(spike, regressor,  new_m, alpha, beta, prior_chol, v)
                 predicted = thld * np.inner(grad_m, np.squeeze(delta_m))
                 if np.isnan(lb) or lb < goodLB:
                     stepsize_post_mean[l] *= deflation
                     stepsize_post_mean[l] += eps
-                    # post_mean[:, l] = last_m[:, l]
-                    # rate[:] = last_rate
                 else:
                     if lb - goodLB > predicted:
                         stepsize_post_mean[l] *= inflation
                     goodLB = lb
+                    post_mean[:, l] = new_m[:, l]
                 updateV()
 
         if hyper and it % 5 == 0:
-            direction_w[:] = 1.1
+            direction_w[:] = 1.5
             eta = regressor.dot(beta) + post_mean.dot(alpha)
             lam = np.exp(eta + 0.5 * v.dot(alpha ** 2))
             for _ in range(fpinter):
@@ -367,24 +366,24 @@ def train(spike, p, prior_var, prior_scale, a0=None, b0=None, m0=None, normofalp
                             print('prior variance[{:d}] caused decrease'.format(l))
                     else:
                         goodLB = lb
-                    updateV()
+                    # updateV()
 
                 for l in range(L):
                     new_scale[l] = prior_scale[l] * direction_w[l]
                     if verbose:
-                        print('prior scale[{:d}]: {:.5f} -> {:.5f}'.format(l, prior_scale[l], new_scale[l]))
+                        print('prior scale[{:d}]: {:.10f} -> {:.10f}'.format(l, prior_scale[l], new_scale[l]))
                     new_chol[l, :] = incchol(T, new_scale[l], kchol) * np.sqrt(prior_var[l])
                     lb = elbo(spike, regressor,  post_mean, alpha, beta, new_chol, v)
                     if np.isnan(lb) or lb < goodLB:
                         if verbose:
                             print('prior scale[{:d}] caused decrease'.format(l))
-                        direction_w[l] = np.exp(-0.5 * np.log(direction_w[l]))
+                        direction_w[l] = 1 / direction_w[l]
                     else:
                         # direction_w[l] *= direction_w[l]
                         goodLB = lb
                         prior_scale[l] = new_scale[l]
                         prior_chol[l, :] = new_chol[l, :]
-                updateV()
+                # updateV()
 
         # store lower bound
         lbound[it] = elbo(spike, regressor,  post_mean, alpha, beta, prior_chol, v)

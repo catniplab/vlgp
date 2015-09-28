@@ -54,7 +54,7 @@ var = np.empty(L, dtype=float)
 var[0] = 3
 var[1] = 3
 w = np.empty(L, dtype=float)
-w[0] = 1e-6
+w[0] = 1e-5
 w[1] = 1e-5
 
 control = {'max iteration': 50,
