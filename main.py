@@ -6,13 +6,13 @@ from matplotlib.backends.backend_pdf import PdfPages
 import h5py
 from sklearn.decomposition.factor_analysis import FactorAnalysis
 
-from chol import *
+from model_chol import *
 from util import likelihood
 import simulation
 
 np.random.seed(0)
 
-T = 5000
+T = 500
 w = 1e-4
 std = 1
 p = 0
@@ -48,20 +48,22 @@ a0 = fa.components_
 m0 *= np.linalg.norm(a0) / np.sqrt(N)
 a0 /= np.linalg.norm(a0) / np.sqrt(N)
 
-mu = np.zeros_like(x)
-
-var = np.empty(L, dtype=float)
-var[0] = 3
-var[1] = 3
+var = np.ones(L, dtype=float) * 0.1
 w = np.empty(L, dtype=float)
-w[0] = 1e-5
-w[1] = 1e-5
+w[0] = 10
+w[1] = 100
+
+# w = np.logspace(-1, 3, 5)
+# grid_w = cartesian([w] * L)
 
 control = {'max iteration': 50,
-           'fixed-point iteration': 3,
-           'tol': 1e-4,
+           'fixed-point iteration': 5,
+           'tol': 1e-5,
            'verbose': True}
 
+# best_lb = np.NINF
+
+# for i, row in enumerate(grid_w):
 lbound, m1, a1, b1, new_var, new_scale, a0, b0, elapsed, converged = train(y, 0, var, w,
                                                                            a0=a0,
                                                                            b0=None,
@@ -72,6 +74,12 @@ lbound, m1, a1, b1, new_var, new_scale, a0, b0, elapsed, converged = train(y, 0,
                                                                            hyper=True,
                                                                            kchol=50,
                                                                            control=control)
+#     print(i, row, lbound[-1])
+#     if best_lb < lbound[-1]:
+#         best_lb = lbound[-1]
+#         best_m = m1
+#
+# m1 = best_m
 
 if not os.path.isdir('output'):
     os.mkdir('output')

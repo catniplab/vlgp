@@ -41,3 +41,32 @@ def likelihood(spike, latent, alpha, beta, intercept=True):
 
     lograte = np.dot(regressor, beta) + np.dot(latent, alpha)
     return np.sum(spike * lograte - np.exp(lograte))
+
+
+def cartesian(arrays):
+    """Generate a cartesian product of input arrays.
+    Parameters
+    ----------
+    arrays : list of array-like
+        1-D arrays to form the cartesian product of.
+    out : ndarray
+        Array to place the cartesian product in.
+    Returns
+    -------
+    out : ndarray
+        2-D array of shape (M, len(arrays)) containing cartesian products
+        formed of input arrays.
+    """
+    arrays = [np.asarray(x) for x in arrays]
+    shape = (len(x) for x in arrays)
+    dtype = arrays[0].dtype
+
+    ix = np.indices(shape)
+    ix = ix.reshape(len(arrays), -1).T
+
+    out = np.empty_like(ix, dtype=dtype)
+
+    for n, arr in enumerate(arrays):
+        out[:, n] = arrays[n][ix[:, n]]
+
+    return out
