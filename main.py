@@ -48,10 +48,10 @@ a0 = fa.components_
 m0 *= np.linalg.norm(a0) / np.sqrt(N)
 a0 /= np.linalg.norm(a0) / np.sqrt(N)
 
-var = np.ones(L, dtype=float) * 0.1
+var = np.ones(L, dtype=float) * 5
 w = np.empty(L, dtype=float)
-w[0] = 10
-w[1] = 100
+w[0] = 1
+w[1] = 1
 
 # w = np.logspace(-1, 3, 5)
 # grid_w = cartesian([w] * L)

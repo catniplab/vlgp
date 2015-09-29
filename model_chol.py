@@ -1,5 +1,6 @@
 __author__ = 'yuan'
 import timeit
+import itertools
 
 import numpy as np
 from scipy import linalg
@@ -39,6 +40,12 @@ def incchol(n, omega, k, tol=1e-10):
     return g[np.argsort(pvec), :]
 
 
+def firingrate(h, m, v, a, b, min=0, max=5):
+    eta_x = h.dot(b) + m.dot(a) + 0.5 * v.dot(a ** 2)
+    np.clip(eta_x, min, max, out=eta_x)
+    return np.exp(eta_x)
+
+
 def elbo(y, h, m, a, b, chol, v):
     """
     Evidence Lower Bound
@@ -56,9 +63,7 @@ def elbo(y, h, m, a, b, chol, v):
     eyek = np.identity(k)
 
     eta = h.dot(b) + m.dot(a)
-    eta_x = eta + 0.5 * v.dot(a ** 2)
-    np.clip(eta_x, 10 * np.finfo(np.float).eps, np.log(np.finfo(np.float).max / 10), out=eta_x)
-    lam = np.exp(eta_x)
+    lam = firingrate(h, m, v, a, b)
     lb = np.sum(y * eta - lam)
 
     for l in range(L):
@@ -72,6 +77,27 @@ def elbo(y, h, m, a, b, chol, v):
         lb += -0.5 * np.inner(mdivS, mdivS) - 0.5 * trace + 0.5 * lndet
         # lb += 0.5 * lndet
     return lb
+
+
+def lbhyper(h, m, a, b, chol, v, sigma, omega):
+    L, T, k = chol.shape
+    eyek = np.identity(k)
+    lam = firingrate(h, m, v, a, b)
+
+    lb = 0.0
+    for l in range(L):
+        G0 = chol[l, :]
+        w = lam.dot(a[l, :] ** 2).reshape((T, 1))
+        A0 = np.dot(G0.T, w * G0)
+        G = incchol(T, omega[l], k) * np.sqrt(sigma[l])
+        Gstar = linalg.pinv2(G)
+        lb += np.inner(Gstar.dot(m[:, l]), Gstar.dot(m[:, l]))
+        diagG = G.diagonal()
+        lb += np.sum(np.log(diagG[np.nonzero(diagG)] ** 2))
+        lb += np.trace(Gstar.dot(G0).dot(Gstar.dot(G0).T) -
+                       Gstar.dot(G0).dot(A0.dot(Gstar.dot(G0).T)) +
+                       Gstar.dot(G0).dot(A0).dot(linalg.solve(eyek + A0, A0, sym_pos=True).dot(Gstar.dot(G0).T)))
+    return -lb / L / T
 
 
 def train(spike, p, prior_var, prior_scale, a0=None, b0=None, m0=None, normofalpha=1.0,
@@ -104,9 +130,10 @@ def train(spike, p, prior_var, prior_scale, a0=None, b0=None, m0=None, normofalp
         converged:
     """
 
-    def updatev(r=2):
+    #################################################
+    def updatev(r=1):
         for _ in range(r):
-            lam = firingrate()
+            lam = firingrate(regressor, post_mean, v, alpha, beta)
             for l in range(L):
                 G = prior_chol[l, :]
                 w = lam.dot(alpha[l, :] ** 2).reshape((T, 1))
@@ -117,11 +144,6 @@ def train(spike, p, prior_var, prior_scale, a0=None, b0=None, m0=None, normofalp
     def makechol():
         for l in range(L):
             prior_chol[l, :] = incchol(T, prior_scale[l], kchol) * np.sqrt(prior_var[l])
-
-    def firingrate():
-        eta_x = regressor.dot(beta) + post_mean.dot(alpha) + 0.5 * v.dot(alpha ** 2)
-        np.clip(eta_x, eps, 30, out=eta_x)
-        return np.exp(eta_x)
     ###################################################
 
     # epsilon
@@ -215,7 +237,7 @@ def train(spike, p, prior_var, prior_scale, a0=None, b0=None, m0=None, normofalp
             new_beta[:] = beta
             good_elbo = elbo(spike, regressor, post_mean, alpha, beta, prior_chol, v)
             for n in range(N):
-                lam = firingrate()
+                lam = firingrate(regressor, post_mean, v, alpha, beta)
                 grad_b = np.dot(regressor.T, spike[:, n] - lam[:, n])
                 neg_hess_b = np.dot(regressor.T, (regressor.T * lam[:, n]).T)
                 if linalg.norm(grad_b, ord=np.inf) < eps:
@@ -246,7 +268,7 @@ def train(spike, p, prior_var, prior_scale, a0=None, b0=None, m0=None, normofalp
             new_alpha[:] = alpha
             good_elbo = elbo(spike, regressor, post_mean, alpha, beta, prior_chol, v)
             for l in range(L):
-                lam = firingrate()
+                lam = firingrate(regressor, post_mean, v, alpha, beta)
                 grad_a = np.dot((spike - lam).T, post_mean[:, l]) \
                          - np.dot(lam.T, v[:, l]) * alpha[l, :]
                 neg_hess_a = np.diag(np.dot(lam.T, post_mean[:, l] ** 2) +
@@ -281,7 +303,7 @@ def train(spike, p, prior_var, prior_scale, a0=None, b0=None, m0=None, normofalp
             new_m[:] = post_mean
             good_elbo = elbo(spike, regressor, post_mean, alpha, beta, prior_chol, v)
             for l in range(L):
-                lam = firingrate()
+                lam = firingrate(regressor, post_mean, v, alpha, beta)
                 G = prior_chol[l]
                 w = lam.dot(alpha[l, :] ** 2).reshape((T, 1))
                 GTWG = np.dot(G.T, w * G)
@@ -308,9 +330,20 @@ def train(spike, p, prior_var, prior_scale, a0=None, b0=None, m0=None, normofalp
                     post_mean[:, l] = new_m[:, l]
             updatev()
 
-        if hyper and it % 5 == 0:
+        if hyper and it % 10 == 0:
+            grid_w = np.array(list(itertools.combinations_with_replacement(np.logspace(-2, 2, 5), 2)))
+
+            lb = np.empty(grid_w.shape[0], dtype=float)
+            for i, row in enumerate(grid_w):
+                lb[i] = lbhyper(regressor, post_mean, alpha, beta, prior_chol, v, prior_var, row)
+                print(row, lb[i])
+
+            prior_scale[:] = grid_w[lb.argmax(), :]
+            print('scale ->', prior_scale)
+            makechol()
+
             for l in range(L):
-                lam = firingrate()
+                lam = firingrate(regressor, post_mean, v, alpha, beta)
                 last_var[l] = prior_var[l]
                 for _ in range(fpinter):
                     G = prior_chol[l]
@@ -324,35 +357,9 @@ def train(spike, p, prior_var, prior_scale, a0=None, b0=None, m0=None, normofalp
                 if verbose:
                     print('prior variance[{:d}]: {:.5f} -> {:.5f}'.format(l, last_var[l], prior_var[l]))
             makechol()
-            # updatev()
+            updatev()
 
-            # grid_w = np.array(list(itertools.combinations_with_replacement(np.logspace(-1, 3, 5), 2)))
 
-            # lb = np.empty(grid_w.shape[0], dtype=float)
-            # for i, row in enumerate(grid_w):
-            #     for l in range(L):
-            #         new_chol[l, :] = incchol(T, row[l], kchol) * np.sqrt(prior_var[l])
-            #     lb[i] = elbo(spike, regressor, post_mean, alpha, beta, new_chol, v)
-            #     # print(row, lb[i])
-            #
-            # prior_scale[:] = grid_w[lb.argmax(), :]
-            # low = -2
-            # high = 6
-            # new_chol[:] = prior_chol
-            # for l in range(L):
-            #     # grid = cartesian([omega] * L)
-            #     omega = np.append(np.logspace(low, high, num=high - low + 1), prior_scale[l])
-            #     lb = np.full(omega.shape[0], fill_value=np.NINF)
-            #     for i, row in enumerate(omega):
-            #         new_chol[l, :] = incchol(T, row, kchol) * np.sqrt(prior_var[l])
-            #         lb[i] = elbo(spike, regressor, post_mean, alpha, beta, new_chol, v)
-            #     if verbose:
-            #         print(np.column_stack((omega, lb)))
-            #     best = omega[lb.argmax()]
-            #     if verbose:
-            #         print('omega[{}]: {} -> {}'.format(l, prior_scale[l], best))
-            #     prior_scale[l] = best
-            # makechol()
 
         # store lower bound
         lbound[it] = elbo(spike, regressor, post_mean, alpha, beta, prior_chol, v)
