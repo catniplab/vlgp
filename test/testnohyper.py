@@ -1,3 +1,4 @@
+__author__ = 'yuan'
 import os.path
 from datetime import datetime
 
@@ -6,14 +7,13 @@ from matplotlib.backends.backend_pdf import PdfPages
 import h5py
 from sklearn.decomposition.factor_analysis import FactorAnalysis
 
-from model_chol import *
+from nohyper import *
 from util import likelihood
 import simulation
 
 np.random.seed(0)
 
 T = 500
-w = 1e-4
 std = 1
 p = 0
 L = 2
@@ -23,7 +23,6 @@ high = np.log(25 / T)
 low = np.log(5 / T)
 
 # simulate latent processes
-# x, ticks = simulation.latents(L, T, std, w)
 x = np.empty((T, L), dtype=float)
 x[:T // 2, 0] = high
 x[T // 2:, 0] = low
@@ -44,39 +43,21 @@ y, _, rate = simulation.spikes(x, a, b, intercept=True)
 fa = FactorAnalysis(n_components=L, svd_method='lapack')
 m0 = fa.fit_transform(y)
 a0 = fa.components_
-# a0 = np.random.randn(L, N)
 m0 *= np.linalg.norm(a0) / np.sqrt(N)
 a0 /= np.linalg.norm(a0) / np.sqrt(N)
 
-var = np.ones(L, dtype=float) * 5
+var = np.ones(L, dtype=float) * 10
 w = np.empty(L, dtype=float)
-w[0] = 1e-2
-w[1] = 1e-6
+w[0] = 1e-5
+w[1] = 1e-5
 
-# w = np.logspace(-1, 3, 5)
-# grid_w = cartesian([w] * L)
-
-control = {'max iteration': 50,
-           'fixed-point iteration': 5,
-           'tol': 1e-5,
-           'verbose': True}
-
-lbound, m1, a1, b1, new_var, new_scale, a0, b0, elapsed, converged = train(y, 0, var, w,
-                                                                           a0=a0,
-                                                                           b0=None,
-                                                                           m0=m0,
-                                                                           normofalpha=np.sqrt(N),
-                                                                           fixalpha=False, fixbeta=False,
-                                                                           fixpostmean=False,
-                                                                           hyper=True,
-                                                                           kchol=50,
-                                                                           control=control)
-#     print(i, row, lbound[-1])
-#     if best_lb < lbound[-1]:
-#         best_lb = lbound[-1]
-#         best_m = m1
-#
-# m1 = best_m
+# for i, row in enumerate(grid_w):
+lbound, m1, a1, b1, new_var, new_scale, a0, b0, elapsed, converged = trainmodel(y, 0, var, w,
+                                                                                a0=a0, b0=None, m0=m0,
+                                                                                normofalpha=np.sqrt(N),
+                                                                                kchol=50,
+                                                                                fpinter=5, niter=50,
+                                                                                tol=1e-7, verbose=True)
 
 if not os.path.isdir('output'):
     os.mkdir('output')
@@ -199,3 +180,4 @@ for l in range(L):
 # savefig(pp, format='pdf')
 
 pp.close()
+
