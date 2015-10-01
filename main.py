@@ -12,12 +12,10 @@ import simulation
 
 np.random.seed(0)
 
-T = 500
-w = 1e-4
-std = 1
+T = 1000
 p = 0
 L = 2
-N = 20
+N = 50
 
 high = np.log(25 / T)
 low = np.log(5 / T)
@@ -50,15 +48,15 @@ a0 /= np.linalg.norm(a0) / np.sqrt(N)
 
 var = np.ones(L, dtype=float) * 5
 w = np.empty(L, dtype=float)
-w[0] = 1e-2
-w[1] = 1e-6
+w[0] = 1e-4
+w[1] = 5e-4
 
 # w = np.logspace(-1, 3, 5)
 # grid_w = cartesian([w] * L)
 
 control = {'max iteration': 50,
            'fixed-point iteration': 5,
-           'tol': 1e-5,
+           'tol': 1e-4,
            'verbose': True}
 
 lbound, m1, a1, b1, new_var, new_scale, a0, b0, elapsed, converged = train(y, 0, var, w,
@@ -69,14 +67,8 @@ lbound, m1, a1, b1, new_var, new_scale, a0, b0, elapsed, converged = train(y, 0,
                                                                            fixalpha=False, fixbeta=False,
                                                                            fixpostmean=False,
                                                                            hyper=True,
-                                                                           kchol=50,
+                                                                           kchol=20,
                                                                            control=control)
-#     print(i, row, lbound[-1])
-#     if best_lb < lbound[-1]:
-#         best_lb = lbound[-1]
-#         best_m = m1
-#
-# m1 = best_m
 
 if not os.path.isdir('output'):
     os.mkdir('output')
