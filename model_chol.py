@@ -69,7 +69,8 @@ def elbo(y, h, m, a, b, chol, v):
         G = chol[l, :]
         w = lam.dot(a[l, :] ** 2).reshape((T, 1))
         GTWG = G.T.dot(w * G)
-        mdivS = linalg.pinv2(G).dot(m[:, l])
+        # mdivS = linalg.pinv2(G).dot(m[:, l])
+        mdivS = linalg.lstsq(G, m[:, l])[0]
         trace = (T - np.trace(GTWG) + np.trace(GTWG.dot(linalg.solve(eyek + GTWG, GTWG, sym_pos=True))))
         lndet = np.linalg.slogdet(eyek - GTWG + GTWG.dot(linalg.solve(eyek + GTWG, GTWG, sym_pos=True)))[1]
 
@@ -396,7 +397,8 @@ def train(y, p, prior_var, prior_scale, a0=None, b0=None, m0=None, normofalpha=1
                 G = prior_chol[l]
                 w = lam.dot(alpha[l, :] ** 2).reshape((T, 1))
                 GTWG = np.dot(G.T, w * G)
-                mdivS = linalg.pinv2(G).dot(m[:, l])
+                # mdivS = linalg.pinv2(G).dot(m[:, l])
+                mdivS = linalg.lstsq(G, m[:, l])[0]
                 new_var = prior_var[l] * (np.inner(mdivS, mdivS) + (T - np.trace(GTWG) + np.trace(GTWG.dot(
                     linalg.solve(eyek + GTWG, GTWG, sym_pos=True))))) / T
                 prior_var[l] = new_var if new_var > 0 else prior_var[l] / 2
