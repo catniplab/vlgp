@@ -129,7 +129,7 @@ def train(spike, p, prior_mean, prior_var, prior_scale,
     prior_cor = np.empty(shape=(L, T, T))
     # prior_inv = np.empty(shape=(L, T, T))
     for l in range(L):
-        # prior_chol[l] = incchol(T, scale[l], inchol_tol)
+        # prior_chol[l] = ichol_gauss(T, scale[l], inchol_tol)
         prior_cor[l, :, :] = sqexpcov(T, prior_scale[l], 1.0)
         # U, s, Vh = linalg.svd(prior_cov[l, :, :])
         # prior_inv[l, :, :] = np.dot(Vh.T, np.dot(np.diag(np.nan_to_num(np.abs(1/s))), U.T))

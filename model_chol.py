@@ -3,40 +3,8 @@ import timeit
 
 import numpy as np
 from scipy import linalg
-
 from util import makeregressor
-
-
-def incchol(n, omega, k, tol=1e-16):
-    """
-    Incomplete Cholesky decomposition for squared exponential covariance
-    :param n: size of covariance matrix (n, n)
-    :param omega: inverse of 2 * squared lengthscale
-    :param k: number of columns of decomposition
-    :return: (n, m) matrix
-    """
-    x = np.arange(n)
-    # x = np.linspace(0, 1, n)
-    diagG = np.ones(n, dtype=float)
-    pvec = np.arange(n, dtype=int)
-    i = 0
-    g = np.zeros((n, k), dtype=float)
-    while i < k and np.sum(diagG[i:]) > tol:
-        if i > 0:
-            jast = np.argmax(diagG[i:])
-            jast += i
-            pvec[i], pvec[jast] = pvec[jast].copy(), pvec[i].copy()
-            g[jast, :i + 1], g[i, :i + 1] = g[i, :i + 1].copy(), g[jast, :i + 1].copy()
-        else:
-            jast = 0
-
-        g[i, i] = np.sqrt(diagG[jast])
-        newAcol = np.exp(- omega * (x[pvec[i + 1:]] - x[pvec[i]]) ** 2)
-        g[i + 1:, i] = (newAcol - np.dot(g[i + 1:, :i], g[i, :i].T)) / g[i, i]
-        diagG[i + 1:] = 1 - np.sum((g[i + 1:, :i + 1]) ** 2, axis=1)
-
-        i += 1
-    return g[np.argsort(pvec), :]
+from la import ichol_gauss
 
 
 def firingrate(h, m, v, a, b, min=0, max=30):
@@ -89,7 +57,7 @@ def lbhyper(h, m, a, b, chol, v, sigma, omega):
         G0 = chol[l, :]
         w = lam.dot(a[l, :] ** 2).reshape((T, 1))
         A0 = G0.T.dot(w * G0)
-        G = incchol(T, omega[l], k) * np.sqrt(sigma[l])
+        G = ichol_gauss(T, omega[l], k) * np.sqrt(sigma[l])
         Gstar = linalg.pinv2(G)
         lb += np.inner(Gstar.dot(m[:, l]), Gstar.dot(m[:, l]))
         diagG = G.diagonal()
@@ -108,7 +76,7 @@ def lbhyper2(y, h, m, a, b, chol, v, sigma, omega):
 
     lb = 0.0
     for l in range(L):
-        G = incchol(T, omega[l], k) * np.sqrt(sigma[l])
+        G = ichol_gauss(T, omega[l], k) * np.sqrt(sigma[l])
         w = lam.dot(a[l, :] ** 2).reshape((T, 1))
         GTWG = G.T.dot(w * G)
         GTu = G.T.dot((y - lam).dot(a[l, :]))
@@ -171,7 +139,7 @@ def train(y, p, prior_var, prior_scale, a0=None, b0=None, m0=None, normofalpha=1
 
     def makechol():
         for l in range(L):
-            prior_chol[l, :] = incchol(T, prior_scale[l], kchol) * np.sqrt(prior_var[l])
+            prior_chol[l, :] = ichol_gauss(T, prior_scale[l], kchol) * np.sqrt(prior_var[l])
 
     ###################################################
 
@@ -371,7 +339,7 @@ def train(y, p, prior_var, prior_scale, a0=None, b0=None, m0=None, normofalpha=1
             # for i, row in enumerate(grid_w):
             #     new_chol = np.empty_like(prior_chol)
             #     for l in range(L):
-            #         new_chol[l, :] = incchol(T, row[l], kchol) * np.sqrt(prior_var[l])
+            #         new_chol[l, :] = ichol_gauss(T, row[l], kchol) * np.sqrt(prior_var[l])
             #     lb[i] = elbo(y, h, m, alpha, beta, new_chol, v)
             #     # lb[i] = lbhyper(h, m, alpha, beta, prior_chol, v, prior_var, row)
             #     # print(row, lb[i])
