@@ -7,7 +7,7 @@ from util import makeregressor
 from la import *
 
 
-def firingrate(h, m, lv, a, b, min=0, max=5):
+def firingrate(h, m, lv, a, b, min=-20, max=20):
     # lv: (L, T, T)
     # v: (T, L)
     v = np.sum(lv ** 2, axis=2).T
@@ -86,9 +86,11 @@ def train(y, p, prior_var, prior_scale, a0=None, b0=None, m0=None, anorm=1.0, hy
             lam = firingrate(h, m, lv, alpha, beta)
             G = chol[l]
             w = lam.dot(alpha[l, :] ** 2).reshape((T, 1))
+            w.clip(np.finfo(float).tiny, np.exp(15), out=w)  # avoid zeros and infinities
             GTWG = G.T.dot(w * G)
-            A = eyek - GTWG + GTWG.dot(linalg.solve(eyek + GTWG, GTWG, sym_pos=True))
-            lv[l, :] = G.dot(ichol(A))
+            # A = eyek - GTWG + GTWG.dot(linalg.solve(eyek + GTWG, GTWG, sym_pos=True))  # A should be pd but numerically not
+            A = eyek - GTWG.dot(GTWG + GTWG.dot(GTWG)).dot(GTWG)
+            lv[l, :] = G.dot(ichol2(A, kchol))
 
     def makechol():
         for l in range(L):

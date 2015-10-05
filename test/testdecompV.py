@@ -13,7 +13,7 @@ import simulation
 
 np.random.seed(0)
 
-T = 1000
+T = 50000
 std = 1
 p = 0
 L = 2

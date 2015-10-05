@@ -7,7 +7,7 @@ from util import makeregressor
 from la import ichol_gauss
 
 
-def firingrate(h, m, v, a, b, min=0, max=30):
+def firingrate(h, m, v, a, b, min=np.NINF, max=30):
     eta_x = h.dot(b) + m.dot(a) + 0.5 * v.dot(a ** 2)
     np.clip(eta_x, min, max, out=eta_x)
     return np.exp(eta_x)
@@ -86,8 +86,8 @@ def lbhyper2(y, h, m, a, b, chol, v, sigma, omega):
     return lb
 
 
-def train(y, p, prior_var, prior_scale, a0=None, b0=None, m0=None, normofalpha=1.0,
-          hyper=False, fixalpha=False, fixbeta=False, fixpostmean=False, kchol=9, control=None):
+def train(y, p, prior_var, prior_scale, a0=None, b0=None, m0=None, anorm=1.0,
+          hyper=False, kchol=10, niter=50, tol=1e-5, verbose=True):
     """
     :param y: (T, N), y trains
     :param p: order of regression
@@ -100,7 +100,7 @@ def train(y, p, prior_var, prior_scale, a0=None, b0=None, m0=None, normofalpha=1
     :param fixalpha: bool, switch of not train alpha
     :param fixbeta: bool, switch of not train beta
     :param fixpostmean: bool, switch of not train posterior mean
-    :param normofalpha: norm constraint of alpha
+    :param anorm: norm constraint of alpha
     :param intercept: bool, include intercept term or not
     :param hyper: train hyperparameters or not
     :param control: control params
@@ -143,6 +143,10 @@ def train(y, p, prior_var, prior_scale, a0=None, b0=None, m0=None, normofalpha=1
 
     ###################################################
 
+    fixpostmean = False
+    fixalpha = False
+    fixbeta = False
+
     # epsilon
     eps = 2 * np.finfo(np.float).eps
 
@@ -151,12 +155,6 @@ def train(y, p, prior_var, prior_scale, a0=None, b0=None, m0=None, normofalpha=1
     L = len(prior_var)
 
     eyek = np.identity(kchol)
-
-    # control
-    maxiter = control['max iteration']
-    fpinter = control['fixed-point iteration']
-    tol = control['tol']
-    verbose = control['verbose']
 
     # hyperparameters
     prior_var = prior_var.copy()
@@ -185,7 +183,7 @@ def train(y, p, prior_var, prior_scale, a0=None, b0=None, m0=None, normofalpha=1
 
     if a0 is None:
         a0 = np.random.randn(L, N)
-        a0 /= linalg.norm(a0) / normofalpha
+        a0 /= linalg.norm(a0) / anorm
     alpha = a0.copy()
 
     if b0 is None:
@@ -219,12 +217,12 @@ def train(y, p, prior_var, prior_scale, a0=None, b0=None, m0=None, normofalpha=1
     # Optimization
     updatev()
     # initialize lower bound
-    lbound = np.full(maxiter, np.finfo(float).min)
+    lbound = np.full(niter, np.finfo(float).min)
     lbound[0] = elbo(y, h, m, alpha, beta, prior_chol, v)
     it = 1
     converged = False
     start = timeit.default_timer()  # time when algorithm starts
-    while not converged and it < maxiter:
+    while not converged and it < niter:
         iter_start = timeit.default_timer()
         if verbose:
             print('\nIteration[{:d}]'.format(it))
@@ -284,7 +282,7 @@ def train(y, p, prior_var, prior_scale, a0=None, b0=None, m0=None, normofalpha=1
                     print('alpha', e)
                     continue
                 new_alpha[l, :] = alpha[l, :] + delta_a
-                new_alpha[l, :] /= linalg.norm(new_alpha[l, :]) / normofalpha
+                new_alpha[l, :] /= linalg.norm(new_alpha[l, :]) / anorm
                 lb = elbo(y, h, m, new_alpha, beta, prior_chol, tryv(m, new_alpha, beta))
                 predicted = thld * np.inner(grad_a, delta_a)
                 if np.isnan(lb) or lb < good_elbo:
