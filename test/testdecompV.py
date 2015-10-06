@@ -13,8 +13,7 @@ import simulation
 
 np.random.seed(0)
 
-T = 50000
-std = 1
+T = 5000
 p = 0
 L = 2
 N = 20
@@ -23,6 +22,7 @@ high = np.log(25 / T)
 low = np.log(5 / T)
 
 # simulate latent processes
+# x, ticks = simulation.latents(L, T, std, w)
 x = np.empty((T, L), dtype=float)
 x[:T // 2, 0] = high
 x[T // 2:, 0] = low
@@ -46,19 +46,19 @@ a0 = fa.components_
 m0 *= np.linalg.norm(a0) / np.sqrt(N)
 a0 /= np.linalg.norm(a0) / np.sqrt(N)
 
-var = np.ones(L, dtype=float) * 10
+var = np.ones(L, dtype=float) * 5
 w = np.empty(L, dtype=float)
-w[0] = 1e-3
-w[1] = 1e-4
+w[0] = 1e-5
+w[1] = 1e-5
 
 # for i, row in enumerate(grid_w):
 lbound, m1, a1, b1, new_var, new_scale, a0, b0, elapsed, converged = train(y, 0, var, w,
-                                                                                a0=a0, b0=None, m0=m0,
-                                                                                anorm=np.sqrt(N),
-                                                                                hyper=True,
-                                                                                kchol=50,
-                                                                                niter=50,
-                                                                                tol=1e-7, verbose=True)
+                                                                           a0=a0, b0=None, m0=m0,
+                                                                           anorm=np.sqrt(N),
+                                                                           hyper=False,
+                                                                           kchol=50,
+                                                                           niter=50,
+                                                                           tol=1e-5, verbose=True)
 
 if not os.path.isdir('output'):
     os.mkdir('output')
