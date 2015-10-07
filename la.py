@@ -20,6 +20,7 @@ def ichol_gauss(n, omega, k, tol=1e-16):
         if i > 0:
             jast = np.argmax(diagG[i:])
             jast += i
+            # Be caseful especially when you do assignment! numpy indexing returns a view instead of a copy.
             pvec[i], pvec[jast] = pvec[jast].copy(), pvec[i].copy()
             g[jast, :i + 1], g[i, :i + 1] = g[i, :i + 1].copy(), g[jast, :i + 1].copy()
         else:
@@ -35,6 +36,12 @@ def ichol_gauss(n, omega, k, tol=1e-16):
 
 
 def ichol(a):
+    """
+    Incomplete Cholesky factorization
+    Note the diagonal elements cannot be too small to divide. Use ichol2.
+    :param a: square matrix
+    :return: lower triangle
+    """
     n = a.shape[0]
     for k in range(n):
         a[k, k] = np.sqrt(a[k, k])
@@ -55,25 +62,31 @@ def ichol(a):
 
 
 def ichol2(a, tol=1e-16):
+    """
+    Incomplete Cholesky factorization
+    This version allows too small diagonal elements.
+    :param a: square matrix
+    :param tol: numerical tolerance
+    :return: lower triangle
+    """
     n = a.shape[0]
-    # x = np.linspace(0, 1, n)
-    diag = a.diagonal()
+    diagA = a.diagonal().copy()  # Don't forget copy. diagonal() returns a read-only vector.
     pvec = np.arange(n, dtype=int)
     i = 0
     g = np.zeros((n, n), dtype=float)
-    while i < n and np.sum(diag[i:]) > tol:
+    while i < n and np.sum(diagA[i:]) > tol:
         if i > 0:
-            jast = np.argmax(diag[i:])
+            jast = np.argmax(diagA[i:])
             jast += i
             pvec[i], pvec[jast] = pvec[jast].copy(), pvec[i].copy()
             g[jast, :i + 1], g[i, :i + 1] = g[i, :i + 1].copy(), g[jast, :i + 1].copy()
         else:
             jast = 0
 
-        g[i, i] = np.sqrt(diag[jast])
+        g[i, i] = np.sqrt(diagA[jast])
         newAcol = a[pvec[i + 1:], pvec[i]]
         g[i + 1:, i] = (newAcol - np.dot(g[i + 1:, :i], g[i, :i].T)) / g[i, i]
-        diag[i + 1:] = 1 - np.sum((g[i + 1:, :i + 1]) ** 2, axis=1)
+        diagA[i + 1:] = 1 - np.sum((g[i + 1:, :i + 1]) ** 2, axis=1)
 
         i += 1
     return g[np.argsort(pvec), :]

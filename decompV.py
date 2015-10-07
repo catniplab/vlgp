@@ -1,4 +1,3 @@
-__author__ = 'yuan'
 import timeit
 import itertools
 import numpy as np
@@ -6,13 +5,15 @@ from scipy import linalg
 from util import makeregressor
 from la import *
 
+__author__ = 'yuan'
 
-def firingrate(h, m, lv, a, b, min=-20, max=20):
+
+def firingrate(h, m, lv, a, b, lb=-30, ub=30):
     # lv: (L, T, T)
     # v: (T, L)
     v = np.sum(lv ** 2, axis=2).T
     eta_x = h.dot(b) + m.dot(a) + 0.5 * v.dot(a ** 2)
-    np.clip(eta_x, min, max, out=eta_x)
+    np.clip(eta_x, lb, ub, out=eta_x)
     return np.exp(eta_x)
 
 
@@ -81,6 +82,8 @@ def train(y, p, prior_var, prior_scale, a0=None, b0=None, m0=None, anorm=1.0, hy
         converged:
     """
 
+    # TODO: replace eyek - * with numpy.fill_diagonal(*, 1 - *.diagonal())
+
     #################################################
     def updatev():
         for l in range(L):
@@ -98,12 +101,9 @@ def train(y, p, prior_var, prior_scale, a0=None, b0=None, m0=None, anorm=1.0, hy
             chol[l, :] = ichol_gauss(T, prior_scale[l], kchol) * np.sqrt(prior_var[l])
     ###################################################
 
-    # epsilon
-    eps = 2 * np.finfo(np.float).eps
-
     # dimensions
     T, N = y.shape
-    L = len(prior_var)
+    L = prior_var.shape[0]
 
     eyek = np.identity(kchol)
 
@@ -170,12 +170,13 @@ def train(y, p, prior_var, prior_scale, a0=None, b0=None, m0=None, anorm=1.0, hy
         if verbose:
             print('\nIteration[{:d}]'.format(it))
 
+        good_elbo = lbound[it - 1]
+
         #############
         # posterior #
         #############
-        good_elbo = lbound[it - 1]
+        lam = firingrate(h, m, lv, alpha, beta)
         for l in range(L):
-            lam = firingrate(h, m, lv, alpha, beta)
             G = chol[l]
             w = lam.dot(alpha[l, :] ** 2).reshape((T, 1))
             GTWG = G.T.dot(w * G)
@@ -183,30 +184,33 @@ def train(y, p, prior_var, prior_scale, a0=None, b0=None, m0=None, anorm=1.0, hy
             u = (y - lam).dot(alpha[l, :])
             # grad_m = u - np.dot(linalg.pinv2(G).T, np.dot(linalg.pinv2(G), m[:, l]))
             grad_m = u - linalg.lstsq(G.T, linalg.lstsq(G, m[:, l])[0])[0]
+            # delta_m = lv[l, :].dot(lv[l, :].T.dot(grad_m))
 
             u2 = G.dot(G.T.dot(u)) - m[:, l]
             tmp = (w * G).T.dot(u2)
             delta_m = u2 - G.dot(tmp) + G.dot(GTWG.dot(linalg.solve(eyek + GTWG, tmp, sym_pos=True)))
             # delta_m = u2 - G.dot((w * G).T.dot(u2)) + G.dot(GTWG.dot(linalg.lstsq(eyek + GTWG, (w * G).T.dot(u2))[0]))
             m[:, l] += step_m[l] * delta_m
-            m[:, l] -= np.mean(m[:, l])
+            # m[:, l] -= np.mean(m[:, l])
             lb = elbo(y, h, m, alpha, beta, chol, lv)
             predicted = thld * np.inner(grad_m, delta_m)
-            if np.isnan(lb) or lb < good_elbo:
-                m[:, l] = good_m[:, l]
-                step_m[l] *= down
-            else:
+            if np.isfinite(lb) and lb > good_elbo:
                 if lb - good_elbo > predicted:
                     step_m[l] *= up
                 good_elbo = lb
+                m[:, l] -= np.mean(m[:, l])
+            else:
+                m[:, l] = good_m[:, l]
+                step_m[l] *= down
         step_m.clip(10 * np.finfo(float).eps, np.finfo(float).max, out=step_m)
+        updatev()
 
         ###########
         # weights #
         ###########
+        v = np.sum(lv ** 2, axis=-1).T
+        lam = firingrate(h, m, lv, alpha, beta)
         for l in range(L):
-            v = np.sum(lv ** 2, axis=-1).T
-            lam = firingrate(h, m, lv, alpha, beta)
             grad_a = (y - lam).T.dot(m[:, l]) - lam.T.dot(v[:, l]) * alpha[l, :]
             # neg_hess_a = np.diag(lam.T.dot(m[:, l] ** 2) +
             #                      2 * lam.T.dot(m[:, l] * v[:, l]) * alpha[l, :] +
@@ -214,8 +218,8 @@ def train(y, p, prior_var, prior_scale, a0=None, b0=None, m0=None, anorm=1.0, hy
             #                      lam.T.dot(v[:, l]))
             diag_neg_hess_a = lam.T.dot(m[:, l] ** 2) + 2 * lam.T.dot(m[:, l] * v[:, l]) * alpha[l, :] + lam.T.dot(
                 v[:, l] ** 2) * alpha[l, :] ** 2 + lam.T.dot(v[:, l])
-            if linalg.norm(grad_a, ord=np.inf) < eps:
-                break
+            # if linalg.norm(grad_a, ord=np.inf) < eps:
+            #     break
             try:
                 # delta_a = step_alpha[l] * linalg.solve(neg_hess_a, grad_a, sym_pos=True)
                 delta_a = grad_a / diag_neg_hess_a
@@ -224,16 +228,17 @@ def train(y, p, prior_var, prior_scale, a0=None, b0=None, m0=None, anorm=1.0, hy
                 continue
             alpha[l, :] += step_alpha[l] * delta_a
             alpha[l, :] /= linalg.norm(alpha[l, :]) / anorm
-            lb = elbo(y, h, m, alpha, beta, chol, lv)
-            predicted = thld * np.inner(grad_a, delta_a)
-            if np.isnan(lb) or lb < good_elbo:
-                alpha[l, :] = good_alpha[l, :]
-                step_alpha[l] *= down
-            else:
-                if lb - good_elbo > predicted:
-                    step_alpha[l] *= up
-                good_elbo = lb
-        step_alpha.clip(10 * np.finfo(float).eps, np.finfo(float).max, out=step_alpha)
+            # lb = elbo(y, h, m, alpha, beta, chol, lv)
+            # predicted = thld * np.inner(grad_a, delta_a)
+            # if np.isnan(lb) or lb < good_elbo:
+            #     alpha[l, :] = good_alpha[l, :]
+            #     step_alpha[l] *= down
+            # else:
+            #     if lb - good_elbo > predicted:
+            #         step_alpha[l] *= up
+            #     good_elbo = lb
+        # step_alpha.clip(10 * np.finfo(float).eps, np.finfo(float).max, out=step_alpha)
+        updatev()
 
         lam = firingrate(h, m, lv, alpha, beta)
         for n in range(N):
@@ -262,7 +267,6 @@ def train(y, p, prior_var, prior_scale, a0=None, b0=None, m0=None, anorm=1.0, hy
                     # step_beta[n] *= up
                 # good_elbo = lb
         # step_beta.clip(10 * np.finfo(float).eps, np.finfo(float).max, out=step_beta)
-
         updatev()
 
         ###############
