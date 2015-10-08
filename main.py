@@ -6,7 +6,7 @@ from matplotlib.backends.backend_pdf import PdfPages
 import h5py
 from sklearn.decomposition.factor_analysis import FactorAnalysis
 
-from model_chol import *
+from ichol import *
 from util import likelihood
 import simulation
 

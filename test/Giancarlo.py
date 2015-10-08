@@ -4,7 +4,7 @@ from scipy import linalg
 from scipy.io import loadmat
 from pylab import *
 from sklearn.decomposition.factor_analysis import FactorAnalysis
-import model_chol, decompV
+import ichol, ichol_V
 
 np.random.seed(0)
 matfile = loadmat('/Users/yuan/Documents/MATLAB/x')
@@ -25,7 +25,7 @@ w[0] = 1e-8
 w[1] = 1e-6
 w[2] = 1e-4
 
-lbound, m1, a1, b1, new_var, new_scale, a0, b0, elapsed, converged = decompV.train(y, 0, var, w, b0=None, m0=m0,
+lbound, m1, a1, b1, new_var, new_scale, a0, b0, elapsed, converged = ichol_V.train(y, 0, var, w, b0=None, m0=m0,
                                                                                    anorm=np.sqrt(N), hyper=False,
                                                                                    kchol=100, niter=50, tol=1e-5,
                                                                                    verbose=True)
