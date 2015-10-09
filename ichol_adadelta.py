@@ -3,8 +3,6 @@ import numpy as np
 from scipy import linalg
 from util import makeregressor
 from la import ichol_gauss
-from pylab import plot
-__author__ = 'yuan'
 
 
 def firingrate(h, m, v, a, b, lb=-30, ub=30):
@@ -86,17 +84,6 @@ def train(y, p, prior_var, prior_scale, a0=None, b0=None, m0=None, anorm=1.0,
             GTWG = G.T.dot(w * G)
             v[:, l] = np.sum(G * (G - G.dot(GTWG) + G.dot(GTWG.dot(linalg.solve(eyek + GTWG, GTWG, sym_pos=True)))),
                              axis=1)
-
-    # def tryv(m, a, b):
-    #     out = np.empty_like(v)
-    #     lam = firingrate(h, m, v, a, b)
-    #     for l in range(L):
-    #         G = prior_chol[l, :]
-    #         w = lam.dot(a[l, :] ** 2).reshape((T, 1))
-    #         GTWG = G.T.dot(w * G)
-    #         out[:, l] = np.sum(G * (G - G.dot(GTWG) + G.dot(GTWG.dot(linalg.solve(eyek + GTWG, GTWG, sym_pos=True)))),
-    #                          axis=1)
-    #     return out
 
     def makechol():
         for l in range(L):
@@ -180,6 +167,13 @@ def train(y, p, prior_var, prior_scale, a0=None, b0=None, m0=None, anorm=1.0,
         #############
         lam = firingrate(h, m, v, alpha, beta)
         for l in range(L):
+            grad_a = (y - lam).T.dot(m[:, l]) - lam.T.dot(v[:, l]) * alpha[l, :]
+            accu_grad_a[l, :] = decay * accu_grad_a[l, :] + (1 - decay) * grad_a ** 2
+            delta_a = np.sqrt(eps + accu_delta_a[l, :]) / np.sqrt(eps + accu_grad_a[l, :]) * grad_a
+            accu_delta_a[l, :] = decay * accu_delta_a[l, :] + (1 - decay) * delta_a ** 2
+            alpha[l, :] += delta_a
+            alpha[l, :] /= linalg.norm(alpha[l, :]) / anorm
+
             G = prior_chol[l]
             u = (y - lam).dot(alpha[l, :])
             grad_m = u - linalg.lstsq(G.T, linalg.lstsq(G, m[:, l])[0])[0]
@@ -195,20 +189,13 @@ def train(y, p, prior_var, prior_scale, a0=None, b0=None, m0=None, anorm=1.0,
             # delta_m /= np.sqrt(eps + new_accu_grad_m)
             m[:, l] += delta_m
             lb = elbo(y, h, m, alpha, beta, prior_chol, v)
-            m[:, l] -= np.mean(m[:, l])
             if np.isfinite(lb) and lb > good_elbo:
                 accu_delta_m[:, l] = decay * accu_delta_m[:, l] + (1 - decay) * delta_m ** 2
                 accu_grad_m[:, l] = new_accu_grad_m
                 good_elbo = lb
             else:
                 m[:, l] = good_m[:, l]
-
-            grad_a = (y - lam).T.dot(m[:, l]) - lam.T.dot(v[:, l]) * alpha[l, :]
-            accu_grad_a[l, :] = decay * accu_grad_a[l, :] + (1 - decay) * grad_a ** 2
-            delta_a = np.sqrt(eps + accu_delta_a[l, :]) / np.sqrt(eps + accu_grad_a[l, :]) * grad_a
-            accu_delta_a[l, :] = decay * accu_delta_a[l, :] + (1 - decay) * delta_a ** 2
-            alpha[l, :] += delta_a
-            alpha[l, :] /= linalg.norm(alpha[l, :]) / anorm
+            m[:, l] -= np.mean(m[:, l])
         updatev()
 
         ###########
@@ -230,6 +217,8 @@ def train(y, p, prior_var, prior_scale, a0=None, b0=None, m0=None, anorm=1.0,
 
         for n in range(N):
             grad_b = h.T.dot(y[:, n] - lam[:, n])
+            if np.allclose(grad_b, 0):
+                continue
             neg_hess_b = h.T.dot((h.T * lam[:, n]).T)
             try:
                 delta_b = linalg.solve(neg_hess_b, grad_b, sym_pos=True)
