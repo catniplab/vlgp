@@ -104,9 +104,6 @@ def train(y, p, prior_var, prior_scale, a0=None, b0=None, m0=None, anorm=1.0,
 
     ###################################################
 
-    # epsilon
-    eps = 2 * np.finfo(np.float).eps
-
     # dimensions
     T, N = y.shape
     L = len(prior_var)
@@ -154,18 +151,18 @@ def train(y, p, prior_var, prior_scale, a0=None, b0=None, m0=None, anorm=1.0,
     good_var = prior_var.copy()
     good_scale = prior_scale.copy()
 
-    step_alpha = 1e-2
-    step_beta = 1e-1
+    step_alpha = 5e-1
+    step_beta = 1
     step_m = np.ones(L)
-
-    accu_grad_a = np.zeros_like(alpha)
-    accu_delta_a = np.zeros_like(alpha)
-    accu_grad_b = np.zeros_like(beta)
-    accu_delta_b = np.zeros_like(beta)
 
     down = 0.5
     up = 1.5
     thld = 0.5
+
+    # adagrad
+    r = 0.95
+    accu_grad_a = np.zeros_like(alpha)
+
 
     # Optimization
     updatev()
@@ -198,7 +195,6 @@ def train(y, p, prior_var, prior_scale, a0=None, b0=None, m0=None, anorm=1.0,
             delta_m = u2 - G.dot((w * G).T.dot(u2)) + G.dot(GTWG.dot(linalg.solve(eyek + GTWG, (w * G).T.dot(u2),
                                                                                   sym_pos=True)))
             m[:, l] += step_m[l] * delta_m
-            # plot(m[:, l])
             lb = elbo(y, h, m, alpha, beta, prior_chol, v)
             predicted = thld * np.inner(grad_m, delta_m)
             if np.isfinite(lb) and lb > good_elbo:
@@ -227,9 +223,9 @@ def train(y, p, prior_var, prior_scale, a0=None, b0=None, m0=None, anorm=1.0,
             # neg_diag_Ha = np.sum(lam * ((m[:, l, np.newaxis] + np.outer(v[:, l], alpha[l, :])) ** 2), axis=0) + \
             #               lam.T.dot(v[:, l])
             # delta_a = grad_a / (neg_diag_Ha.clip(0.5, np.PINF))
-            accu_grad_a[l, :] = 0.95 * accu_grad_a[l, :] + 0.05 * grad_a ** 2
-            adj_grad_a = grad_a / (1e-6 + np.sqrt(accu_grad_a[l, :]))
-            alpha[l, :] += step_alpha * adj_grad_a
+            accu_grad_a[l, :] = r * accu_grad_a[l, :] + (1 - r) * grad_a ** 2
+            delta_a = grad_a / np.sqrt(1e-6 + accu_grad_a[l, :])
+            alpha[l, :] += step_alpha * delta_a
             alpha[l, :] /= linalg.norm(alpha[l, :]) / anorm
         updatev()
 
@@ -237,16 +233,11 @@ def train(y, p, prior_var, prior_scale, a0=None, b0=None, m0=None, anorm=1.0,
         for n in range(N):
             grad_b = h.T.dot(y[:, n] - lam[:, n])
             neg_hess_b = h.T.dot((h.T * lam[:, n]).T)
-            # if linalg.norm(grad_b, ord=np.inf) < eps:
-            #     break
             try:
                 delta_b = linalg.solve(neg_hess_b, grad_b, sym_pos=True)
             except linalg.LinAlgError as e:
-                print('beta', e)
+                print('b', e)
                 continue
-            # accu_grad_b[:, n] = 0.95 * accu_grad_b[:, n] + 0.05 * grad_b ** 2
-            # delta_b = grad_b / (1e-6 + np.sqrt(accu_grad_b[:, n]))
-            # accu_delta_b[:, n] = 0.95 * accu_delta_b[:, n] + 0.05 * delta_b ** 2
             beta[:, n] += step_beta * delta_b
         updatev()
 

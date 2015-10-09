@@ -104,9 +104,6 @@ def train(y, p, prior_var, prior_scale, a0=None, b0=None, m0=None, anorm=1.0,
 
     ###################################################
 
-    # epsilon
-    eps = 2 * np.finfo(np.float).eps
-
     # dimensions
     T, N = y.shape
     L = len(prior_var)
@@ -154,13 +151,15 @@ def train(y, p, prior_var, prior_scale, a0=None, b0=None, m0=None, anorm=1.0,
     good_var = prior_var.copy()
     good_scale = prior_scale.copy()
 
-    step_alpha = 1e-2
-    step_beta = 1e-1
-    step_m = 1e-2
-
+    # adadelta
+    decay = 0.9
+    eps = 1e-6
     accu_grad_m = np.zeros_like(m)
+    accu_delta_m = np.zeros_like(m)
     accu_grad_a = np.zeros_like(alpha)
+    accu_delta_a = np.zeros_like(alpha)
     accu_grad_b = np.zeros_like(beta)
+    accu_delta_b = np.zeros_like(beta)
 
     # Optimization
     updatev()
@@ -182,71 +181,62 @@ def train(y, p, prior_var, prior_scale, a0=None, b0=None, m0=None, anorm=1.0,
         lam = firingrate(h, m, v, alpha, beta)
         for l in range(L):
             G = prior_chol[l]
-            w = lam.dot(alpha[l, :] ** 2).reshape((T, 1))
-            GTWG = G.T.dot(w * G)
-
             u = (y - lam).dot(alpha[l, :])
-            # grad_m = u - np.dot(linalg.pinv2(G).T, np.dot(linalg.pinv2(G), m[:, l]))
             grad_m = u - linalg.lstsq(G.T, linalg.lstsq(G, m[:, l])[0])[0]
 
+            w = lam.dot(alpha[l, :] ** 2).reshape((T, 1))
+            GTWG = G.T.dot(w * G)
             u2 = G.dot(G.T.dot(u)) - m[:, l]
             delta_m = u2 - G.dot((w * G).T.dot(u2)) + G.dot(GTWG.dot(linalg.solve(eyek + GTWG, (w * G).T.dot(u2),
                                                                                   sym_pos=True)))
 
-            accu_grad_m[:, l] = 0.95 * accu_grad_m[:, l] + 0.05 * grad_m ** 2
-            delta_m /= (1e-6 + np.sqrt(accu_grad_m[:, l]))
-            m[:, l] += step_m * delta_m
-            # plot(m[:, l])
+            new_accu_grad_m = decay * accu_grad_m[:, l] + (1 - decay) * grad_m ** 2
+            # delta_m = np.sqrt(eps + accu_delta_m[:, l]) / np.sqrt(eps + new_accu_grad_m) * grad_m
+            # delta_m /= np.sqrt(eps + new_accu_grad_m)
+            m[:, l] += delta_m
             lb = elbo(y, h, m, alpha, beta, prior_chol, v)
             m[:, l] -= np.mean(m[:, l])
-            # predicted = thld * np.inner(grad_m, delta_m)
             if np.isfinite(lb) and lb > good_elbo:
-                # if lb - good_elbo > predicted:
-            #         step_m[l] *= up
+                accu_delta_m[:, l] = decay * accu_delta_m[:, l] + (1 - decay) * delta_m ** 2
+                accu_grad_m[:, l] = new_accu_grad_m
                 good_elbo = lb
-            #     m[:, l] -= np.mean(m[:, l])
             else:
                 m[:, l] = good_m[:, l]
-            #     step_m[l] *= down
-        # step_m.clip(10 * np.finfo(float).eps, np.finfo(float).max, out=step_m)
+
+            grad_a = (y - lam).T.dot(m[:, l]) - lam.T.dot(v[:, l]) * alpha[l, :]
+            accu_grad_a[l, :] = decay * accu_grad_a[l, :] + (1 - decay) * grad_a ** 2
+            delta_a = np.sqrt(eps + accu_delta_a[l, :]) / np.sqrt(eps + accu_grad_a[l, :]) * grad_a
+            accu_delta_a[l, :] = decay * accu_delta_a[l, :] + (1 - decay) * delta_a ** 2
+            alpha[l, :] += delta_a
+            alpha[l, :] /= linalg.norm(alpha[l, :]) / anorm
         updatev()
 
         ###########
         # weights #
         ###########
-        lam = firingrate(h, m, v, alpha, beta)
-        for l in range(L):
-            grad_a = (y - lam).T.dot(m[:, l]) - lam.T.dot(v[:, l]) * alpha[l, :]
-            # neg_hess_a = np.diag(lam.T.dot(m[:, l] ** 2) +
-            #                      2 * lam.T.dot(m[:, l] * v[:, l]) * alpha[l, :] +
-            #                      lam.T.dot(v[:, l] ** 2) * alpha[l, :] ** 2 +
-            #                      lam.T.dot(v[:, l]))
-            # neg_diag_Ha = lam.T.dot(m[:, l] ** 2) + 2 * lam.T.dot(m[:, l] * v[:, l]) * alpha[l, :] + lam.T.dot(
-            #     v[:, l] ** 2) * alpha[l, :] ** 2 + lam.T.dot(v[:, l])
-            # neg_diag_Ha = np.sum(lam * ((m[:, l, np.newaxis] + np.outer(v[:, l], alpha[l, :])) ** 2), axis=0) + \
-            #               lam.T.dot(v[:, l])
-            # delta_a = grad_a / (neg_diag_Ha.clip(0.5, np.PINF))
-            accu_grad_a[l, :] = 0.95 * accu_grad_a[l, :] + 0.05 * grad_a ** 2
-            adj_grad_a = grad_a / (1e-6 + np.sqrt(accu_grad_a[l, :]))
-            alpha[l, :] += step_alpha * adj_grad_a
-            alpha[l, :] /= linalg.norm(alpha[l, :]) / anorm
-        updatev()
+        # lam = firingrate(h, m, v, alpha, beta)
+        # for l in range(L):
+        #
+        # updatev()
 
-        lam = firingrate(h, m, v, alpha, beta)
+        # lam = firingrate(h, m, v, alpha, beta)
+        # for n in range(N):
+        #     grad_b = h.T.dot(y[:, n] - lam[:, n])
+        #     accu_grad_b[:, n] = decay * accu_grad_b[:, n] + (1 - decay) * grad_b ** 2
+        #     delta_b = np.sqrt(eps + accu_delta_b[:, n]) / np.sqrt(eps + accu_grad_b[:, n]) * grad_b
+        #     accu_delta_b[:, n] = decay * accu_delta_b[:, n] + (1 - decay) * delta_b ** 2
+        #     beta[:, n] += delta_b
+        # updatev()
+
         for n in range(N):
             grad_b = h.T.dot(y[:, n] - lam[:, n])
-            # neg_hess_b = h.T.dot((h.T * lam[:, n]).T)
-            # if linalg.norm(grad_b, ord=np.inf) < eps:
-            #     break
-            # try:
-            #     delta_b = linalg.solve(neg_hess_b, grad_b, sym_pos=True)
-            # except linalg.LinAlgError as e:
-            #     print('beta', e)
-            #     continue
-            accu_grad_b[:, n] = 0.95 * accu_grad_b[:, n] + 0.05 * grad_b ** 2
-            delta_b = grad_b / (1e-6 + np.sqrt(accu_grad_b[:, n]))
-            # accu_delta_b[:, n] = 0.95 * accu_delta_b[:, n] + 0.05 * delta_b ** 2
-            beta[:, n] += step_beta * delta_b
+            neg_hess_b = h.T.dot((h.T * lam[:, n]).T)
+            try:
+                delta_b = linalg.solve(neg_hess_b, grad_b, sym_pos=True)
+            except linalg.LinAlgError as e:
+                print('b', e)
+                continue
+            beta[:, n] += delta_b
         updatev()
 
         # store lower bound
