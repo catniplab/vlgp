@@ -1,5 +1,6 @@
 __author__ = 'yuan'
 import numpy as np
+import warnings
 
 
 def ichol_gauss(n, omega, k, tol=1e-16):
@@ -32,6 +33,8 @@ def ichol_gauss(n, omega, k, tol=1e-16):
         diagG[i + 1:] = 1 - np.sum((g[i + 1:, :i + 1]) ** 2, axis=1)
 
         i += 1
+    if i == k:
+        warnings.warn('Not enough ranks')
     return g[np.argsort(pvec), :]
 
 

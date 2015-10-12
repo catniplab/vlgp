@@ -3,8 +3,6 @@ import numpy as np
 from scipy import linalg
 from util import makeregressor
 from la import ichol_gauss
-from pylab import plot
-__author__ = 'yuan'
 
 
 def firingrate(h, m, v, a, b, lb=-30, ub=30):
@@ -87,21 +85,9 @@ def train(y, p, prior_var, prior_scale, a0=None, b0=None, m0=None, anorm=1.0,
             v[:, l] = np.sum(G * (G - G.dot(GTWG) + G.dot(GTWG.dot(linalg.solve(eyek + GTWG, GTWG, sym_pos=True)))),
                              axis=1)
 
-    # def tryv(m, a, b):
-    #     out = np.empty_like(v)
-    #     lam = firingrate(h, m, v, a, b)
-    #     for l in range(L):
-    #         G = prior_chol[l, :]
-    #         w = lam.dot(a[l, :] ** 2).reshape((T, 1))
-    #         GTWG = G.T.dot(w * G)
-    #         out[:, l] = np.sum(G * (G - G.dot(GTWG) + G.dot(GTWG.dot(linalg.solve(eyek + GTWG, GTWG, sym_pos=True)))),
-    #                          axis=1)
-    #     return out
-
     def makechol():
         for l in range(L):
             prior_chol[l, :] = ichol_gauss(T, prior_scale[l], kchol) * np.sqrt(prior_var[l])
-
     ###################################################
 
     # dimensions
@@ -255,7 +241,7 @@ def train(y, p, prior_var, prior_scale, a0=None, b0=None, m0=None, anorm=1.0,
         # if np.abs(lbound[it] - lbound[it - 1]) < tol * np.abs(lbound[it - 1]):
         #     converged = True
 
-        if np.abs(lbound[it] - lbound[it - 1]) < tol * np.abs(lbound[it - 1]) and it % 5 == 0:
+        if np.abs(lbound[it] - lbound[it - 1]) < tol * np.abs(lbound[it - 1]):
             converged = True
 
         if verbose:
