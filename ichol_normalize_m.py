@@ -173,6 +173,7 @@ def train(y, p, prior_var, prior_scale, a0=None, b0=None, m0=None, anorm=1.0,
             u = (y - lam).dot(alpha[l, :])
             # grad_m = u - np.dot(linalg.pinv2(G).T, np.dot(linalg.pinv2(G), m[:, l]))
             grad_m = u - linalg.lstsq(G.T, linalg.lstsq(G, m[:, l])[0])[0]
+            new_accu_grad_m = decay * accu_grad_m[:, l] + (1 - decay) * grad_m ** 2
 
             u2 = G.dot(G.T.dot(u)) - m[:, l]
             delta_m = u2 - G.dot((w * G).T.dot(u2)) + G.dot(GTWG.dot(linalg.solve(eyek + GTWG, (w * G).T.dot(u2),
