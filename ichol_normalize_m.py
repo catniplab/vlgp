@@ -137,14 +137,15 @@ def train(y, p, prior_var, prior_scale, a0=None, b0=None, m0=None, anorm=1.0,
     good_var = prior_var.copy()
     good_scale = prior_scale.copy()
 
-    step_beta = 1
+    step_beta = 0.5
 
     # adagrad
     decay = 0.9
     eps = 1e-6
     accu_grad_a = np.zeros_like(alpha)
     accu_delta_a = np.zeros_like(alpha)
-
+    accu_grad_m = np.zeros_like(m)
+    accu_grad_b = np.zeros_like(beta)
 
     # Optimization
     updatev()
@@ -173,24 +174,32 @@ def train(y, p, prior_var, prior_scale, a0=None, b0=None, m0=None, anorm=1.0,
             u = (y - lam).dot(alpha[l, :])
             # grad_m = u - np.dot(linalg.pinv2(G).T, np.dot(linalg.pinv2(G), m[:, l]))
             grad_m = u - linalg.lstsq(G.T, linalg.lstsq(G, m[:, l])[0])[0]
-            new_accu_grad_m = decay * accu_grad_m[:, l] + (1 - decay) * grad_m ** 2
+            accu_grad_m[:, l] = decay * accu_grad_m[:, l] + (1 - decay) * grad_m ** 2
 
             u2 = G.dot(G.T.dot(u)) - m[:, l]
             delta_m = u2 - G.dot((w * G).T.dot(u2)) + G.dot(GTWG.dot(linalg.solve(eyek + GTWG, (w * G).T.dot(u2),
                                                                                   sym_pos=True)))
-            m[:, l] += delta_m
+            m[:, l] = good_m[:, l] + delta_m
             m[:, l] -= np.mean(m[:, l])
             m[:, l] /= linalg.norm(m[:, l], ord=np.inf)
             lb = elbo(y, h, m, alpha, beta, prior_chol, v)
             if np.isfinite(lb) and lb > good_elbo:
+                # Newton step
                 good_elbo = lb
             else:
-                m[:, l] = good_m[:, l]
+                # Gradient step
+                m[:, l] = good_m[:, l] + grad_m / np.sqrt(eps + accu_grad_m[:, l])
+                m[:, l] -= np.mean(m[:, l])
+                m[:, l] /= linalg.norm(m[:, l], ord=np.inf)
 
             grad_a = (y - lam).T.dot(m[:, l]) - lam.T.dot(v[:, l]) * alpha[l, :]
             accu_grad_a[l, :] = decay * accu_grad_a[l, :] + (1 - decay) * grad_a ** 2
             delta_a = np.sqrt(eps + accu_delta_a[l, :]) / np.sqrt(eps + accu_grad_a[l, :]) * grad_a
             accu_delta_a[l, :] = decay * accu_delta_a[l, :] + (1 - decay) * delta_a ** 2
+            # alpha[l, :] += 100 * delta_a
+            neg_diag_Ha = np.sum(lam * ((m[:, l, np.newaxis] + np.outer(v[:, l], alpha[l, :])) ** 2), axis=0) + \
+                          lam.T.dot(v[:, l])
+            delta_a = grad_a / (np.sqrt(eps + accu_grad_a[l, :]) * neg_diag_Ha)
             alpha[l, :] += delta_a
         updatev()
 
