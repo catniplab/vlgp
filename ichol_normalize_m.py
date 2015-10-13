@@ -213,7 +213,7 @@ def train(y, p, prior_var, prior_scale, a0=None, b0=None, m0=None, anorm=1.0,
             # alpha[l, :] += 100 * delta_a
             neg_diag_Ha = np.sum(lam * ((m[:, l, np.newaxis] + np.outer(v[:, l], alpha[l, :])) ** 2), axis=0) + \
                           lam.T.dot(v[:, l])
-            delta_a = grad_a / (np.sqrt(eps + accu_grad_a[l, :]) * (1e-2 + neg_diag_Ha))
+            delta_a = grad_a / (np.sqrt(eps + accu_grad_a[l, :]) * (0.1 + neg_diag_Ha))
             alpha[l, :] += delta_a
         updatev()
 
