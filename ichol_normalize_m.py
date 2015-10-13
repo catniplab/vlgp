@@ -160,11 +160,25 @@ def train(y, p, prior_var, prior_scale, a0=None, b0=None, m0=None, anorm=1.0,
         if verbose:
             print('\nIteration[{:d}]'.format(it))
 
-        good_elbo = lbound[it - 1]
+        ###########
+        # weights #
+        ###########
+        lam = firingrate(h, m, v, alpha, beta)
+        for n in range(N):
+            grad_b = h.T.dot(y[:, n] - lam[:, n])
+            neg_hess_b = h.T.dot((h.T * lam[:, n]).T)
+            try:
+                delta_b = linalg.solve(neg_hess_b, grad_b, sym_pos=True)
+            except linalg.LinAlgError as e:
+                print('b', e)
+                continue
+            beta[:, n] += delta_b.clip(-1, 1, out=delta_b)
+        updatev()
 
         #############
         # posterior #
         #############
+        good_elbo = elbo(y, h, m, alpha, beta, prior_chol, v)
         lam = firingrate(h, m, v, alpha, beta)
         for l in range(L):
             G = prior_chol[l]
@@ -199,23 +213,8 @@ def train(y, p, prior_var, prior_scale, a0=None, b0=None, m0=None, anorm=1.0,
             # alpha[l, :] += 100 * delta_a
             neg_diag_Ha = np.sum(lam * ((m[:, l, np.newaxis] + np.outer(v[:, l], alpha[l, :])) ** 2), axis=0) + \
                           lam.T.dot(v[:, l])
-            delta_a = grad_a / (np.sqrt(eps + accu_grad_a[l, :]) * neg_diag_Ha)
+            delta_a = grad_a / (np.sqrt(eps + accu_grad_a[l, :]) * (1e-2 + neg_diag_Ha))
             alpha[l, :] += delta_a
-        updatev()
-
-        ###########
-        # weights #
-        ###########
-        lam = firingrate(h, m, v, alpha, beta)
-        for n in range(N):
-            grad_b = h.T.dot(y[:, n] - lam[:, n])
-            neg_hess_b = h.T.dot((h.T * lam[:, n]).T)
-            try:
-                delta_b = linalg.solve(neg_hess_b, grad_b, sym_pos=True)
-            except linalg.LinAlgError as e:
-                print('b', e)
-                continue
-            beta[:, n] += step_beta * delta_b
         updatev()
 
         # store lower bound
@@ -227,13 +226,6 @@ def train(y, p, prior_var, prior_scale, a0=None, b0=None, m0=None, anorm=1.0,
         chg_post_mean = np.max(np.abs(good_m - m))
         chg_variance = np.max(np.abs(good_var - prior_var)) if hyper else 0.0
         chg_scale = np.max(np.abs(good_scale - prior_scale)) if hyper else 0.0
-
-        # converged if the change in ELBO is relatively smaller than a tolerance
-        # if np.abs(lbound[it] - lbound[it - 1]) < tol * np.abs(lbound[it - 1]):
-        #     converged = True
-
-        if np.abs(lbound[it] - lbound[it - 1]) < tol * np.abs(lbound[it - 1]) and it % 5 == 0:
-            converged = True
 
         if verbose:
             print('lower bound = {:.5f}\n'
@@ -247,6 +239,13 @@ def train(y, p, prior_var, prior_scale, a0=None, b0=None, m0=None, anorm=1.0,
                                                            timeit.default_timer() - iter_start,
                                                            chg_alpha, chg_beta, chg_post_mean,
                                                            chg_variance, chg_scale))
+
+        # converged if the change in ELBO is relatively smaller than a tolerance
+        # if np.abs(lbound[it] - lbound[it - 1]) < tol * np.abs(lbound[it - 1]):
+        #     converged = True
+
+        if np.abs(lbound[it] - lbound[it - 1]) < tol * np.abs(lbound[it - 1]) and it % 5 == 0:
+            converged = True
 
         # store current iteration
         good_alpha[:] = alpha
