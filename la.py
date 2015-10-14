@@ -2,8 +2,10 @@ __author__ = 'yuan'
 import numpy as np
 import warnings
 
+_tol = 1e-8
 
-def ichol_gauss(n, omega, k, tol=1e-16):
+
+def ichol_gauss(n, omega, k, tol=_tol):
     """
     Incomplete Cholesky decomposition for squared exponential covariance
     :param n: size of covariance matrix (n, n)
@@ -64,7 +66,7 @@ def ichol(a):
     return a
 
 
-def ichol2(a, tol=1e-16):
+def ichol2(a, tol=_tol):
     """
     Incomplete Cholesky factorization
     This version allows too small diagonal elements.
