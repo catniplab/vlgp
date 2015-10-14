@@ -1,4 +1,3 @@
-__author__ = 'yuan'
 import timeit
 
 import numpy as np

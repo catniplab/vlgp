@@ -5,8 +5,6 @@ from scipy import linalg
 from util import makeregressor
 from la import *
 
-__author__ = 'yuan'
-
 
 def firingrate(h, m, lv, a, b, lb=-30, ub=30):
     # lv: (L, T, T)

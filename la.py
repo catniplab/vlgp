@@ -1,11 +1,8 @@
-__author__ = 'yuan'
 import numpy as np
 import warnings
 
-_tol = 1e-8
 
-
-def ichol_gauss(n, omega, k, tol=_tol):
+def ichol_gauss(n, omega, k, tol=1e-8):
     """
     Incomplete Cholesky decomposition for squared exponential covariance
     :param n: size of covariance matrix (n, n)
@@ -19,13 +16,20 @@ def ichol_gauss(n, omega, k, tol=_tol):
     pvec = np.arange(n, dtype=int)
     i = 0
     g = np.zeros((n, k), dtype=float)
+    vtmp = np.zeros(k, dtype=float)
     while i < k and np.sum(diagG[i:]) > tol:
         if i > 0:
             jast = np.argmax(diagG[i:])
             jast += i
             # Be caseful especially when you do assignment! numpy indexing returns a view instead of a copy.
+            # stmp = pvec[jast]
+            # pvec[jast] = pvec[i]
+            # pvec[i] = stmp
             pvec[i], pvec[jast] = pvec[jast].copy(), pvec[i].copy()
-            g[jast, :i + 1], g[i, :i + 1] = g[i, :i + 1].copy(), g[jast, :i + 1].copy()
+            vtmp[:i + 1] = g[i, :i + 1]
+            g[i, :i + 1] = g[jast, :i + 1]
+            g[jast, :i + 1] = vtmp[:i + 1]
+            # g[jast, :i + 1], g[i, :i + 1] = g[i, :i + 1].copy(), g[jast, :i + 1].copy()
         else:
             jast = 0
 
@@ -66,7 +70,7 @@ def ichol(a):
     return a
 
 
-def ichol2(a, tol=_tol):
+def ichol2(a, tol=1e-8):
     """
     Incomplete Cholesky factorization
     This version allows too small diagonal elements.
@@ -79,12 +83,20 @@ def ichol2(a, tol=_tol):
     pvec = np.arange(n, dtype=int)
     i = 0
     g = np.zeros((n, n), dtype=float)
+    vtmp = np.zeros_like(pvec)
     while i < n and np.sum(diagA[i:]) > tol:
         if i > 0:
             jast = np.argmax(diagA[i:])
             jast += i
+            # pvec[i], pvec[jast] = pvec[jast].copy(), pvec[i].copy()
+            # g[jast, :i + 1], g[i, :i + 1] = g[i, :i + 1].copy(), g[jast, :i + 1].copy()
+            # stmp = pvec[jast]
+            # pvec[jast] = pvec[i]
+            # pvec[i] = stmp
             pvec[i], pvec[jast] = pvec[jast].copy(), pvec[i].copy()
-            g[jast, :i + 1], g[i, :i + 1] = g[i, :i + 1].copy(), g[jast, :i + 1].copy()
+            vtmp[:i + 1] = g[i, :i + 1]
+            g[i, :i + 1] = g[jast, :i + 1]
+            g[jast, :i + 1] = vtmp[:i + 1]
         else:
             jast = 0
 
