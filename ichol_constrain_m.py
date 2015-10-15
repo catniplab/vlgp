@@ -11,7 +11,7 @@ def firingrate(h, m, v, a, b, lb=-30, ub=30):
     return np.exp(eta_x)
 
 
-def elbo(y, h, m, a, b, chol, v):
+def elbo(y, h, m, v, a, b, chol):
     """
     Evidence Lower Bound
     :param y: spike trains
@@ -45,31 +45,30 @@ def elbo(y, h, m, a, b, chol, v):
     return lb
 
 
-def train(y, p, prior_var, prior_scale, a0=None, b0=None, m0=None, anorm=1.0,
-          hyper=False, kchol=10, niter=50, tol=1e-5, verbose=True):
+def train(y, p, chol, a0=None, b0=None, m0=None, niter=50, tol=1e-5, verbose=True):
     """
     :param y: (T, N), y trains
     :param p: order of regression
     :param prior_mean: (T, L), prior mean
     :param prior_var: (L,), prior variance
     :param prior_scale: (L,), prior inverse of squared lengthscale
-    :param a0: (L, N), initial value of alpha
-    :param b0: (N, intercept + p * N), initial value of beta
+    :param a0: (L, N), initial value of a
+    :param b0: (N, intercept + p * N), initial value of b
     :param m0: (T, L), initial value of posterior mean
-    :param fixalpha: bool, switch of not train alpha
-    :param fixbeta: bool, switch of not train beta
+    :param fixalpha: bool, switch of not train a
+    :param fixbeta: bool, switch of not train b
     :param fixpostmean: bool, switch of not train posterior mean
-    :param anorm: norm constraint of alpha
+    :param anorm: norm constraint of a
     :param intercept: bool, include intercept term or not
     :param hyper: train hyperparameters or not
     :param control: control params
     :return:
         m: posterior mean
         post_cov: posterior covariance
-        beta: coefficient of h
-        alpha: coefficient of latent
-        a0: initial value of alpha
-        b0: initial value of beta
+        b: coefficient of h
+        a: coefficient of latent
+        a0: initial value of a
+        b0: initial value of b
         lbound: array of lower bounds
         elapsed:
         converged:
@@ -77,35 +76,23 @@ def train(y, p, prior_var, prior_scale, a0=None, b0=None, m0=None, anorm=1.0,
 
     #################################################
     def updatev():
-        lam = firingrate(h, m, v, alpha, beta)
+        lam = firingrate(h, m, v, a, b)
         for l in range(L):
-            G = prior_chol[l, :]
-            w = lam.dot(alpha[l, :] ** 2).reshape((T, 1))
+            G = chol[l, :]
+            w = lam.dot(a[l, :] ** 2).reshape((T, 1))
             GTWG = G.T.dot(w * G)
             v[:, l] = np.sum(G * (G - G.dot(GTWG) + G.dot(GTWG.dot(linalg.solve(eyek + GTWG, GTWG, sym_pos=True)))),
                              axis=1)
-
-    def makechol():
-        for l in range(L):
-            prior_chol[l, :] = ichol_gauss(T, prior_scale[l], kchol) * np.sqrt(prior_var[l])
     ###################################################
 
     # dimensions
-    T, N = y.shape
-    L = len(prior_var)
-
-    eyek = np.identity(kchol)
-
-    # hyperparameters
-    prior_var = prior_var.copy()
-    prior_scale = prior_scale.copy()
-
-    # incomplete cholesky decomposition of prior covariance matrix
-    prior_chol = np.empty((L, T, kchol), dtype=float)
-    makechol()
+    L, T, k = chol.shape
+    N = y.shape[1]
+    L = m0.shape[1]
+    eyek = np.identity(k)
 
     # temporal slice of v
-    v = np.ones((T, L)) * prior_var
+    v = np.ones((T, L)) * chol[:, 0, 0]
 
     # read-only variables, protection from unexpected assignment
     y.setflags(write=0)
@@ -115,7 +102,7 @@ def train(y, p, prior_var, prior_scale, a0=None, b0=None, m0=None, anorm=1.0,
     h.setflags(write=0)
 
     # initialize args
-    # make alpha copy to avoid changing initial values
+    # make a copy to avoid changing initial values
     if m0 is None:
         m = np.zeros((T, L), dtype=float)
     else:
@@ -123,36 +110,31 @@ def train(y, p, prior_var, prior_scale, a0=None, b0=None, m0=None, anorm=1.0,
 
     if a0 is None:
         a0 = np.random.randn(L, N)
-        a0 /= linalg.norm(a0) / anorm
-    alpha = a0.copy()
+    a = a0.copy()
 
     if b0 is None:
         b0 = linalg.lstsq(h, y)[0]
-    beta = b0.copy()
+    b = b0.copy()
 
     # valid values of parameters from previous iteration
-    good_alpha = alpha.copy()
-    good_beta = beta.copy()
+    good_a = a.copy()
+    good_b = b.copy()
     good_m = m.copy()
-    good_var = prior_var.copy()
-    good_scale = prior_scale.copy()
-
-    step_beta = 0.5
 
     # adagrad
     decay = 0.9
     eps = 1e-6
-    accu_grad_a = np.zeros_like(alpha)
-    accu_delta_a = np.zeros_like(alpha)
-    accu_grad_m = np.zeros_like(m)
-    accu_grad_b = np.zeros_like(beta)
-    accu_delta_b = np.zeros_like(beta)
+    accu_grad_a = np.zeros_like(a)
+    # accu_delta_a = np.zeros_like(a)
+    # accu_grad_m = np.zeros_like(m)
+    # accu_grad_b = np.zeros_like(b)
+    # accu_delta_b = np.zeros_like(b)
 
     # Optimization
     updatev()
     # initialize lower bound
     lbound = np.full(niter, np.finfo(float).min)
-    lbound[0] = elbo(y, h, m, alpha, beta, prior_chol, v)
+    lbound[0] = elbo(y, h, m, v, a, b, chol)
     it = 1
     converged = False
     start = timeit.default_timer()  # time when algorithm starts
@@ -164,7 +146,7 @@ def train(y, p, prior_var, prior_scale, a0=None, b0=None, m0=None, anorm=1.0,
         ###########
         # weights #
         ###########
-        lam = firingrate(h, m, v, alpha, beta)
+        lam = firingrate(h, m, v, a, b)
         for n in range(N):
             grad_b = h.T.dot(y[:, n] - lam[:, n])
             # accu_grad_b[:, n] = decay * accu_grad_b[:, n] + (1 - decay) * grad_b ** 2
@@ -177,22 +159,22 @@ def train(y, p, prior_var, prior_scale, a0=None, b0=None, m0=None, anorm=1.0,
                 print('b', e)
                 continue
             # accu_delta_b[:, n] = decay * accu_delta_b[:, n] + (1 - decay) * delta_b ** 2
-            beta[:, n] += delta_b
+            b[:, n] += delta_b
         updatev()
 
         #############
         # posterior #
         #############
-        good_elbo = elbo(y, h, m, alpha, beta, prior_chol, v)
-        lam = firingrate(h, m, v, alpha, beta)
+        good_elbo = elbo(y, h, m, v, a, b, chol)
+        lam = firingrate(h, m, v, a, b)
         for l in range(L):
-            G = prior_chol[l]
-            w = lam.dot(alpha[l, :] ** 2).reshape((T, 1))
+            G = chol[l]
+            w = lam.dot(a[l, :] ** 2).reshape((T, 1))
             GTWG = G.T.dot(w * G)
 
-            u = (y - lam).dot(alpha[l, :])
+            u = (y - lam).dot(a[l, :])
             # grad_m = u - np.dot(linalg.pinv2(G).T, np.dot(linalg.pinv2(G), m[:, l]))
-            grad_m = u - linalg.lstsq(G.T, linalg.lstsq(G, m[:, l])[0])[0]
+            # grad_m = u - linalg.lstsq(G.T, linalg.lstsq(G, m[:, l])[0])[0]
             # accu_grad_m[:, l] = decay * accu_grad_m[:, l] + (1 - decay) * grad_m ** 2
 
             u2 = G.dot(G.T.dot(u)) - m[:, l]
@@ -200,9 +182,8 @@ def train(y, p, prior_var, prior_scale, a0=None, b0=None, m0=None, anorm=1.0,
                                                                                   sym_pos=True)))
             m[:, l] = good_m[:, l] + delta_m
             m[:, l] -= np.mean(m[:, l])
-            # alpha[l, :] = good_alpha[l, :] * linalg.norm(m[:, l], ord=np.inf)
             m[:, l] /= linalg.norm(m[:, l], ord=np.inf)
-            lb = elbo(y, h, m, alpha, beta, prior_chol, v)
+            lb = elbo(y, h, m, v, a, b, chol)
             if np.isfinite(lb) and lb > good_elbo:
                 # Newton step
                 good_elbo = lb
@@ -210,59 +191,48 @@ def train(y, p, prior_var, prior_scale, a0=None, b0=None, m0=None, anorm=1.0,
                 # Gradient step
                 # m[:, l] = good_m[:, l] + grad_m / np.sqrt(eps + accu_grad_m[:, l])
                 # m[:, l] -= np.mean(m[:, l])
-                # alpha[l, :] = good_alpha[l, :] * linalg.norm(m[:, l], ord=np.inf)
+                # a[l, :] = good_a[l, :] * linalg.norm(m[:, l], ord=np.inf)
                 # m[:, l] /= linalg.norm(m[:, l], ord=np.inf)
                 m[:, l] = good_m[:, l]
 
-            grad_a = (y - lam).T.dot(m[:, l]) - lam.T.dot(v[:, l]) * alpha[l, :]
+            grad_a = (y - lam).T.dot(m[:, l]) - lam.T.dot(v[:, l]) * a[l, :]
             accu_grad_a[l, :] = decay * accu_grad_a[l, :] + (1 - decay) * grad_a ** 2
             # delta_a = np.sqrt(eps + accu_delta_a[l, :]) / np.sqrt(eps + accu_grad_a[l, :]) * grad_a
             # accu_delta_a[l, :] = decay * accu_delta_a[l, :] + (1 - decay) * delta_a ** 2
-            # alpha[l, :] += 100 * delta_a
-            neg_diag_Ha = np.sum(lam * ((m[:, l, np.newaxis] + np.outer(v[:, l], alpha[l, :])) ** 2), axis=0) + \
+            # a[l, :] += 100 * delta_a
+            neg_diag_Ha = np.sum(lam * ((m[:, l, np.newaxis] + np.outer(v[:, l], a[l, :])) ** 2), axis=0) + \
                           lam.T.dot(v[:, l])
             delta_a = grad_a / (np.sqrt(eps + accu_grad_a[l, :]) + neg_diag_Ha)
-            alpha[l, :] += delta_a
+            a[l, :] += delta_a
         updatev()
 
         # store lower bound
-        lbound[it] = elbo(y, h, m, alpha, beta, prior_chol, v)
+        lbound[it] = elbo(y, h, m, v, a, b, chol)
 
         # check convergence
-        chg_alpha = np.max(np.abs(good_alpha - alpha))
-        chg_beta = np.max(np.abs(good_beta - beta))
-        chg_post_mean = np.max(np.abs(good_m - m))
-        chg_variance = np.max(np.abs(good_var - prior_var)) if hyper else 0.0
-        chg_scale = np.max(np.abs(good_scale - prior_scale)) if hyper else 0.0
+        change_a = np.max(np.abs(good_a - a))
+        change_b = np.max(np.abs(good_b - b))
+        change_m = np.max(np.abs(good_m - m))
 
         if verbose:
             print('lower bound = {:.5f}\n'
                   'increment = {:.10f}\n'
                   'time = {:.2f}s\n'
-                  'change in alpha = {:.10f}\n'
-                  'change in beta = {:.10f}\n'
-                  'change in posterior mean = {:.10f}\n'
-                  'change in prior variance = {:.10f}\n'
-                  'change in prior scale = {:.10f}'.format(lbound[it], lbound[it] - lbound[it - 1],
-                                                           timeit.default_timer() - iter_start,
-                                                           chg_alpha, chg_beta, chg_post_mean,
-                                                           chg_variance, chg_scale))
+                  'change in a = {:.10f}\n'
+                  'change in b = {:.10f}\n'
+                  'change in m = {:.10f}\n'.format(lbound[it], lbound[it] - lbound[it - 1],
+                                                   timeit.default_timer() - iter_start,
+                                                   change_a, change_b, change_m))
 
-        # converged if the change in ELBO is relatively smaller than a tolerance
-        # if np.abs(lbound[it] - lbound[it - 1]) < tol * np.abs(lbound[it - 1]):
-        #     converged = True
-
-        if np.abs(lbound[it] - lbound[it - 1]) < tol * np.abs(lbound[it - 1]) and it % 5 == 0:
+        if np.abs(lbound[it] - lbound[it - 1]) < tol * np.abs(lbound[it - 1]) and it % 3 == 0:
             converged = True
 
         # store current iteration
-        good_alpha[:] = alpha
-        good_beta[:] = beta
+        good_a[:] = a
+        good_b[:] = b
         good_m[:] = m
-        good_var[:] = prior_var
-        good_scale[:] = prior_scale
 
         it += 1
 
     stop = timeit.default_timer()
-    return lbound[:it], m, alpha, beta, prior_var, prior_scale, a0, b0, stop - start, converged
+    return lbound[:it], m, a, b, stop - start, converged
