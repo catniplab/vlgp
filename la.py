@@ -22,14 +22,11 @@ def ichol_gauss(n, omega, k, tol=1e-8):
             jast = np.argmax(diagG[i:])
             jast += i
             # Be caseful especially when you do assignment! numpy indexing returns a view instead of a copy.
-            # stmp = pvec[jast]
-            # pvec[jast] = pvec[i]
-            # pvec[i] = stmp
             pvec[i], pvec[jast] = pvec[jast].copy(), pvec[i].copy()
-            vtmp[:i + 1] = g[i, :i + 1]
-            g[i, :i + 1] = g[jast, :i + 1]
-            g[jast, :i + 1] = vtmp[:i + 1]
-            # g[jast, :i + 1], g[i, :i + 1] = g[i, :i + 1].copy(), g[jast, :i + 1].copy()
+            # vtmp[:i + 1] = g[i, :i + 1]
+            # g[i, :i + 1] = g[jast, :i + 1]
+            # g[jast, :i + 1] = vtmp[:i + 1]
+            g[jast, :i + 1], g[i, :i + 1] = g[i, :i + 1].copy(), g[jast, :i + 1].copy()
         else:
             jast = 0
 

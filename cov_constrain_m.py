@@ -33,7 +33,6 @@ def elbo(y, h, m, v, a, b, Sigma):
 
     for l in range(L):
         w = lam.dot(a[l, :] ** 2)
-        print(w)
         isv = eyeT - linalg.solve(np.diag(1 / w) + Sigma[l, :], Sigma[l, :], sym_pos=True)
 
         lb += -0.5 * m[:, l].dot(linalg.lstsq(Sigma[l, :], m[:, l])[0]) + \
@@ -63,9 +62,7 @@ def train(y, p, prior_var, prior_scale, a0=None, b0=None, m0=None, hyper=False, 
     prior_var = prior_var.copy()
     prior_scale = prior_scale.copy()
 
-    i, j = np.meshgrid(np.arange(T), np.arange(T))
-    logcor = -(i - j) ** 2
-    Sigma = np.empty(shape=(L, T, T))
+    Sigma = np.empty(shape=(L, T, T), dtype=float)
     for l in range(L):
         Sigma[l, :] = sqexpcov(T, prior_scale[l], prior_var[l])
 
@@ -146,7 +143,7 @@ def train(y, p, prior_var, prior_scale, a0=None, b0=None, m0=None, hyper=False, 
             # grad_m = u - linalg.lstsq(Sigma[l, :], m[:, l])[0]
 
             u2 = Sigma[l, :].dot(u) - m[:, l]
-            delta_m = linalg.solve(eyeT + Sigma[l, :].dot(np.diag(w)), u2, sym_pos=True)
+            delta_m = linalg.lstsq(eyeT + Sigma[l, :].dot(np.diag(w)), u2)[0]
             m[:, l] = good_m[:, l] + delta_m
             m[:, l] -= np.mean(m[:, l])
             m[:, l] /= linalg.norm(m[:, l], ord=np.inf)
@@ -188,9 +185,6 @@ def train(y, p, prior_var, prior_scale, a0=None, b0=None, m0=None, hyper=False, 
                                                            chg_variance, chg_scale))
 
         # converged if the change in ELBO is relatively smaller than a tolerance
-        # if np.abs(lbound[it] - lbound[it - 1]) < tol * np.abs(lbound[it - 1]):
-        #     converged = True
-
         if np.abs(lbound[it] - lbound[it - 1]) < tol * np.abs(lbound[it - 1]) and it % 5 == 0:
             converged = True
 
