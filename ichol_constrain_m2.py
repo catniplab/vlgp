@@ -1,11 +1,14 @@
 import timeit
 import numpy as np
 from scipy import linalg
-from util import makeregressor, selfh
+from util import selfh
 
 
 def firingrate(h, m, v, a, b, lb=-30, ub=30):
-    eta_x = h.dot(b) + m.dot(a) + 0.5 * v.dot(a ** 2)
+    L, N = a.shape
+    eta_x = m.dot(a) + 0.5 * v.dot(a ** 2)
+    for n in range(N):
+        eta_x[:, n] += h[:, n, :].dot(b[:, n])
     np.clip(eta_x, lb, ub, out=eta_x)
     return np.exp(eta_x)
 
@@ -22,11 +25,13 @@ def elbo(y, h, m, v, a, b, chol):
     :param v: temporal slices of posterior variance
     :return: lower bound
     """
-    # T, N = y.shape
+    N = y.shape[1]
     L, T, k = chol.shape
     eyek = np.identity(k)
 
-    eta = h.dot(b) + m.dot(a)
+    eta = m.dot(a)
+    for n in range(N):
+        eta[:, n] += h[:, n, :].dot(b[:, n])
     lam = firingrate(h, m, v, a, b)
     lb = np.sum(y * eta - lam)
 
@@ -97,7 +102,7 @@ def train(y, p, chol, a0=None, b0=None, m0=None, niter=50, tol=1e-5, verbose=Tru
     y.setflags(write=0)
 
     # construct makeregressor
-    h = makeregressor(y, p, intercept=True)
+    h = selfh(y, p)
     h.setflags(write=0)
 
     # initialize args
@@ -111,9 +116,9 @@ def train(y, p, chol, a0=None, b0=None, m0=None, niter=50, tol=1e-5, verbose=Tru
         a0 = np.random.randn(L, N)
     a = a0.copy()
 
-    if b0 is None:
-        b0 = linalg.lstsq(h, y)[0]
-    b = b0.copy()
+    b = np.empty((1 + p, N), dtype=float)
+    for n in range(N):
+        b[:, n] = linalg.lstsq(h[:, n, :], y[:, n])[0]
 
     # valid values of parameters from previous iteration
     good_a = a.copy()
@@ -124,12 +129,6 @@ def train(y, p, chol, a0=None, b0=None, m0=None, niter=50, tol=1e-5, verbose=Tru
     decay = 0.9
     eps = 1e-6
     accu_grad_a = np.zeros_like(a)
-    # accu_delta_a = np.zeros_like(a)
-    # accu_grad_m = np.zeros_like(m)
-    # accu_grad_b = np.zeros_like(b)
-    # accu_delta_b = np.zeros_like(b)
-
-    penalty = 1
 
     # Optimization
     updatev()
@@ -149,17 +148,8 @@ def train(y, p, chol, a0=None, b0=None, m0=None, niter=50, tol=1e-5, verbose=Tru
         ###########
         lam = firingrate(h, m, v, a, b)
         for n in range(N):
-            grad_b = h.T.dot(y[:, n] - lam[:, n])
-            # accu_grad_b[:, n] = decay * accu_grad_b[:, n] + (1 - decay) * grad_b ** 2
-            neg_hess_b = h.T.dot((h.T * lam[:, n]).T)
-            # np.fill_diagonal(neg_hess_b, neg_hess_b.diagonal() +
-            #                  np.sqrt(eps + accu_grad_b[:, n]) / np.sqrt(eps + accu_delta_b[:, n]))
-            # try:
-            #     delta_b = linalg.solve(neg_hess_b, grad_b, sym_pos=True)
-            # except linalg.LinAlgError as e:
-            #     print('b', e)
-            #     continue
-            # accu_delta_b[:, n] = decay * accu_delta_b[:, n] + (1 - decay) * delta_b ** 2
+            grad_b = h[:, n, :].T.dot(y[:, n] - lam[:, n])
+            neg_hess_b = h[:, n, :].T.dot((h[:, n, :].T * lam[:, n]).T)
             delta_b = linalg.lstsq(neg_hess_b, grad_b)[0]
             b[:, n] += delta_b
         updatev()
@@ -237,6 +227,4 @@ def train(y, p, chol, a0=None, b0=None, m0=None, niter=50, tol=1e-5, verbose=Tru
         it += 1
 
     stop = timeit.default_timer()
-    if verbose:
-        print('Converged: {}'.format(converged))
     return lbound[:it], m, a, b, stop - start, converged

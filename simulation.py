@@ -89,7 +89,8 @@ def spikes(latent, alpha, beta, intercept=True, y0=None, seed=None):
             regressor[t, intercept:(p - t) * N] = y0[t:, :].flatten()
 
     for t in range(T):
-        rate[t, :] = np.exp(np.dot(regressor[t, :], beta) + np.dot(latent[t, :], alpha))
+        eta = np.clip(np.dot(regressor[t, :], beta) + np.dot(latent[t, :], alpha), -30, 30)
+        rate[t, :] = np.exp(eta)
         # spike[t, :] = (np.random.poisson(rate[t, :], size=(1, N)) > 0) * 1
         # truncate spike to 1 if spike > 1
         # it's equivalent to Bernoulli P(1) = (1 - e^-(lam_t))

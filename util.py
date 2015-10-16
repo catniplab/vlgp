@@ -70,3 +70,31 @@ def cartesian(arrays):
         out[:, n] = arrays[n][ix[:, n]]
 
     return out
+
+
+def varimax(x, gamma=1.0, q=20, tol=1e-5):
+    from scipy.linalg import svd
+    from numpy import eye, asarray, dot, sum, diag
+    p,k = x.shape
+    rotation = eye(k)
+    d = 0
+    for i in range(q):
+        d_old = d
+        rotated = dot(x, rotation)
+        u, s, vh = svd(dot(x.T, asarray(rotated) ** 3 - (gamma / p) * dot(rotated, diag(diag(dot(rotated.T, rotated))))))
+        rotation = dot(u, vh)
+        d = sum(s)
+        if d_old != 0 and d / d_old < 1 + tol:
+            break
+    return dot(x, rotation)
+
+
+def selfh(y, p):
+    T, N = y.shape
+    h = np.zeros((T, N, 1 + p))  # for each b_n at time t, h is a vector of length 1 + p
+    for t in range(T):
+        for n in range(N):
+            h[t, n, 0] = 1
+            if t - p >= 0:
+                h[t, n, 1:] = y[t - p:t, n]  # by row
+    return h
