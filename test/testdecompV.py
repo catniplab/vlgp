@@ -1,3 +1,4 @@
+__author__ = 'yuan'
 import os.path
 from datetime import datetime
 
@@ -6,16 +7,16 @@ from matplotlib.backends.backend_pdf import PdfPages
 import h5py
 from sklearn.decomposition.factor_analysis import FactorAnalysis
 
-from ichol import *
+from ichol_V import *
 from util import likelihood
 import simulation
 
 np.random.seed(0)
 
-T = 1000
+T = 5000
 p = 0
 L = 2
-N = 50
+N = 20
 
 high = np.log(25 / T)
 low = np.log(5 / T)
@@ -42,33 +43,22 @@ y, _, rate = simulation.spikes(x, a, b, intercept=True)
 fa = FactorAnalysis(n_components=L, svd_method='lapack')
 m0 = fa.fit_transform(y)
 a0 = fa.components_
-# a0 = np.random.randn(L, N)
 m0 *= np.linalg.norm(a0) / np.sqrt(N)
 a0 /= np.linalg.norm(a0) / np.sqrt(N)
 
 var = np.ones(L, dtype=float) * 5
 w = np.empty(L, dtype=float)
-w[0] = 1e-4
-w[1] = 5e-4
+w[0] = 1e-5
+w[1] = 1e-5
 
-# w = np.logspace(-1, 3, 5)
-# grid_w = cartesian([w] * L)
-
-control = {'max iteration': 50,
-           'fixed-point iteration': 5,
-           'tol': 1e-4,
-           'verbose': True}
-
+# for i, row in enumerate(grid_w):
 lbound, m1, a1, b1, new_var, new_scale, a0, b0, elapsed, converged = train(y, 0, var, w,
-                                                                           a0=a0,
-                                                                           b0=None,
-                                                                           m0=m0,
+                                                                           a0=a0, b0=None, m0=m0,
                                                                            anorm=np.sqrt(N),
-                                                                           fixalpha=False, fixbeta=False,
-                                                                           fixpostmean=False,
-                                                                           hyper=True,
-                                                                           kchol=20,
-                                                                           control=control)
+                                                                           hyper=False,
+                                                                           kchol=50,
+                                                                           niter=50,
+                                                                           tol=1e-5, verbose=True)
 
 if not os.path.isdir('output'):
     os.mkdir('output')
@@ -191,3 +181,4 @@ for l in range(L):
 # savefig(pp, format='pdf')
 
 pp.close()
+
