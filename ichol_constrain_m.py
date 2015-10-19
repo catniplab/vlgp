@@ -1,7 +1,7 @@
 import timeit
 import numpy as np
 from scipy import linalg
-from util import makeregressor, selfh
+from util import makeregressor
 
 
 def firingrate(h, m, v, a, b, lb=-30, ub=30):
@@ -239,4 +239,4 @@ def train(y, p, chol, a0=None, b0=None, m0=None, niter=50, tol=1e-5, verbose=Tru
     stop = timeit.default_timer()
     if verbose:
         print('Converged: {}'.format(converged))
-    return lbound[:it], m, a, b, stop - start, converged
+    return lbound[:it], m, v, a, b, stop - start, converged
