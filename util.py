@@ -1,21 +1,20 @@
 import numpy as np
 
 
-def makeregressor(spike, p, intercept=True):
+def makeregressor(obs, p):
     """
-    Construct spike regressor.
-    :param spike: (T, N) spike trains
+    Construct regressor.
+    :param obs: (T, N) observations
     :param p: order of regression
-    :param intercept: indicator if intercept term included
-    :return: (T, intercept + p * N) array
+    :return: (T, 1 + p * N) array
     """
-    T, N = spike.shape
-    regressor = np.ones((T, intercept + p * N), dtype=float)
+    T, N = obs.shape
+    regressor = np.ones((T, 1 + p * N), dtype=float)
     for t in range(T):
         if t - p >= 0:
-            regressor[t, intercept:] = spike[t - p:t, :].flatten()  # by row
+            regressor[t, 1:] = obs[t - p:t, :].flatten()  # by row
         else:
-            regressor[t, intercept + (p - t) * N:] = spike[:t, :].flatten()
+            regressor[t, 1 + (p - t) * N:] = obs[:t, :].flatten()
     return regressor
 
 

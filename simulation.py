@@ -101,3 +101,28 @@ def spikes(latent, alpha, beta, intercept=True, y0=None, seed=None):
             regressor[t + 1, intercept + (p - 1) * N:] = spike[t, :]
 
     return spike, regressor, rate
+
+
+def gaussian(latent, a, b, K, y0=None, seed=None):
+    if seed is not None:
+        np.random.seed(seed)
+
+    T, L = latent.shape
+    _, N = a.shape
+    p = (b.shape[0] - 1) // N
+
+    observation = np.empty((T, N), dtype=float)
+    mean = np.empty_like(observation, dtype=float)
+    h = np.ones((T, b.shape[0]), dtype=float)
+    if y0 is not None:
+        for t in range(p):
+            h[t, 1:(p - t) * N] = y0[t:, :].flatten()
+
+    for t in range(T):
+        mean[t, :] = latent[t, :].dot(a) + h[t, :].dot(b)
+        observation[t, :] = np.random.multivariate_normal(mean[t, :], K)
+        if t + 1 < T and p != 0:
+            h[t + 1, 1:] = np.roll(h[t, 1:], -N)
+            h[t + 1, 1 + (p - 1) * N:] = observation[t, :]
+
+    return observation, h, mean

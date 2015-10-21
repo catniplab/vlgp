@@ -34,12 +34,12 @@ def elbo(y, h, m, v, a, b, chol):
         G = chol[l, :]
         w = lam.dot(a[l, :] ** 2).reshape((T, 1))
         GTWG = G.T.dot(w * G)
-        # mdivS = linalg.pinv2(G).dot(m[:, l])
-        mdivS = linalg.lstsq(G, m[:, l])[0]
+        # m_div_G = linalg.pinv2(G).dot(m[:, l])
+        m_div_G = linalg.lstsq(G, m[:, l])[0]
         trace = (T - np.trace(GTWG) + np.trace(GTWG.dot(linalg.solve(eyek + GTWG, GTWG, sym_pos=True))))
         lndet = np.linalg.slogdet(eyek - GTWG + GTWG.dot(linalg.solve(eyek + GTWG, GTWG, sym_pos=True)))[1]
 
-        lb += -0.5 * np.inner(mdivS, mdivS) - 0.5 * trace + 0.5 * lndet
+        lb += -0.5 * np.inner(m_div_G, m_div_G) - 0.5 * trace + 0.5 * lndet
         # lb += 0.5 * lndet
     return lb
 
@@ -91,13 +91,13 @@ def train(y, p, chol, a0=None, b0=None, bmask=None, m0=None, niter=50, tol=1e-5,
     eyek = np.identity(k)
 
     # temporal slice of v
-    v = np.ones((T, L)) * chol[:, 0, 0]
+    v = np.ones((T, L)) * chol[:, 0, 0] ** 2
 
     # read-only variables, protection from unexpected assignment
     y.setflags(write=0)
 
     # construct makeregressor
-    h = makeregressor(y, p, intercept=True)
+    h = makeregressor(y, p)
     h.setflags(write=0)
 
     # initialize args
