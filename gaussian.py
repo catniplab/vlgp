@@ -26,7 +26,7 @@ def elbo(y, h, chol, m, v, a, b, K):
     return out
 
 
-def train(y, p, chol, m0=None, a0=None, b0=None, bmask=None, K0=None, niter=50, tol=1e-5, verbose=True):
+def train(y, p, chol, m0=None, a0=None, b0=None, bmask=None, niter=50, tol=1e-5, verbose=True):
     T, N = y.shape
     L, _, k = chol.shape
     eyek = np.identity(k)
@@ -48,9 +48,9 @@ def train(y, p, chol, m0=None, a0=None, b0=None, bmask=None, K0=None, niter=50, 
     if bmask is None:
         bmask = np.full_like(b, fill_value=True, dtype=bool)
 
-    if K0 is None:
-        K0 = np.eye(N, dtype=float)
-    K = K0.copy()
+    # K = np.eye(N, dtype=float)
+
+    K = np.var(y - h.dot(b), axis=0)
 
     v = np.ones((T, L)) * chol[:, 0, 0] ** 2
 
