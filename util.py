@@ -99,3 +99,17 @@ def raster(y):
     xticks([])
     yticks([])
     gca().invert_yaxis()
+
+
+def selfhistory(obs, p):
+    T, N = obs.shape()
+    h = np.ones((N, T, 1 + p), dtype=float)
+
+    for n in range(N):
+        for t in range(T):
+            if t - p < 0:
+                h[n, t, 1:] = obs[n, 0:t]
+            else:
+                h[n, t, 1:] = obs[n, t - p:t]
+
+    return h
