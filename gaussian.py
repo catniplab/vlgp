@@ -113,4 +113,4 @@ def train(y, p, chol, m0=None, a0=None, b0=None, bmask=None, niter=50, tol=1e-5,
         i += 1
     stop = timeit.default_timer()
 
-    return elbo, m, v, a, b, K, stop - start, converged
+    return elbo[:i], m, v, a, b, K, stop - start, converged

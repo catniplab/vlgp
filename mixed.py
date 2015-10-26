@@ -79,7 +79,7 @@ def train(y, pois, p, chol, m0=None, a0=None, b0=None, niter=50, tol=1e-5,
     lbound[0] = elbo(y, h, pois, chol, m, v, a, b, vgauss)
 
     # adagrad
-    decay = 0.9
+    decay = 0.95
     eps = 1e-6
     accu_grad_a = np.zeros_like(a)
 
@@ -105,7 +105,7 @@ def train(y, pois, p, chol, m0=None, a0=None, b0=None, niter=50, tol=1e-5,
                 for t in range(T):
                     neghess += np.outer(h[n, t, :], h[n, t, :]) / vgauss[n]
             delta = linalg.lstsq(neghess, grad)[0]
-            b[n, :] += delta
+            b[n, :] += 0.5 * delta
         updatev()
 
         # estimate latent
@@ -180,4 +180,4 @@ def train(y, pois, p, chol, m0=None, a0=None, b0=None, niter=50, tol=1e-5,
         i += 1
 
     stop = timeit.default_timer()
-    return lbound, m, v, a, b, vgauss, stop - start, converged
+    return lbound[:i], m, v, a, b, vgauss, stop - start, converged

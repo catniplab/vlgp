@@ -2,7 +2,7 @@ import numpy as np
 import warnings
 
 
-def ichol_gauss(n, omega, k, tol=1e-8):
+def ichol_gauss(n, omega, k, tol=1e-6):
     """
     Incomplete Cholesky decomposition for squared exponential covariance
     :param n: size of covariance matrix (n, n)
@@ -67,7 +67,7 @@ def ichol(a):
     return a
 
 
-def ichol2(a, tol=1e-8):
+def ichol2(a, tol=1e-6):
     """
     Incomplete Cholesky factorization
     This version allows too small diagonal elements.
