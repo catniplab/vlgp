@@ -102,7 +102,7 @@ def raster(y):
 
 
 def selfhistory(obs, p):
-    T, N = obs.shape()
+    T, N = obs.shape
     h = np.ones((N, T, 1 + p), dtype=float)
 
     for n in range(N):

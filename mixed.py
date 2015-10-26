@@ -9,8 +9,8 @@ def elbo(y, h, pois, chol, m, v, a, b, vgauss):
     N = y.shape[1]
     eyek = np.identity(k)
 
-    eta = np.einsum('ijk, ik->ij', h, b) + m.dot(a)
-    lam = np.exp((eta[pois] + 0.5 * v.dot(a[:, pois] ** 2)).clip(-30, 30))
+    eta = np.einsum('ijk, ik->ij', h, b).T + m.dot(a)
+    lam = np.exp((eta[:, pois] + 0.5 * v.dot(a[:, pois] ** 2)).clip(-30, 30))
     lpois = np.sum(y[:, pois] * eta[:, pois] - lam)
 
     lgauss = - 0.5 * np.sum((y[:, ~pois] - eta[:, ~pois]) ** 2 / vgauss[~pois] + v.dot(a[:, ~pois] ** 2))
@@ -36,8 +36,8 @@ def elbo(y, h, pois, chol, m, v, a, b, vgauss):
 def train(y, pois, p, chol, m0=None, a0=None, b0=None, niter=50, tol=1e-5,
           verbose=True):
     def updatev():
-        eta = np.einsum('ijk, ik->ij', h, b) + m.dot(a)
-        lam = np.exp((eta[pois] + 0.5 * v.dot(a[:, pois] ** 2)).clip(-30, 30))
+        eta = np.einsum('ijk, ik->ij', h, b).T + m.dot(a)
+        lam = np.exp((eta[:, pois] + 0.5 * v.dot(a[:, pois] ** 2)).clip(-30, 30))
         for l in range(L):
             G = chol[l, :]
             adj = np.empty((T, N), dtype=float)
@@ -56,7 +56,9 @@ def train(y, pois, p, chol, m0=None, a0=None, b0=None, niter=50, tol=1e-5,
     if a0 is None:
         a0 = np.zeros((L, N), dtype=float)
     if b0 is None:
-        b0 = linalg.lstsq(h, y)[0]
+        b0 = np.empty((N, 1 + p), dtype=float)
+        for n in range(N):
+            b0[n, :] = linalg.lstsq(h[n, :], y[:, n])[0]
     if m0 is None:
         m0 = np.zeros((L, T), dtype=float)
 
@@ -64,7 +66,8 @@ def train(y, pois, p, chol, m0=None, a0=None, b0=None, niter=50, tol=1e-5,
     b = b0
     m = m0
 
-    vgauss = np.var((y - h.dot(b) - m.dot(a)), axis=1)
+    eta = np.einsum('ijk, ik->ij', h, b).T + m.dot(a)
+    vgauss = np.mean((y - eta) ** 2, axis=0)  # variance of gaussian residuals
 
     good_m = m.copy()
     good_a = a.copy()
@@ -72,8 +75,8 @@ def train(y, pois, p, chol, m0=None, a0=None, b0=None, niter=50, tol=1e-5,
 
     v = np.empty_like(m, dtype=float)
 
-    lb = np.full(niter, fill_value=np.finfo(float).min, dtype=float)
-    lb[0] = 0
+    lbound = np.full(niter, fill_value=np.finfo(float).min, dtype=float)
+    lbound[0] = elbo(y, h, pois, chol, m, v, a, b, vgauss)
 
     # adagrad
     decay = 0.9
@@ -84,8 +87,12 @@ def train(y, pois, p, chol, m0=None, a0=None, b0=None, niter=50, tol=1e-5,
     i = 1
     start = timeit.default_timer()
     while not converged and i < niter:
+        iter_start = timeit.default_timer()
+        if verbose:
+            print('\nIteration[{:d}]'.format(i))
+
         # estimate b
-        eta = np.einsum('ijk, ik->ij', h, b) + m.dot(a)
+        eta = np.einsum('ijk, ik->ij', h, b).T + m.dot(a)
         for n in range(N):
             neghess = np.zeros((1 + p, 1 + p), dtype=float)
             if pois[n]:
@@ -96,21 +103,21 @@ def train(y, pois, p, chol, m0=None, a0=None, b0=None, niter=50, tol=1e-5,
             else:
                 grad = ((y[:, n] - eta[:, n]) / vgauss[n]).dot(h[n, :])
                 for t in range(T):
-                    neghess += np.outer(h[n, t, :], h[n, t, :])
-                neghess /= vgauss[n]
+                    neghess += np.outer(h[n, t, :], h[n, t, :]) / vgauss[n]
             delta = linalg.lstsq(neghess, grad)[0]
-            b[n] += delta
+            b[n, :] += delta
         updatev()
 
         # estimate latent
-        eta = np.einsum('ijk, ik->ij', h, b) + m.dot(a)
-        lam = np.exp((eta[pois] + 0.5 * v.dot(a[:, pois] ** 2)).clip(-30, 30))
+        good_elbo = elbo(y, h, pois, chol, m, v, a, b, vgauss)
+        eta = np.einsum('ijk, ik->ij', h, b).T + m.dot(a)
+        lam = np.exp((eta[:, pois] + 0.5 * v.dot(a[:, pois] ** 2)).clip(-30, 30))
         for l in range(L):
             G = chol[l]
             adj = np.empty((T, N), dtype=float)
             adj[:, pois] = lam
             adj[:, ~pois] = 1 / vgauss[~pois]
-            w = lam.dot(a[l, :] ** 2).reshape((T, 1))
+            w = adj.dot(a[l, :] ** 2).reshape((T, 1))
             GTWG = G.T.dot(w * G)
 
             adj4grad = np.ones(N, dtype=float)
@@ -135,7 +142,7 @@ def train(y, pois, p, chol, m0=None, a0=None, b0=None, niter=50, tol=1e-5,
             grad_a[pois] = (y[:, pois] - lam).T.dot(m[:, l]) - lam.T.dot(v[:, l]) * a[l, pois]
             grad_a[~pois] = ((y[:, ~pois] - eta[:, ~pois]).T.dot(m[:, l]) - np.sum(v[:, l]) * a[l, ~pois]) / vgauss[~pois]
             accu_grad_a[l, :] = decay * accu_grad_a[l, :] + (1 - decay) * grad_a ** 2
-            neg_diag_Ha[pois] = np.sum(lam * ((m[:, l, np.newaxis] + np.outer(v[:, l], a[l, :])) ** 2), axis=0) + \
+            neg_diag_Ha[pois] = np.sum(lam * ((m[:, l, np.newaxis] + np.outer(v[:, l], a[l, pois])) ** 2), axis=0) + \
                           lam.T.dot(v[:, l])
             neg_diag_Ha[~pois] = np.sum(m[:, l] ** 2 + v[:, l]) / vgauss[~pois]
             delta_a = grad_a / (np.sqrt(eps + accu_grad_a[l, :]) + neg_diag_Ha)
@@ -143,12 +150,27 @@ def train(y, pois, p, chol, m0=None, a0=None, b0=None, niter=50, tol=1e-5,
         updatev()
 
         # estimate gaussian variance
-        eta = np.einsum('ijk, ik->ij', h, b) + m.dot(a)
-        vgauss = np.mean((y - eta) ** 2, axis=1)
+        eta = np.einsum('ijk, ik->ij', h, b).T + m.dot(a)
+        vgauss = np.mean((y - eta) ** 2, axis=0)
 
-        lb[i] = elbo(y, h, pois, chol, m, v, a, b, vgauss)
+        lbound[i] = elbo(y, h, pois, chol, m, v, a, b, vgauss)
 
-        if np.abs(lb[i] - lb[i - 1]) < tol * np.abs(lb[i - 1]):
+        # check convergence
+        change_a = np.max(np.abs(good_a - a))
+        change_b = np.max(np.abs(good_b - b))
+        change_m = np.max(np.abs(good_m - m))
+
+        if verbose:
+            print('lower bound = {:.5f}\n'
+                  'increment = {:.10f}\n'
+                  'time = {:.2f}s\n'
+                  'change in a = {:.10f}\n'
+                  'change in b = {:.10f}\n'
+                  'change in m = {:.10f}\n'.format(lbound[i], lbound[i] - lbound[i - 1],
+                                                   timeit.default_timer() - iter_start,
+                                                   change_a, change_b, change_m))
+
+        if np.abs(lbound[i] - lbound[i - 1]) < tol * np.abs(lbound[i - 1]):
             converged = True
 
         good_m[:] = m
@@ -158,4 +180,4 @@ def train(y, pois, p, chol, m0=None, a0=None, b0=None, niter=50, tol=1e-5,
         i += 1
 
     stop = timeit.default_timer()
-    return lb, m, v, a, b, stop - start, converged
+    return lbound, m, v, a, b, vgauss, stop - start, converged
