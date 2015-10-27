@@ -51,10 +51,12 @@ def train(y, pois, p, chol, m0=None, a0=None, b0=None, niter=50, tol=1e-5,
     L, T, cholrank = chol.shape
     N = y.shape[1]
     eyek = np.identity(cholrank)
-    h = selfhistory(y, p)
+    y0 = np.zeros(N, dtype=float)
+    y0[~pois] = np.mean(y[:, ~pois], axis=0)
+    h = selfhistory(y, p, y0)
 
     if a0 is None:
-        a0 = np.zeros((L, N), dtype=float)
+        a0 = linalg.lstsq(m0, y)[0]
     if b0 is None:
         b0 = np.empty((N, 1 + p), dtype=float)
         for n in range(N):
@@ -79,10 +81,13 @@ def train(y, pois, p, chol, m0=None, a0=None, b0=None, niter=50, tol=1e-5,
     lbound[0] = elbo(y, h, pois, chol, m, v, a, b, vgauss)
 
     # adagrad
-    decay = 0.95
+    decay = 0.9
     eps = 1e-6
     accu_grad_a = np.zeros_like(a)
+    accu_grad_b = np.zeros_like(b)
+    accu_grad_m = np.zeros_like(m)
 
+    dec = False
     converged = False
     i = 1
     start = timeit.default_timer()
@@ -97,27 +102,35 @@ def train(y, pois, p, chol, m0=None, a0=None, b0=None, niter=50, tol=1e-5,
             neghess = np.zeros((1 + p, 1 + p), dtype=float)
             if pois[n]:
                 lam = np.exp((eta[:, n] + 0.5 * v.dot(a[:, n] ** 2)).clip(-30, 30))
-                grad = (y[:, n] - lam).dot(h[n, :])
+                grad_b = (y[:, n] - lam).dot(h[n, :])
                 for t in range(T):
                     neghess += lam[t] * np.outer(h[n, t, :], h[n, t, :])
             else:
-                grad = ((y[:, n] - eta[:, n]) / vgauss[n]).dot(h[n, :])
+                grad_b = ((y[:, n] - eta[:, n]) / vgauss[n]).dot(h[n, :])
                 for t in range(T):
                     neghess += np.outer(h[n, t, :], h[n, t, :]) / vgauss[n]
-            delta = linalg.lstsq(neghess, grad)[0]
-            b[n, :] += 0.5 * delta
+            accu_grad_b[n, :] = decay * accu_grad_b[n, :] + (1 - decay) * grad_b ** 2
+
+            delta = linalg.solve(neghess + np.diag(np.sqrt(eps + accu_grad_b[n, :])), grad_b, sym_pos=True)[0]
+            b[n, :] += delta
         updatev()
 
-        # estimate latent
+        # estimate latent and a
         good_elbo = elbo(y, h, pois, chol, m, v, a, b, vgauss)
         eta = np.einsum('ijk, ik->ij', h, b).T + m.dot(a)
         lam = np.exp((eta[:, pois] + 0.5 * v.dot(a[:, pois] ** 2)).clip(-30, 30))
         for l in range(L):
+            # m
             G = chol[l]
+            grad_m = (y[:, pois] - lam).dot(a[l, pois]) + \
+                     ((y[:, ~pois] - eta[:, ~pois]) / vgauss[~pois]).dot(a[l, ~pois]) - \
+                     linalg.lstsq(G.T, linalg.lstsq(G, m[:, l])[0])[0]
+            accu_grad_m[:, l] = decay * accu_grad_m[:, l] + (1 - decay) * grad_m ** 2
+
             adj = np.empty((T, N), dtype=float)
             adj[:, pois] = lam
             adj[:, ~pois] = 1 / vgauss[~pois]
-            w = adj.dot(a[l, :] ** 2).reshape((T, 1))
+            w = (adj.dot(a[l, :] ** 2) + np.sqrt(eps + accu_grad_m[:, l])).reshape((T, 1))
             GTWG = G.T.dot(w * G)
 
             adj4grad = np.ones(N, dtype=float)
@@ -130,13 +143,22 @@ def train(y, pois, p, chol, m0=None, a0=None, b0=None, niter=50, tol=1e-5,
             m[:, l] = good_m[:, l] + delta_m
             m[:, l] -= np.mean(m[:, l])
             m[:, l] /= linalg.norm(m[:, l], ord=np.inf)
-            lb = elbo(y, h, pois, chol, m, v, a, b, vgauss)
-            if np.isfinite(lb) and lb > good_elbo:
-                # Newton step
-                good_elbo = lb
-            else:
-                m[:, l] = good_m[:, l]
 
+            if dec is True:
+                lb = elbo(y, h, pois, chol, m, v, a, b, vgauss)
+                if np.isfinite(lb) and lb > good_elbo:
+                    good_elbo = lb
+                else:
+            #     m[:, l] = good_m[:, l] + grad_m / np.sqrt(eps + accu_grad_m[:, l])
+                # lb = elbo(y, h, pois, chol, m, v, a, b, vgauss)
+                # if np.isfinite(lb) and lb > good_elbo:
+                #     good_elbo = lb
+                # else:
+                    m[:, l] = good_m[:, l]
+        updatev()
+
+        for l in range(L):
+            # a
             grad_a = np.empty(N, dtype=float)
             neg_diag_Ha = np.empty_like(grad_a)
             grad_a[pois] = (y[:, pois] - lam).T.dot(m[:, l]) - lam.T.dot(v[:, l]) * a[l, pois]
@@ -170,7 +192,15 @@ def train(y, pois, p, chol, m0=None, a0=None, b0=None, niter=50, tol=1e-5,
                                                    timeit.default_timer() - iter_start,
                                                    change_a, change_b, change_m))
 
-        if np.abs(lbound[i] - lbound[i - 1]) < tol * np.abs(lbound[i - 1]):
+        if verbose:
+            print('decreased: {}'.format(dec))
+
+        if i > 5 and lbound[i] < lbound[i - 1]:
+            dec = True
+            m[:] = good_m
+            a[:] = good_a
+
+        if i > 5 and np.abs(lbound[i] - lbound[i - 2]) < tol * np.abs(lbound[i - 2]):
             converged = True
 
         good_m[:] = m
