@@ -4,25 +4,28 @@ from scipy import linalg
 from util import selfhistory
 
 
-def elbo(y, h, pois, chol, m, v, a, b, vgauss):
+def elbo(y, h, dist, chol, m, v, a, b):
     L, T, k = chol.shape
     N = y.shape[1]
     eyek = np.identity(k)
 
     eta = np.einsum('ijk, ik->ij', h, b).T + m.dot(a)
-    lam = np.exp((eta[:, pois] + 0.5 * v.dot(a[:, pois] ** 2)).clip(-30, 30))
-    lpois = np.sum(y[:, pois] * eta[:, pois] - lam)
+    lam = np.exp((eta + 0.5 * v.dot(a ** 2)).clip(-30, 30))
+    var = np.var(y - eta, axis=0, ddof=0)
 
-    lgauss = - 0.5 * np.sum((y[:, ~pois] - eta[:, ~pois]) ** 2 / vgauss[~pois] + v.dot(a[:, ~pois] ** 2))
+    lpois = np.sum(y[:, dist == 'poisson'] * eta[:, dist == 'poisson'] - lam[:, dist == 'poisson'])
+
+    lgauss = - 0.5 * np.sum((y[:, dist == 'gaussian'] - eta[:, dist == 'gaussian']) ** 2 / var[dist == 'gaussian'] +
+                            v.dot(a[:, dist == 'gaussian'] ** 2))
 
     lb = lpois + lgauss
 
     for l in range(L):
         G = chol[l, :]
-        adj = np.empty((T, N), dtype=float)
-        adj[:, pois] = lam
-        adj[:, ~pois] = 1 / vgauss[~pois]
-        w = adj.dot(a[l, :] ** 2).reshape((T, 1))
+        u = np.empty((T, N), dtype=float)
+        u[:, dist == 'poisson'] = lam[:, dist == 'poisson']
+        u[:, dist == 'gaussian'] = 1 / var[dist == 'gaussian']
+        w = u.dot(a[l, :] ** 2).reshape((T, 1))
         GTWG = G.T.dot(w * G)
         m_div_G = linalg.lstsq(G, m[:, l])[0]
         trace = (T - np.trace(GTWG) + np.trace(GTWG.dot(linalg.solve(eyek + GTWG, GTWG, sym_pos=True))))
@@ -33,17 +36,31 @@ def elbo(y, h, pois, chol, m, v, a, b, vgauss):
     return lb
 
 
-def train(y, pois, p, chol, m0=None, a0=None, b0=None, niter=50, tol=1e-5,
-          verbose=True):
+def accumulate(accu, grad, decay):
+    return decay * accu + (1 - decay) * grad ** 2
+
+
+def residual(y, dist, h, m, v, a, b):
+    res = np.empty_like(y, dtype=float)
+    eta = np.einsum('ijk, ik->ij', h, b).T + m.dot(a)
+    lam = np.exp((eta + 0.5 * v.dot(a ** 2)).clip(-30, 30))
+    var = np.var(y - eta, axis=0, ddof=0)
+    res[:, dist == 'poisson'] = y[:, dist == 'poisson'] - lam[:, dist == 'poisson']
+    res[:, dist == 'gaussian'] = (y[:, dist == 'gaussian'] - eta[:, dist == 'gaussian']) / var[dist == 'gaussian']
+    return res
+
+
+def train(y, dist, p, chol, m0=None, a0=None, b0=None, niter=50, chkcnv=5, tol=1e-4, decay=0.9, eps=1e-6, verbose=True):
     def updatev():
         eta = np.einsum('ijk, ik->ij', h, b).T + m.dot(a)
-        lam = np.exp((eta[:, pois] + 0.5 * v.dot(a[:, pois] ** 2)).clip(-30, 30))
+        lam = np.exp((eta + 0.5 * v.dot(a ** 2)).clip(-30, 30))
+        var = np.var(y - eta, axis=0, ddof=0)
         for l in range(L):
             G = chol[l, :]
-            adj = np.empty((T, N), dtype=float)
-            adj[:, pois] = lam
-            adj[:, ~pois] = 1 / vgauss[~pois]
-            w = adj.dot(a[l, :] ** 2).reshape((T, 1))
+            u = np.empty((T, N), dtype=float)
+            u[:, dist == 'poisson'] = lam[:, dist == 'poisson']
+            u[:, dist == 'gaussian'] = 1 / var[dist == 'gaussian']
+            w = u.dot(a[l, :] ** 2).reshape((T, 1))
             GTWG = G.T.dot(w * G)
             v[:, l] = np.sum(G * (G - G.dot(GTWG) + G.dot(GTWG.dot(linalg.solve(eyek + GTWG, GTWG, sym_pos=True)))),
                              axis=1)
@@ -51,25 +68,25 @@ def train(y, pois, p, chol, m0=None, a0=None, b0=None, niter=50, tol=1e-5,
     L, T, cholrank = chol.shape
     N = y.shape[1]
     eyek = np.identity(cholrank)
+
     y0 = np.zeros(N, dtype=float)
-    y0[~pois] = np.mean(y[:, ~pois], axis=0)
+    y0[dist == 'gaussian'] = np.mean(y[:, dist == 'gaussian'], axis=0)
     h = selfhistory(y, p, y0)
+
+    if m0 is None:
+        m0 = np.tile(np.mean(y, axis=1), (1, L))
 
     if a0 is None:
         a0 = linalg.lstsq(m0, y)[0]
+
     if b0 is None:
         b0 = np.empty((N, 1 + p), dtype=float)
         for n in range(N):
             b0[n, :] = linalg.lstsq(h[n, :], y[:, n])[0]
-    if m0 is None:
-        m0 = np.zeros((L, T), dtype=float)
 
     a = a0
     b = b0
     m = m0
-
-    eta = np.einsum('ijk, ik->ij', h, b).T + m.dot(a)
-    vgauss = np.mean((y - eta) ** 2, axis=0)  # variance of gaussian residuals
 
     good_m = m.copy()
     good_a = a.copy()
@@ -78,16 +95,14 @@ def train(y, pois, p, chol, m0=None, a0=None, b0=None, niter=50, tol=1e-5,
     v = np.empty_like(m, dtype=float)
 
     lbound = np.full(niter, fill_value=np.finfo(float).min, dtype=float)
-    lbound[0] = elbo(y, h, pois, chol, m, v, a, b, vgauss)
+    lbound[0] = elbo(y, h, dist, chol, m, v, a, b)
 
     # adagrad
-    decay = 0.9
-    eps = 1e-6
     accu_grad_a = np.zeros_like(a)
     accu_grad_b = np.zeros_like(b)
     accu_grad_m = np.zeros_like(m)
 
-    dec = False
+    # dec = False
     converged = False
     i = 1
     start = timeit.default_timer()
@@ -96,86 +111,84 @@ def train(y, pois, p, chol, m0=None, a0=None, b0=None, niter=50, tol=1e-5,
         if verbose:
             print('\nIteration[{:d}]'.format(i))
 
-        # estimate b
+        # estimate latent
         eta = np.einsum('ijk, ik->ij', h, b).T + m.dot(a)
-        for n in range(N):
-            neghess = np.zeros((1 + p, 1 + p), dtype=float)
-            if pois[n]:
-                lam = np.exp((eta[:, n] + 0.5 * v.dot(a[:, n] ** 2)).clip(-30, 30))
-                grad_b = (y[:, n] - lam).dot(h[n, :])
-                for t in range(T):
-                    neghess += lam[t] * np.outer(h[n, t, :], h[n, t, :])
-            else:
-                grad_b = ((y[:, n] - eta[:, n]) / vgauss[n]).dot(h[n, :])
-                for t in range(T):
-                    neghess += np.outer(h[n, t, :], h[n, t, :]) / vgauss[n]
-            accu_grad_b[n, :] = decay * accu_grad_b[n, :] + (1 - decay) * grad_b ** 2
-
-            delta = linalg.solve(neghess + np.diag(np.sqrt(eps + accu_grad_b[n, :])), grad_b, sym_pos=True)[0]
-            b[n, :] += delta
-        updatev()
-
-        # estimate latent and a
-        good_elbo = elbo(y, h, pois, chol, m, v, a, b, vgauss)
-        eta = np.einsum('ijk, ik->ij', h, b).T + m.dot(a)
-        lam = np.exp((eta[:, pois] + 0.5 * v.dot(a[:, pois] ** 2)).clip(-30, 30))
+        lam = np.exp((eta + 0.5 * v.dot(a ** 2)).clip(-30, 30))
+        var = np.var(y - eta, axis=0, ddof=0)
         for l in range(L):
             # m
             G = chol[l]
-            grad_m = (y[:, pois] - lam).dot(a[l, pois]) + \
-                     ((y[:, ~pois] - eta[:, ~pois]) / vgauss[~pois]).dot(a[l, ~pois]) - \
+            grad_m = (y[:, dist == 'poisson'] - lam[:, dist == 'poisson']).dot(a[l, dist == 'poisson']) + \
+                     ((y[:, dist == 'gaussian'] - eta[:, dist == 'gaussian']) / var[dist == 'gaussian']).dot(a[l, dist == 'gaussian']) - \
                      linalg.lstsq(G.T, linalg.lstsq(G, m[:, l])[0])[0]
-            accu_grad_m[:, l] = decay * accu_grad_m[:, l] + (1 - decay) * grad_m ** 2
+            accu_grad_m[:, l] = accumulate(accu_grad_m[:, l], grad_m, decay)
 
-            adj = np.empty((T, N), dtype=float)
-            adj[:, pois] = lam
-            adj[:, ~pois] = 1 / vgauss[~pois]
-            w = (adj.dot(a[l, :] ** 2) + np.sqrt(eps + accu_grad_m[:, l])).reshape((T, 1))
+            u = np.empty((T, N), dtype=float)
+            u[:, dist == 'poisson'] = lam[:, dist == 'poisson']
+            u[:, dist == 'gaussian'] = 1 / var[dist == 'gaussian']
+            w = (u.dot(a[l, :] ** 2) + np.sqrt(eps + accu_grad_m[:, l])).reshape((T, 1))
             GTWG = G.T.dot(w * G)
 
-            adj4grad = np.ones(N, dtype=float)
-            adj4grad[~pois] = 1 / vgauss[~pois]
-            residual = adj4grad * (y - eta)
+            # adj4grad = np.ones(N, dtype=float)
+            # adj4grad[dist == 'gaussian'] = 1 / var[dist == 'gaussian']
+            # residual = adj4grad * (y - eta)
+            R = residual(y, dist, h, m, v, a, b)
 
-            u = G.dot(G.T.dot(residual.dot(a[l, :]))) - m[:, l]
+            u = G.dot(G.T.dot(R.dot(a[l, :]))) - m[:, l]
             delta_m = u - G.dot((w * G).T.dot(u)) + G.dot(GTWG.dot(linalg.solve(eyek + GTWG, (w * G).T.dot(u),
                                                                                   sym_pos=True)))
             m[:, l] = good_m[:, l] + delta_m
             m[:, l] -= np.mean(m[:, l])
             m[:, l] /= linalg.norm(m[:, l], ord=np.inf)
 
-            if dec is True:
-                lb = elbo(y, h, pois, chol, m, v, a, b, vgauss)
-                if np.isfinite(lb) and lb > good_elbo:
-                    good_elbo = lb
-                else:
-            #     m[:, l] = good_m[:, l] + grad_m / np.sqrt(eps + accu_grad_m[:, l])
-                # lb = elbo(y, h, pois, chol, m, v, a, b, vgauss)
-                # if np.isfinite(lb) and lb > good_elbo:
-                #     good_elbo = lb
-                # else:
-                    m[:, l] = good_m[:, l]
+            # grad_a = np.empty(N, dtype=float)
+            # neg_diag_Ha = np.empty_like(grad_a)
+            # grad_a[dist] = (y[:, dist] - lam).T.dot(m[:, l]) - lam.T.dot(v[:, l]) * a[l, dist]
+            # grad_a[dist == 'gaussian'] = ((y[:, dist == 'gaussian'] - eta[:, dist == 'gaussian']).T.dot(m[:, l]) - np.sum(v[:, l]) * a[l, dist == 'gaussian']) / vgauss[dist == 'gaussian']
+            # accu_grad_a[l, :] = decay * accu_grad_a[l, :] + (1 - decay) * grad_a ** 2
+            # neg_diag_Ha[dist] = np.sum(lam * ((m[:, l, np.newaxis] + np.outer(v[:, l], a[l, dist])) ** 2), axis=0) + \
+            #               lam.T.dot(v[:, l])
+            # neg_diag_Ha[dist == 'gaussian'] = np.sum(m[:, l] ** 2 + v[:, l]) / vgauss[dist == 'gaussian']
+            # delta_a = grad_a / (np.sqrt(eps + accu_grad_a[l, :]) + neg_diag_Ha)
+            # a[l, :] += delta_a
         updatev()
 
-        for l in range(L):
-            # a
-            grad_a = np.empty(N, dtype=float)
-            neg_diag_Ha = np.empty_like(grad_a)
-            grad_a[pois] = (y[:, pois] - lam).T.dot(m[:, l]) - lam.T.dot(v[:, l]) * a[l, pois]
-            grad_a[~pois] = ((y[:, ~pois] - eta[:, ~pois]).T.dot(m[:, l]) - np.sum(v[:, l]) * a[l, ~pois]) / vgauss[~pois]
-            accu_grad_a[l, :] = decay * accu_grad_a[l, :] + (1 - decay) * grad_a ** 2
-            neg_diag_Ha[pois] = np.sum(lam * ((m[:, l, np.newaxis] + np.outer(v[:, l], a[l, pois])) ** 2), axis=0) + \
-                          lam.T.dot(v[:, l])
-            neg_diag_Ha[~pois] = np.sum(m[:, l] ** 2 + v[:, l]) / vgauss[~pois]
-            delta_a = grad_a / (np.sqrt(eps + accu_grad_a[l, :]) + neg_diag_Ha)
-            a[l, :] += delta_a
-        updatev()
-
-        # estimate gaussian variance
+        # estimate coefficients
         eta = np.einsum('ijk, ik->ij', h, b).T + m.dot(a)
-        vgauss = np.mean((y - eta) ** 2, axis=0)
+        lam = np.exp((eta + 0.5 * v.dot(a ** 2)).clip(-30, 30))
+        var = np.var(y - eta, axis=0, ddof=0)
+        for n in range(N):
+            neghess_b = np.zeros((1 + p, 1 + p), dtype=float)
+            if dist[n] == 'poisson':
+                grad_b = (y[:, n] - lam[:, n]).dot(h[n, :])
+                for t in range(T):
+                    neghess_b += lam[t, n] * np.outer(h[n, t, :], h[n, t, :])
+            else:
+                grad_b = ((y[:, n] - eta[:, n]) / var[n]).dot(h[n, :])
+                for t in range(T):
+                    neghess_b += np.outer(h[n, t, :], h[n, t, :]) / var[n]
+            accu_grad_b[n, :] = accumulate(accu_grad_b[n, :], grad_b, decay)
 
-        lbound[i] = elbo(y, h, pois, chol, m, v, a, b, vgauss)
+            delta_b = linalg.solve(neghess_b + np.diag(np.sqrt(eps + accu_grad_b[n, :])), grad_b, sym_pos=True)
+            b[n, :] += delta_b
+
+            neghess_a = np.zeros((L, L), dtype=float)
+            if dist[n] == 'poisson':
+                grad_a = (y[:, n] - lam[:, n]).dot(m) - lam[:, n].dot(v * a[:, n])
+                for t in range(T):
+                    neghess_a += lam[t, n] * (np.outer(m[t, :] + v[t, :] * a[:, n], m[t, :] + v[t, :] * a[:, n]) +
+                                              np.diag(v[t, :]))
+            else:
+                grad_a = ((y[:, n] - eta[:, n]).dot(m) - np.sum(v * a[:, n], axis=0)) / var[n]
+                for t in range(T):
+                    neghess_a += (np.outer(m[t, :], m[t, :]) + np.diag(v[t, :])) / var[n]
+            accu_grad_a[:, n] = accumulate(accu_grad_a[:, n], grad_a, decay)
+
+            delta_a = linalg.solve(neghess_a + np.diag(np.sqrt(eps + accu_grad_a[:, n])), grad_a, sym_pos=True)
+            a[:, n] += delta_a
+        updatev()
+
+        lbound[i] = elbo(y, h, dist, chol, m, v, a, b)
 
         # check convergence
         change_a = np.max(np.abs(good_a - a))
@@ -192,15 +205,7 @@ def train(y, pois, p, chol, m0=None, a0=None, b0=None, niter=50, tol=1e-5,
                                                    timeit.default_timer() - iter_start,
                                                    change_a, change_b, change_m))
 
-        if verbose:
-            print('decreased: {}'.format(dec))
-
-        if i > 5 and lbound[i] < lbound[i - 1]:
-            dec = True
-            m[:] = good_m
-            a[:] = good_a
-
-        if i > 5 and np.abs(lbound[i] - lbound[i - 2]) < tol * np.abs(lbound[i - 2]):
+        if i > chkcnv and np.abs(lbound[i] - lbound[i - 1]) < tol * np.abs(lbound[i - 1]):
             converged = True
 
         good_m[:] = m
@@ -210,4 +215,22 @@ def train(y, pois, p, chol, m0=None, a0=None, b0=None, niter=50, tol=1e-5,
         i += 1
 
     stop = timeit.default_timer()
-    return lbound[:i], m, v, a, b, vgauss, stop - start, converged
+
+    lv = np.empty((L, T, cholrank), dtype=float)
+    eta = np.einsum('ijk, ik->ij', h, b).T + m.dot(a)
+    lam = np.exp((eta + 0.5 * v.dot(a ** 2)).clip(-30, 30))
+
+    for l in range(L):
+        G = chol[l, :]
+        u = np.empty((T, N), dtype=float)
+        u[:, dist == 'poisson'] = lam[:, dist == 'poisson']
+        u[:, dist == 'gaussian'] = 1 / var[dist == 'gaussian']
+        w = u.dot(a[l, :] ** 2).reshape((T, 1))
+        GTWG = G.T.dot(w * G)
+
+        A = eyek - GTWG + GTWG.dot(linalg.solve(eyek + GTWG, GTWG, sym_pos=True))  # A should be pd but numerically not
+        eigval, eigvec = linalg.eigh(A)
+        eigval.clip(0, np.PINF, out=eigval)  # remove negative eigenvalues
+        lv[l, :] = G.dot(eigvec.dot(np.diag(np.sqrt(eigval))))
+
+    return lbound[:i], m, lv, a, b, stop - start, converged

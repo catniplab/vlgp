@@ -53,7 +53,7 @@ def ichol(a):
         a[k, k] = np.sqrt(a[k, k])
         for i in range(k + 1, n):
             if a[i, k] != 0:
-                a[i, k] /= a[k, k]
+               a[i, k] /= a[k, k]
 
         for j in range(k + 1, n):
             for i in range(j, n):

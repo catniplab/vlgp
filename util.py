@@ -112,8 +112,8 @@ def selfhistory(obs, p, y0=None):
             h[n, t, 0] = 1
             if t - p < 0:
                 h[n, t, 1:p - t + 1] = y0[n]
-                h[n, t, p - t + 1:] = obs[n, :t]
+                h[n, t, p - t + 1:] = obs[:t, n]
             else:
-                h[n, t, 1:] = obs[n, t - p:t]
+                h[n, t, 1:] = obs[t - p:t, n]
 
     return h
