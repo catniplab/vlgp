@@ -170,17 +170,7 @@ def train(y, family, p, chol, m0=None, a0=None, b0=None, niter=50, chkcnv=5, tol
                 H = h[n, :]
                 z = H.dot(b[n, :]) + (y[:, n] - lam[:, n]) / lam[:, n]
                 b[n, :] = linalg.solve(H.T.dot(lam[:, n, np.newaxis] * H), H.T.dot(lam[:, n] * z), sym_pos=True)
-            else:
-                # least squares solution for Gaussian channel
-                # (H'H)^-1 H'(y - ma)
-                b[n, :] = linalg.solve(h[n, :].T.dot(h[n, :]), h[n, :].T.dot(y[:, n] - m.dot(a[:, n])), sym_pos=True)
 
-                # grad_b = ((y[:, n] - eta[:, n]) / var[n]).dot(h[n, :])
-                # for t in range(T):
-                #     neghess_b += np.outer(h[n, t, :], h[n, t, :]) / var[n]
-
-            # neghess_a = np.zeros((L, L), dtype=float)
-            if family[n] == 'poisson':
                 grad_a = m.T.dot(y[:, n] - lam[:, n]) - np.diag(lam[:, n].dot(v)).dot(a[:, n])
                 neghess_a = m.T.dot(lam[:, n, np.newaxis] * m) + np.diag(lam[:, n].dot(v))
                 delta_a = linalg.solve(neghess_a, grad_a, sym_pos=True)
@@ -193,6 +183,14 @@ def train(y, family, p, chol, m0=None, a0=None, b0=None, niter=50, chkcnv=5, tol
                 # delta_a = linalg.solve(neghess_a + np.diag(np.sqrt(eps + accu_grad_a[:, n])), grad_a, sym_pos=True)
                 # a[:, n] += delta_a
             else:
+                # least squares solution for Gaussian channel
+                # (H'H)^-1 H'(y - ma)
+                b[n, :] = linalg.solve(h[n, :].T.dot(h[n, :]), h[n, :].T.dot(y[:, n] - m.dot(a[:, n])), sym_pos=True)
+
+                # grad_b = ((y[:, n] - eta[:, n]) / var[n]).dot(h[n, :])
+                # for t in range(T):
+                #     neghess_b += np.outer(h[n, t, :], h[n, t, :]) / var[n]
+
                 # least squares solution for Gaussian channel
                 # (m'm + diag(j'v))^-1 m'(y - Hb)
                 a[:, n] = linalg.solve(m.T.dot(m) + np.diag(np.sum(v, axis=0)), m.T.dot(y[:, n] - h[n, :].dot(b[n, :])),
