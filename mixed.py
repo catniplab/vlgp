@@ -130,6 +130,7 @@ def train(y, family, p, chol, m0=None, a0=None, b0=None, niter=50, chkcnv=5, tol
 
             m[:, l] = good_m[:, l] + delta_m
             m[:, l] -= np.mean(m[:, l])
+            a[l, :] *= linalg.norm(m[:, l], ord=np.inf)
             m[:, l] /= linalg.norm(m[:, l], ord=np.inf)
 
             # grad_a = np.empty(N, dtype=float)
