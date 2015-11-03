@@ -12,8 +12,6 @@ UB = 20
 
 def llh(y, h, family, chol, m, v, a, b, vhat):
     L, T, k = chol.shape
-    N = y.shape[1]
-    eyek = identity(k)
 
     eta = einsum('ijk, ki->ji', h, b) + m.dot(a)
     lam = exp((eta + 0.5 * v.dot(a ** 2)).clip(LB, UB))
@@ -127,6 +125,9 @@ def train(y, family, p, chol, m0=None, a0=None, b0=None, niter=50, tol=1e-4, dec
         eta = einsum('ijk, ki->ji', h, b) + m.dot(a)
         lam = exp((eta + 0.5 * v.dot(a ** 2)).clip(LB, UB))
         vhat = var(y - eta, axis=0, ddof=0)
+
+        m2[:] = good_m
+
         for l in range(L):
             # m
             G = chol[l]
@@ -151,16 +152,19 @@ def train(y, family, p, chol, m0=None, a0=None, b0=None, niter=50, tol=1e-4, dec
             # print('||grad m[{}]|| = {}'.format(l, linalg.norm(grad_m)))
             # print('||delta m[{}]|| = {}'.format(l, linalg.norm(delta_m)))
 
-            lb1 = elbo(y, h, family, chol, m, v, a, b, vhat)
-            m2[:, l] = m[:, l] + 1e-10 * grad_m / linalg.norm(grad_m, ord=inf)
+            lb1 = elbo(y, h, family, chol, good_m, v, a, b, vhat)
+            m2[:, l] = good_m[:, l] + 1e-10 * grad_m / linalg.norm(grad_m, ord=inf)
             lb2 = elbo(y, h, family, chol, m2, v, a, b, vhat)
 
-            lh1 = llh(y, h, family, chol, m, v, a, b, vhat)
-            m2[:, l] = m[:, l] + 1e-10 * grad_l / linalg.norm(grad_l, ord=inf)
-            lh2 = llh(y, h, family, chol, m2, v, a, b, vhat)
+            # print(linalg.norm(m2))
+            # print(linalg.norm(good_m))
+
+            # lh1 = llh(y, h, family, chol, good_m, v, a, b, vhat)
+            # m2[:, l] = good_m[:, l] + 0 * grad_l / linalg.norm(grad_l, ord=inf)
+            # lh2 = llh(y, h, family, chol, m2, v, a, b, vhat)
 
             print('Inc[{}] tiny grad = {}'.format(l, lb2 - lb1))
-            print('Inc[{}] lh {}'.format(l, lh2 - lh1))
+            # print('Inc[{}] lh {}'.format(l, lh2 - lh1))
 
             m[:, l] = good_m[:, l] + delta_m
 
@@ -169,7 +173,7 @@ def train(y, family, p, chol, m0=None, a0=None, b0=None, niter=50, tol=1e-4, dec
 
             m[:, l] -= mean(m[:, l])
             scale = linalg.norm(m[:, l], ord=inf)
-            a[l, :] *= scale
+            # a[l, :] *= scale
             m[:, l] /= scale
 
             # grad_a = empty(N, dtype=float)
