@@ -10,32 +10,20 @@ LB = -20
 UB = 20
 
 
-def elbo2(y, h, family, chol, m, v, a, b, vhat):
+def vfromw(w, chol):
     L, T, k = chol.shape
-    poisson = family == 'poisson'
-    gaussian = family == 'gaussian'
-
-    eta = einsum('ijk, ki->ji', h, b) + m.dot(a)
-    lam = exp((eta + 0.5 * v.dot(a ** 2)).clip(LB, UB))
-
-    lpois = sum(y[:, poisson] * eta[:, poisson] - lam[:, poisson])
-
-    lgauss = - 0.5 * sum(((y[:, gaussian] - eta[:, gaussian]) ** 2 +
-                         v.dot(a[:, gaussian] ** 2)) / vhat[gaussian])
-
-    lb = lpois + lgauss
-
+    eyek = identity(k)
+    v = empty((T, L), dtype=float)
     for l in range(L):
         G = chol[l, :]
-        m_div_G = linalg.lstsq(G, m[:, l])[0]
-        lb += -0.5 * inner(m_div_G, m_div_G)
+        GTWG = G.T.dot(w[:, l].reshape((T, 1)) * G)
+        v[:, l] = sum(G * (G - G.dot(GTWG) + G.dot(GTWG.dot(linalg.solve(eyek + GTWG, GTWG, sym_pos=True)))),
+                         axis=1)
+    return v
 
-    return lb
 
-
-def elbo(y, h, family, chol, m, v, a, b, vhat):
+def elbo(y, h, family, chol, m, w, v, a, b, vhat):
     L, T, k = chol.shape
-    N = y.shape[1]
     eyek = identity(k)
     poisson = family == 'poisson'
     gaussian = family == 'gaussian'
@@ -52,11 +40,7 @@ def elbo(y, h, family, chol, m, v, a, b, vhat):
 
     for l in range(L):
         G = chol[l, :]
-        U = empty((T, N), dtype=float)
-        U[:, poisson] = lam[:, poisson]
-        U[:, gaussian] = 1 / vhat[gaussian]
-        w = U.dot(a[l, :] ** 2).reshape((T, 1))
-        GTWG = G.T.dot(w * G)
+        GTWG = G.T.dot(w[:, l].reshape((T, 1)) * G)
         A = GTWG.dot(linalg.solve(eyek + GTWG, GTWG, sym_pos=True))
         m_div_G = linalg.lstsq(G, m[:, l])[0]
         tr = T - trace(GTWG) + trace(A)
@@ -71,7 +55,7 @@ def accumulate(accu, grad, decay):
     return decay * accu + (1 - decay) * grad ** 2
 
 
-def residual(y, family, h, m, v, a, b, vhat):
+def residual(y, h, family, chol, m, w, v, a, b, vhat):
     poisson = family == 'poisson'
     gaussian = family == 'gaussian'
     res = empty_like(y, dtype=float)
@@ -108,17 +92,28 @@ def train(y, family, p, chol, m0=None, a0=None, b0=None, niter=50, tol=1e-4, dec
     a = a0
     b = b0
     m = m0
+    a2 = a.copy()
+    m2 = m.copy()
 
     good_m = m.copy()
     good_a = a.copy()
     good_b = b.copy()
 
-    v = zeros_like(m, dtype=float)
-    v2 = v.copy()
+    w = zeros((T, L), dtype=float)
+    v = vfromw(w, chol)
+    eta = einsum('ijk, ki->ji', h, b) + m.dot(a)
+    lam = exp((eta + 0.5 * v.dot(a ** 2)).clip(LB, UB))
+    vhat = var(y - eta, axis=0, ddof=0)
+    for l in range(L):
+        U = empty((T, N), dtype=float)
+        U[:, poisson] = lam[:, poisson]
+        U[:, gaussian] = 1 / vhat[gaussian]
+        w[:, l] = U.dot(a[l, :] ** 2)
+    v = vfromw(w, chol)
 
     vhat = var(y - einsum('ijk, ki->ji', h, b) + m.dot(a), axis=0, ddof=0)
     lbound = full(niter, fill_value=finfo(float).min, dtype=float)
-    lbound[0] = elbo(y, h, family, chol, m, v, a, b, vhat)
+    lbound[0] = elbo(y, h, family, chol, m, w, v, a, b, vhat)
 
     # adagrad
     accu_grad_a = zeros_like(a)
@@ -126,7 +121,6 @@ def train(y, family, p, chol, m0=None, a0=None, b0=None, niter=50, tol=1e-4, dec
     accu_grad_m = zeros_like(m)
 
     # dec = False
-    fixpoint = False
     converged = False
     i = 1
     start = timeit.default_timer()
@@ -136,6 +130,8 @@ def train(y, family, p, chol, m0=None, a0=None, b0=None, niter=50, tol=1e-4, dec
             print('\nIteration[{:d}]'.format(i))
 
         # estimate latent
+        m2[:] = good_m
+        a2[:] = good_a
         for l in range(L):
             eta = einsum('ijk, ki->ji', h, b) + m.dot(a)
             lam = exp((eta + 0.5 * v.dot(a ** 2)).clip(LB, UB))
@@ -148,21 +144,18 @@ def train(y, family, p, chol, m0=None, a0=None, b0=None, niter=50, tol=1e-4, dec
             # accu_grad_m[:, l] = accumulate(accu_grad_m[:, l], grad_m, decay)
             accu_grad_m[:, l] = accumulate(accu_grad_m[:, l], grad_m / linalg.norm(grad_m, ord=inf), decay)
 
-            U = empty((T, N), dtype=float)
-            U[:, poisson] = lam[:, poisson]
-            U[:, gaussian] = 1 / vhat[gaussian]
-            # w = (U.dot(a[l, :] ** 2)).reshape((T, 1))  # adjusted by adagrad
-            w = (U.dot(a[l, :] ** 2) + sqrt(eps + accu_grad_m[:, l])).reshape((T, 1))  # adjusted by adagrad
-            GTWG = G.T.dot(w * G)
+            w1 = (w[:, l] + sqrt(eps + accu_grad_m[:, l])).reshape((T, 1))  # adjusted by adagrad
+            GTWG = G.T.dot(w1 * G)
 
-            R = residual(y, family, h, m, v, a, b, vhat)
+            R = residual(y, h, family, chol, m, w, v, a, b, vhat)
 
             u = G.dot(G.T.dot(R.dot(a[l, :]))) - m[:, l]
-            delta_m = u - G.dot((w * G).T.dot(u)) + G.dot(GTWG.dot(linalg.solve(eyek + GTWG, (w * G).T.dot(u),
-                                                                                  sym_pos=True)))
-            # lb1 = elbo2(y, h, family, chol, m2, v, a, b, vhat)
+            delta_m = u - G.dot((w1 * G).T.dot(u)) + \
+                      G.dot(GTWG.dot(linalg.solve(eyek + GTWG, (w1 * G).T.dot(u), sym_pos=True)))
+
+            # lb1 = elbo(y, h, family, chol, m2, w, v, a, b, vhat)
             # m2[:, l] += 1e-10 * grad_m / linalg.norm(grad_m, ord=inf)
-            # lb2 = elbo2(y, h, family, chol, m2, v, a, b, vhat)
+            # lb2 = elbo(y, h, family, chol, m2, w, v, a, b, vhat)
             # if lb2 < lb1:
             #     print('Inc m[{}] tiny grad = {}'.format(l, lb2 - lb1))
 
@@ -184,18 +177,18 @@ def train(y, family, p, chol, m0=None, a0=None, b0=None, niter=50, tol=1e-4, dec
             # a[l, :] += delta_a
 
         # estimate coefficients
+        eta = einsum('ijk, ki->ji', h, b) + m.dot(a)
+        lam = exp((eta + 0.5 * v.dot(a ** 2)).clip(LB, UB))
+        vhat = var(y - eta, axis=0, ddof=0)
         for n in range(N):
-            eta = einsum('ijk, ki->ji', h, b) + m.dot(a)
-            lam = exp((eta + 0.5 * v.dot(a ** 2)).clip(LB, UB))
-            vhat = var(y - eta, axis=0, ddof=0)
             if family[n] == 'poisson':
                 va = v * a[:, n]  # (T, L)
                 wv = diag(lam[:, n].dot(v))
                 grad_a = m.T.dot(y[:, n]) - (m + va).T.dot(lam[:, n])
 
-                # lb1 = elbo2(y, h, family, chol, m, v, a2, b, vhat)
+                # lb1 = elbo(y, h, family, chol, m, w, v, a2, b, vhat)
                 # a2[:, n] += 1e-10 * grad_a
-                # lb2 = elbo2(y, h, family, chol, m, v, a2, b, vhat)
+                # lb2 = elbo(y, h, family, chol, m, w, v, a2, b, vhat)
                 # if lb2 < lb1:
                 #     print('Inc a[{}] tiny grad = {}'.format(n, lb2 - lb1))
 
@@ -225,29 +218,19 @@ def train(y, family, p, chol, m0=None, a0=None, b0=None, niter=50, tol=1e-4, dec
                 # (H'H)^-1 H'(y - ma)
                 b[:, n] = linalg.solve(h[n, :].T.dot(h[n, :]), h[n, :].T.dot(y[:, n] - m.dot(a[:, n])), sym_pos=True)
 
-        # update v
-        lbound[i] = elbo(y, h, family, chol, m, v, a, b, vhat)
-        v2[:] = v
+        # update w
         for _ in range(3):
+            eta = einsum('ijk, ki->ji', h, b) + m.dot(a)
+            lam = exp((eta + 0.5 * v.dot(a ** 2)).clip(LB, UB))
+            vhat = var(y - eta, axis=0, ddof=0)
             for l in range(L):
-                eta = einsum('ijk, ki->ji', h, b) + m.dot(a)
-                lam = exp((eta + 0.5 * v.dot(a ** 2)).clip(LB, UB))
-                vhat = var(y - eta, axis=0, ddof=0)
-                G = chol[l, :]
                 U = empty((T, N), dtype=float)
                 U[:, poisson] = lam[:, poisson]
                 U[:, gaussian] = 1 / vhat[gaussian]
-                w = U.dot(a[l, :] ** 2).reshape((T, 1))
-                GTWG = G.T.dot(w * G)
-                v[:, l] = sum(G * (G - G.dot(GTWG) + G.dot(GTWG.dot(linalg.solve(eyek + GTWG, GTWG, sym_pos=True)))),
-                                 axis=1)
-            lb = elbo(y, h, family, chol, m, v, a, b, vhat)
-            if lb > lbound[i]:
-                v2[:] = v
-                lbound[i] = lb
-                break
-        v[:] = v2
-        # lbound[i] = elbo(y, h, family, chol, m, v, a, b, vhat)
+                w[:, l] = U.dot(a[l, :] ** 2)
+            v = vfromw(w, chol)
+
+        lbound[i] = elbo(y, h, family, chol, m, w, v, a, b, vhat)
 
         if verbose:
             print('lower bound = {:.5f}\n'
@@ -262,7 +245,7 @@ def train(y, family, p, chol, m0=None, a0=None, b0=None, niter=50, tol=1e-4, dec
                                                    linalg.norm(good_m - m, ord=inf)))
 
         # check convergence
-        if abs(lbound[i] - lbound[i - 1]) < tol * abs(lbound[i - 1]) and not fixpoint:
+        if abs(lbound[i] - lbound[i - 1]) < tol * abs(lbound[i - 1]):
             converged = True
 
         good_m[:] = m
@@ -274,16 +257,9 @@ def train(y, family, p, chol, m0=None, a0=None, b0=None, niter=50, tol=1e-4, dec
     stop = timeit.default_timer()
 
     lv = empty((L, T, cholrank), dtype=float)
-    eta = einsum('ijk, ki->ji', h, b) + m.dot(a)
-    lam = exp((eta + 0.5 * v.dot(a ** 2)).clip(LB, UB))
-
     for l in range(L):
         G = chol[l, :]
-        u = empty((T, N), dtype=float)
-        u[:, poisson] = lam[:, poisson]
-        u[:, gaussian] = 1 / vhat[gaussian]
-        w = u.dot(a[l, :] ** 2).reshape((T, 1))
-        GTWG = G.T.dot(w * G)
+        GTWG = G.T.dot(w[:, l].reshape((T, 1)) * G)
 
         A = eyek - GTWG + GTWG.dot(linalg.solve(eyek + GTWG, GTWG, sym_pos=True))  # A should be pd but numerically not
         eigval, eigvec = linalg.eigh(A)
