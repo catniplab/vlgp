@@ -5,6 +5,7 @@ from util import selfhistory
 from numpy import identity, diag, eye, dot, einsum, inner, outer, trace, exp, log, sum, mean, var, min, max, abs, sqrt
 from numpy import empty, empty_like, full, full_like, zeros, zeros_like, ones, ones_like, newaxis, tile
 from numpy import inf, finfo, PINF, NINF
+from numpy.random import permutation
 
 LB = -20
 UB = 20
@@ -175,26 +176,24 @@ def train(y, family, p, chol, m0=None, a0=None, b0=None, niter=50, tol=1e-5, dec
 
         # estimate latent
         for l in range(L):
-            # m
             eta = einsum('ijk, ki->ji', h, b) + m.dot(a)
             vhat = var(y - eta, axis=0, ddof=0)
             lam = exp((eta + 0.5 * v.dot(a ** 2)).clip(LB, UB))
             G = chol[l]
             grad_m = (y[:, poisson] - lam[:, poisson]).dot(a[l, poisson]) + \
-                     ((y[:, gaussian] - eta[:, gaussian]) / vhat[gaussian]).dot(a[l, gaussian]) \
-                     - linalg.lstsq(G.T, linalg.lstsq(G, m[:, l])[0])[0]
+                     ((y[:, gaussian] - eta[:, gaussian]) /
+                      vhat[gaussian]).dot(a[l, gaussian]) - linalg.lstsq(G.T, linalg.lstsq(G, m[:, l])[0])[0]
             accu_grad_m[:, l] = accumulate(accu_grad_m[:, l], grad_m, decay)
             # accu_grad_m[:, l] = accumulate(accu_grad_m[:, l], grad_m / linalg.norm(grad_m, ord=inf), decay)
 
-            wada = (w[:, l] + sqrt(eps + accu_grad_m[:, l])).reshape((T, 1))  # adjusted by adagrad
+            # wada = (w[:, l] + sqrt(eps + accu_grad_m[:, l])).reshape((T, 1))  # adjusted by adagrad
+            wada = w[:, l].reshape((T, 1))
             GTWG = G.T.dot(wada * G)
 
             # eta = einsum('ijk, ki->ji', h, b) + m.dot(a)
             # lam = exp((eta + 0.5 * v.dot(a ** 2)).clip(LB, UB))
             R[:, poisson] = y[:, poisson] - lam[:, poisson]
             R[:, gaussian] = (y[:, gaussian] - eta[:, gaussian]) / vhat[gaussian]
-
-            # R = residual(y, h, family, chol, m, w, v, a, b, vhat)
 
             u = G.dot(G.T.dot(R.dot(a[l, :]))) - m[:, l]
             delta_m = u - G.dot((wada * G).T.dot(u)) + \
