@@ -183,8 +183,8 @@ def train(y, family, p, chol, m0=None, a0=None, b0=None, niter=50, tol=1e-5, dec
             grad_m = (y[:, poisson] - lam[:, poisson]).dot(a[l, poisson]) + \
                      ((y[:, gaussian] - eta[:, gaussian]) / vhat[gaussian]).dot(a[l, gaussian]) \
                      - linalg.lstsq(G.T, linalg.lstsq(G, m[:, l])[0])[0]
-            # accu_grad_m[:, l] = accumulate(accu_grad_m[:, l], grad_m, decay)
-            accu_grad_m[:, l] = accumulate(accu_grad_m[:, l], grad_m / linalg.norm(grad_m, ord=inf), decay)
+            accu_grad_m[:, l] = accumulate(accu_grad_m[:, l], grad_m, decay)
+            # accu_grad_m[:, l] = accumulate(accu_grad_m[:, l], grad_m / linalg.norm(grad_m, ord=inf), decay)
 
             wada = (w[:, l] + sqrt(eps + accu_grad_m[:, l])).reshape((T, 1))  # adjusted by adagrad
             GTWG = G.T.dot(wada * G)

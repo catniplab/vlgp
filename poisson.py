@@ -1,220 +1,219 @@
 import timeit
 import numpy as np
 from scipy import linalg
-from util import makeregressor
+from util import selfhistory
+from numpy import identity, diag, eye, dot, einsum, inner, outer, trace, exp, log, sum, mean, var, min, max, abs, sqrt
+from numpy import empty, empty_like, full, full_like, zeros, zeros_like, ones, ones_like, newaxis, tile
+from numpy import inf, finfo, PINF, NINF
+
+# Bounds for exp
+LB = -20
+UB = 20
 
 
-def firingrate(h, m, v, a, b, lb=-30, ub=30):
-    eta_x = h.dot(b) + m.dot(a) + 0.5 * v.dot(a ** 2)
-    np.clip(eta_x, lb, ub, out=eta_x)
+def firingrate(h, m, v, a, b):
+    eta_x = einsum('ijk, ki->ji', h, b) + m.dot(a) + 0.5 * v.dot(a ** 2)
+    np.clip(eta_x, LB, UB, out=eta_x)
     return np.exp(eta_x)
 
 
-def elbo(y, h, m, v, a, b, chol):
-    """
-    Evidence Lower Bound
-    :param y: spike trains
-    :param h: regressors
-    :param m: posterior mean
-    :param a: alpha
-    :param b: beta
-    :param chol: incomplete cholesky decomposition of prior covariance
-    :param v: temporal slices of posterior variance
-    :return: lower bound
-    """
-    # T, N = y.shape
-    L, T, k = chol.shape
-    eyek = np.identity(k)
+def vfromw(w, chol):
+    """Construct temporal slice of V from W
+    Args:
+        w: diagonals of W (T, L)
+        chol: cholesky factorizations of prior covariances (L, T, r)
 
-    eta = h.dot(b) + m.dot(a)
-    lam = firingrate(h, m, v, a, b)
-    lb = np.sum(y * eta - lam)
+    Returns:
+        v: diagonals of V (T, L)
+    """
+    L, T, r = chol.shape
+    eyer = identity(r)
+    v = empty((T, L), dtype=float)
+    for l in range(L):
+        G = chol[l, :]
+        GTWG = G.T.dot(w[:, l].reshape((T, 1)) * G)
+        v[:, l] = sum(G * (G - G.dot(GTWG) + G.dot(GTWG.dot(linalg.solve(eyer + GTWG, GTWG, sym_pos=True)))),
+                      axis=1)
+    return v
+
+
+def elbo(y, h, chol, m, w, v, a, b):
+    """Evidence Lower BOund
+    Args:
+        y: observations (T, N)
+        h: autocorrelation regressor (N, T, 1 + p)
+        chol: cholesky factorizations of prior covariances (L, T, r)
+        m: posterior mean (T, L)
+        w: diagonals of W (T, L)
+        v: temporal slice of V (T, L)
+        a: latent coefficients (L, N)
+        b: autocorrelation coefficients (1 + p, N)
+        vhat: MLE of sample variances
+
+    Returns:
+
+    """
+    L, T, r = chol.shape
+    eyer = identity(r)
+
+    eta = einsum('ijk, ki->ji', h, b) + m.dot(a)
+    lam = exp((eta + 0.5 * v.dot(a ** 2)).clip(LB, UB))
+
+    lb = sum(y * eta - lam)
 
     for l in range(L):
         G = chol[l, :]
-        w = lam.dot(a[l, :] ** 2).reshape((T, 1))
-        GTWG = G.T.dot(w * G)
-        # m_div_G = linalg.pinv2(G).dot(m[:, l])
+        GTWG = G.T.dot(w[:, l].reshape((T, 1)) * G)
+        A = GTWG.dot(linalg.solve(eyer + GTWG, GTWG, sym_pos=True))
         m_div_G = linalg.lstsq(G, m[:, l])[0]
-        trace = (T - np.trace(GTWG) + np.trace(GTWG.dot(linalg.solve(eyek + GTWG, GTWG, sym_pos=True))))
-        lndet = np.linalg.slogdet(eyek - GTWG + GTWG.dot(linalg.solve(eyek + GTWG, GTWG, sym_pos=True)))[1]
+        tr = T - trace(GTWG) + trace(A)
+        lndet = np.linalg.slogdet(eyer - GTWG + A)[1]
 
-        lb += -0.5 * np.inner(m_div_G, m_div_G) - 0.5 * trace + 0.5 * lndet
-        # lb += 0.5 * lndet
+        lb += -0.5 * inner(m_div_G, m_div_G) - 0.5 * tr + 0.5 * lndet
+
     return lb
 
 
-def train(y, p, chol, a0=None, b0=None, bmask=None, m0=None, niter=50, tol=1e-5, verbose=True):
-    """
-    :param y: (T, N), y trains
-    :param p: order of regression
-    :param prior_mean: (T, L), prior mean
-    :param prior_var: (L,), prior variance
-    :param prior_scale: (L,), prior inverse of squared lengthscale
-    :param a0: (L, N), initial value of a
-    :param b0: (N, intercept + p * N), initial value of b
-    :param m0: (T, L), initial value of posterior mean
-    :param fixalpha: bool, switch of not train a
-    :param fixbeta: bool, switch of not train b
-    :param fixpostmean: bool, switch of not train posterior mean
-    :param anorm: norm constraint of a
-    :param intercept: bool, include intercept term or not
-    :param hyper: train hyperparameters or not
-    :param control: control params
-    :return:
-        m: posterior mean
-        post_cov: posterior covariance
-        b: coefficient of h
-        a: coefficient of latent
-        a0: initial value of a
-        b0: initial value of b
-        lbound: array of lower bounds
-        elapsed:
-        converged:
-    """
+def accumulate(accu, grad, decay):
+    """adagrad
+    Args:
+        accu: accumulation matrix
+        grad: new gradient
+        decay: expoential decay
 
-    #################################################
-    def updatev():
-        lam = firingrate(h, m, v, a, b)
-        for l in range(L):
-            G = chol[l, :]
-            w = lam.dot(a[l, :] ** 2).reshape((T, 1))
-            GTWG = G.T.dot(w * G)
-            v[:, l] = np.sum(G * (G - G.dot(GTWG) + G.dot(GTWG.dot(linalg.solve(eyek + GTWG, GTWG, sym_pos=True)))),
-                             axis=1)
-    ###################################################
+    Returns:
 
-    # dimensions
-    L, T, k = chol.shape
+    """
+    return decay * accu + (1 - decay) * grad ** 2
+
+
+def train(y, p, chol, m0=None, a0=None, b0=None, niter=50, tol=1e-5, decay=0.95, eps=1e-6, verbose=True):
+    """Variational Bayesian
+    Args:
+        y: observations (T, N), spikes
+        p: order of autocorrelation
+        chol: cholesky factorizations of prior covariances (L, T, r)
+        m0: initial posterior mean (T, L)
+        a0: initial latent coefficients (L, N)
+        b0: initial autocorrelation coefficients (1 + p, N)
+        niter: max number of iterations
+        tol: relative tolerance of convergence
+        decay: adagrad
+        eps: adagrad
+        verbose: detailed output
+
+    Returns:
+        lbound: ELBO of all iterations
+        m: posterior mean (T, L)
+        lv: L matrices in factorization of V = LL' (L, T, r)
+        a: latent coefficients (L, N)
+        b: autocorrelation coefficients (1 + p, N)
+        elapsed: running time
+        converged: whether the algorithm converged within iteration limit
+    """
+    L, T, r = chol.shape
     N = y.shape[1]
-    L = m0.shape[1]
-    eyek = np.identity(k)
+    eyek = identity(r)
 
-    # temporal slice of v
-    v = np.ones((T, L)) * chol[:, 0, 0] ** 2
+    y0 = zeros(N, dtype=float)
+    h = selfhistory(y, p, y0)
 
-    # read-only variables, protection from unexpected assignment
-    y.setflags(write=0)
-
-    # construct makeregressor
-    h = makeregressor(y, p)
-    h.setflags(write=0)
-
-    # initialize args
-    # make a copy to avoid changing initial values
     if m0 is None:
-        m = np.zeros((T, L), dtype=float)
-    else:
-        m = m0.copy()
+        m0 = tile(mean(y, axis=1), (1, L))
 
     if a0 is None:
-        a0 = np.random.randn(L, N)
-    a = a0.copy()
+        a0 = linalg.lstsq(m0, y)[0]
 
     if b0 is None:
-        b0 = linalg.lstsq(h, y)[0]
-    b = b0.copy()
+        b0 = empty((1 + p, N), dtype=float)
+        for n in range(N):
+            b0[:, n] = linalg.lstsq(h[n, :], y[:, n])[0]
 
-    if bmask is None:
-        bmask = np.full_like(b, fill_value=True, dtype=bool)
-    b[~bmask] = 0.0
+    a = a0
+    b = b0
+    m = m0
 
-    # valid values of parameters from previous iteration
+    R = empty_like(y, dtype=float)
+
+    eta = einsum('ijk, ki->ji', h, b) + m.dot(a)
+    lam = exp(eta.clip(LB, UB))  # no a'Va at beginning
+    w = lam.dot(a.T ** 2)
+    v = vfromw(w, chol)
+
+    # backup, could be useless
+    good_m = m.copy()
     good_a = a.copy()
     good_b = b.copy()
-    good_m = m.copy()
+    #
+
+    lbound = full(niter, fill_value=finfo(float).min, dtype=float)
+    lbound[0] = elbo(y, h, chol, m, w, v, a, b)
 
     # adagrad
-    decay = 0.9
-    eps = 1e-6
-    accu_grad_a = np.zeros_like(a)
+    accu_grad_a = zeros_like(a)
+    accu_grad_b = zeros_like(b)
+    accu_grad_m = zeros_like(m)
 
-    # Optimization
-    updatev()
-    # initialize lower bound
-    lbound = np.full(niter, np.finfo(float).min)
-    lbound[0] = elbo(y, h, m, v, a, b, chol)
-    it = 1
+    # dec = False
     converged = False
-    start = timeit.default_timer()  # time when algorithm starts
-    while not converged and it < niter:
+    i = 1
+    start = timeit.default_timer()
+    while not converged and i < niter:
         iter_start = timeit.default_timer()
         if verbose:
-            print('\nIteration[{:d}]'.format(it))
+            print('\nIteration[{:d}]'.format(i))
 
-        ###########
-        # weights #
-        ###########
-        lam = firingrate(h, m, v, a, b)
-        for n in range(N):
-            grad_b = h.T.dot(y[:, n] - lam[:, n])
-            grad_b[~bmask[:, n]] = 0.0
-            # accu_grad_b[:, n] = decay * accu_grad_b[:, n] + (1 - decay) * grad_b ** 2
-            neg_hess_b = h.T.dot((h.T * lam[:, n]).T)
-            # np.fill_diagonal(neg_hess_b, neg_hess_b.diagonal() +
-            #                  np.sqrt(eps + accu_grad_b[:, n]) / np.sqrt(eps + accu_delta_b[:, n]))
-            # try:
-            #     delta_b = linalg.solve(neg_hess_b, grad_b, sym_pos=True)
-            # except linalg.LinAlgError as e:
-            #     print('b', e)
-            #     continue
-            # accu_delta_b[:, n] = decay * accu_delta_b[:, n] + (1 - decay) * delta_b ** 2
-            delta_b = linalg.lstsq(neg_hess_b, grad_b)[0]
-            delta_b[~bmask[:, n]] = 0.0
-            b[:, n] += 0.5 * delta_b
-        updatev()
-
-        #############
-        # posterior #
-        #############
-        good_elbo = elbo(y, h, m, v, a, b, chol)
-        lam = firingrate(h, m, v, a, b)
+        # estimate latent
         for l in range(L):
+            # m
+            eta = einsum('ijk, ki->ji', h, b) + m.dot(a)
+            lam = exp((eta + 0.5 * v.dot(a ** 2)).clip(LB, UB))
             G = chol[l]
-            w = lam.dot(a[l, :] ** 2).reshape((T, 1))
-            GTWG = G.T.dot(w * G)
+            grad_m = (y - lam).dot(a[l, :]) - linalg.lstsq(G.T, linalg.lstsq(G, m[:, l])[0])[0]
+            accu_grad_m[:, l] = accumulate(accu_grad_m[:, l], grad_m, decay)
+            # accu_grad_m[:, l] = accumulate(accu_grad_m[:, l], grad_m / linalg.norm(grad_m, ord=inf), decay)
 
-            u = (y - lam).dot(a[l, :])
-            # grad_m = u - np.dot(linalg.pinv2(G).T, np.dot(linalg.pinv2(G), m[:, l]))
-            # grad_m = u - linalg.lstsq(G.T, linalg.lstsq(G, m[:, l])[0])[0]
-            # accu_grad_m[:, l] = decay * accu_grad_m[:, l] + (1 - decay) * grad_m ** 2
+            wada = (w[:, l] + sqrt(eps + accu_grad_m[:, l])).reshape((T, 1))  # adjusted by adagrad
+            GTWG = G.T.dot(wada * G)
 
-            u2 = G.dot(G.T.dot(u)) - m[:, l]
-            delta_m = u2 - G.dot((w * G).T.dot(u2)) + G.dot(GTWG.dot(linalg.solve(eyek + GTWG, (w * G).T.dot(u2),
-                                                                                  sym_pos=True)))
+            u = G.dot(G.T.dot((y - lam).dot(a[l, :]))) - m[:, l]
+            delta_m = u - G.dot((wada * G).T.dot(u)) + \
+                      G.dot(GTWG.dot(linalg.solve(eyek + GTWG, (wada * G).T.dot(u), sym_pos=True)))
+
             m[:, l] = good_m[:, l] + delta_m
-            m[:, l] -= np.mean(m[:, l])
-            m[:, l] /= linalg.norm(m[:, l], ord=np.inf)
-            lb = elbo(y, h, m, v, a, b, chol)
-            if np.isfinite(lb) and lb > good_elbo:
-                # Newton step
-                good_elbo = lb
-            else:
-                # Gradient step
-                # m[:, l] = good_m[:, l] + grad_m / np.sqrt(eps + accu_grad_m[:, l])
-                # m[:, l] -= np.mean(m[:, l])
-                # a[l, :] = good_a[l, :] * linalg.norm(m[:, l], ord=np.inf)
-                # m[:, l] /= linalg.norm(m[:, l], ord=np.inf)
-                m[:, l] = good_m[:, l]
+            m[:, l] -= mean(m[:, l])
+            scale = linalg.norm(m[:, l], ord=inf)
+            a[l, :] *= scale
+            m[:, l] /= scale
 
-            grad_a = (y - lam).T.dot(m[:, l]) - lam.T.dot(v[:, l]) * a[l, :]
-            accu_grad_a[l, :] = decay * accu_grad_a[l, :] + (1 - decay) * grad_a ** 2
-            # delta_a = np.sqrt(eps + accu_delta_a[l, :]) / np.sqrt(eps + accu_grad_a[l, :]) * grad_a
-            # accu_delta_a[l, :] = decay * accu_delta_a[l, :] + (1 - decay) * delta_a ** 2
-            # a[l, :] += 100 * delta_a
-            neg_diag_Ha = np.sum(lam * ((m[:, l, np.newaxis] + np.outer(v[:, l], a[l, :])) ** 2), axis=0) + \
-                          lam.T.dot(v[:, l])
-            delta_a = grad_a / (np.sqrt(eps + accu_grad_a[l, :]) + neg_diag_Ha)
-            a[l, :] += delta_a
-        updatev()
+        # estimate coefficients
+        for n in range(N):
+            eta = einsum('ijk, ki->ji', h, b) + m.dot(a)
+            lam = exp((eta + 0.5 * v.dot(a ** 2)).clip(LB, UB))
+            # a
+            va = v * a[:, n]  # (T, L)
+            wv = diag(lam[:, n].dot(v))
+            grad_a = m.T.dot(y[:, n]) - (m + va).T.dot(lam[:, n])
+            accu_grad_a[:, n] = accumulate(accu_grad_a[:, n], grad_a, decay)
 
-        # store lower bound
-        lbound[it] = elbo(y, h, m, v, a, b, chol)
+            neghess_a = (m + va).T.dot(lam[:, n, newaxis] * (m + va)) + wv
+            delta_a = linalg.solve(neghess_a, grad_a, sym_pos=True)
+            a[:, n] += delta_a
 
-        # check convergence
-        change_a = np.max(np.abs(good_a - a))
-        change_b = np.max(np.abs(good_b - b))
-        change_m = np.max(np.abs(good_m - m))
+            # b
+            grad_b = h[n, :].T.dot(y[:, n] - lam[:, n])
+            accu_grad_b[:, n] = accumulate(accu_grad_b[:, n], grad_b, decay)
+            neghess_b = h[n, :].T.dot(lam[:, n, newaxis] * h[n, :])
+            b[:, n] += linalg.solve(neghess_b, grad_b, sym_pos=True)
+
+        # update w
+        eta = einsum('ijk, ki->ji', h, b) + m.dot(a)
+        vhat = var(y - eta, axis=0, ddof=0)
+        lam = exp((eta + 0.5 * v.dot(a ** 2)).clip(LB, UB))
+        w = lam.dot(a.T ** 2)
+        v = vfromw(w, chol)
+
+        lbound[i] = elbo(y, h, chol, m, w, v, a, b)
 
         if verbose:
             print('lower bound = {:.5f}\n'
@@ -222,21 +221,35 @@ def train(y, p, chol, a0=None, b0=None, bmask=None, m0=None, niter=50, tol=1e-5,
                   'time = {:.2f}s\n'
                   'change in a = {:.10f}\n'
                   'change in b = {:.10f}\n'
-                  'change in m = {:.10f}\n'.format(lbound[it], lbound[it] - lbound[it - 1],
+                  'change in m = {:.10f}\n'.format(lbound[i], lbound[i] - lbound[i - 1],
                                                    timeit.default_timer() - iter_start,
-                                                   change_a, change_b, change_m))
+                                                   linalg.norm(good_a - a, ord=inf),
+                                                   linalg.norm(good_b - b, ord=inf),
+                                                   linalg.norm(good_m - m, ord=inf)))
 
-        if np.abs(lbound[it] - lbound[it - 1]) < tol * np.abs(lbound[it - 1]):
+        # check convergence
+        if abs(lbound[i] - lbound[i - 1]) < tol * abs(lbound[i - 1]):
             converged = True
 
-        # store current iteration
+        # keep a copy of current iteration
+        # no use in algorithm
+        # for debug only now
+        good_m[:] = m
         good_a[:] = a
         good_b[:] = b
-        good_m[:] = m
 
-        it += 1
+        i += 1
 
     stop = timeit.default_timer()
-    if verbose:
-        print('Converged: {}'.format(converged))
-    return lbound[:it], m, v, a, b, stop - start, converged
+
+    lv = empty((L, T, r), dtype=float)  # V = LL'
+    for l in range(L):
+        G = chol[l, :]
+        GTWG = G.T.dot(w[:, l].reshape((T, 1)) * G)
+
+        A = eyek - GTWG + GTWG.dot(linalg.solve(eyek + GTWG, GTWG, sym_pos=True))  # A should be pd but numerically not
+        eigval, eigvec = linalg.eigh(A)
+        eigval.clip(0, PINF, out=eigval)  # remove negative eigenvalues
+        lv[l, :] = G.dot(eigvec.dot(diag(sqrt(eigval))))
+
+    return lbound[:i], m, lv, a, b, stop - start, converged
