@@ -1,10 +1,12 @@
 import timeit
+
 import numpy as np
+from numpy import empty, empty_like, full, zeros, zeros_like, newaxis, tile
+from numpy import identity, diag, einsum, inner, trace, exp, sum, mean, var, abs, sqrt
+from numpy import inf, finfo, PINF
 from scipy import linalg
+
 from util import selfhistory
-from numpy import identity, diag, eye, dot, einsum, inner, outer, trace, exp, log, sum, mean, var, min, max, abs, sqrt
-from numpy import empty, empty_like, full, full_like, zeros, zeros_like, ones, ones_like, newaxis, tile
-from numpy import inf, finfo, PINF, NINF
 
 # Bounds for exp
 LB = -20

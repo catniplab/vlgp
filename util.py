@@ -1,15 +1,22 @@
-import numpy as np
+from numpy import exp
+from numpy import sum, dot
+from numpy import zeros, ones, diag, meshgrid, arange, eye, asarray
+from scipy.linalg import svd
 
 
 def makeregressor(obs, p):
+    """Construct full regressive matrix
+
+    Args:
+        obs: observations (T, N)
+        p: order of auto/cross-regression
+
+    Returns:
+        full regressive matrix (T, 1 + p*N)
     """
-    Construct regressor.
-    :param obs: (T, N) observations
-    :param p: order of regression
-    :return: (T, 1 + p * N) array
-    """
+
     T, N = obs.shape
-    regressor = np.ones((T, 1 + p * N), dtype=float)
+    regressor = ones((T, 1 + p * N), dtype=float)
     for t in range(T):
         if t - p >= 0:
             regressor[t, 1:] = obs[t - p:t, :].flatten()  # by row
@@ -26,11 +33,25 @@ def sqexpcov(n, w, var=1.0):
     :param var: variance
     :return: (n, n) covariance matrix
     """
-    i, j = np.meshgrid(np.arange(n), np.arange(n))
-    return var * np.exp(-w * (i - j) ** 2)
+
+    i, j = meshgrid(arange(n), arange(n))
+    return var * exp(- w * (i - j) ** 2)
 
 
 def likelihood(spike, latent, alpha, beta, intercept=True):
+    """Poisson likelihood
+
+    Args:
+        spike:
+        latent:
+        alpha:
+        beta:
+        intercept:
+
+    Returns:
+
+    """
+
     T, N = spike.shape
     L, _ = latent.shape
     k, _ = beta.shape
@@ -38,42 +59,47 @@ def likelihood(spike, latent, alpha, beta, intercept=True):
 
     regressor = makeregressor(spike, p, intercept)
 
-    lograte = np.dot(regressor, beta) + np.dot(latent, alpha)
-    return np.sum(spike * lograte - np.exp(lograte))
+    lograte = dot(regressor, beta) + dot(latent, alpha)
+    return sum(spike * lograte - exp(lograte))
 
 
-def cartesian(arrays):
-    """Generate a cartesian product of input arrays.
-    Parameters
-    ----------
-    arrays : list of array-like
-        1-D arrays to form the cartesian product of.
-    out : ndarray
-        Array to place the cartesian product in.
-    Returns
-    -------
-    out : ndarray
-        2-D array of shape (M, len(arrays)) containing cartesian products
-        formed of input arrays.
-    """
-    arrays = [np.asarray(x) for x in arrays]
-    shape = (len(x) for x in arrays)
-    dtype = arrays[0].dtype
-
-    ix = np.indices(shape)
-    ix = ix.reshape(len(arrays), -1).T
-
-    out = np.empty_like(ix, dtype=dtype)
-
-    for n, arr in enumerate(arrays):
-        out[:, n] = arrays[n][ix[:, n]]
-
-    return out
+# def cartesian(arrays):
+#     """Cartesian product
+#
+#     Args:
+#         arrays:
+#
+#     Returns:
+#
+#     """
+#     arrays = [np.asarray(x) for x in arrays]
+#     shape = (len(x) for x in arrays)
+#     dtype = arrays[0].dtype
+#
+#     ix = np.indices(shape)
+#     ix = ix.reshape(len(arrays), -1).T
+#
+#     out = np.empty_like(ix, dtype=dtype)
+#
+#     for n, arr in enumerate(arrays):
+#         out[:, n] = arrays[n][ix[:, n]]
+#
+#     return out
 
 
 def varimax(x, gamma=1.0, q=20, tol=1e-5):
-    from scipy.linalg import svd
-    from numpy import eye, asarray, dot, sum, diag
+    """Varimax rotation
+
+    Args:
+        x: original matrix
+        gamma:
+        q:
+        tol:
+
+    Returns:
+        rotated matrix
+    """
+
     p,k = x.shape
     rotation = eye(k)
     d = 0
@@ -89,23 +115,43 @@ def varimax(x, gamma=1.0, q=20, tol=1e-5):
 
 
 def raster(y):
+    """Raster plot
+
+    Args:
+        y: spike trains (T, N)
+
+    Returns:
+
+    """
     from matplotlib.pyplot import figure, xlim, ylim, vlines, xticks, yticks, gca
+
     T, N = y.shape
-    figure(figsize=(8, 8))
+    figure(figsize=(10, 6))
     ylim(0, N)
     xlim(0, T)
     for n in range(N):
-        vlines(np.arange(T)[y[:, n] > 0], n, n + 1, color='black')
+        vlines(arange(T)[y[:, n] > 0], n, n + 1, color='black')
     xticks([])
     yticks([])
     gca().invert_yaxis()
 
 
 def selfhistory(obs, p, y0=None):
+    """Construct autoregressive matrices
+
+    Args:
+        obs: observations (T, N)
+        p: order of autoregression
+        y0: prehistory (N,), 0 if None
+
+    Returns:
+        autoregressive matrices (N, T, 1 + p)
+    """
+
     T, N = obs.shape
-    h = np.zeros((N, T, 1 + p), dtype=float)
+    h = zeros((N, T, 1 + p), dtype=float)
     if y0 is None:
-        y0 = np.zeros(N, dtype=float)
+        y0 = zeros(N, dtype=float)
 
     for n in range(N):
         for t in range(T):

@@ -1,18 +1,21 @@
 import timeit
-import numpy as np
-from scipy import linalg
-from util import selfhistory
-from numpy import identity, diag, eye, dot, einsum, inner, outer, trace, exp, log, sum, mean, var, min, max, abs, sqrt
-from numpy import empty, empty_like, full, full_like, zeros, zeros_like, ones, ones_like, newaxis, tile
-from numpy import inf, finfo, PINF, NINF
-from numpy.random import permutation
 
+import numpy as np
+from numpy import empty, empty_like, full, zeros, zeros_like, newaxis, tile
+from numpy import identity, diag, einsum, inner, trace, exp, sum, mean, var, abs, sqrt
+from numpy import inf, finfo, PINF
+from scipy import linalg
+
+from util import selfhistory
+
+# lower and upper bound of exp
 LB = -20
 UB = 20
 
 
 def vfromw(w, chol):
     """Construct temporal slice of V from W
+
     Args:
         w: diagonals of W (T, L)
         chol: cholesky factorizations of prior covariances (L, T, r)
@@ -33,6 +36,7 @@ def vfromw(w, chol):
 
 def elbo(y, h, family, chol, m, w, v, a, b, vhat):
     """Evidence Lower BOund
+
     Args:
         y: observations (T, N)
         h: autocorrelation regressor (N, T, 1 + p)
@@ -78,6 +82,7 @@ def elbo(y, h, family, chol, m, w, v, a, b, vhat):
 
 def accumulate(accu, grad, decay):
     """adagrad
+
     Args:
         accu: accumulation matrix
         grad: new gradient
@@ -91,6 +96,7 @@ def accumulate(accu, grad, decay):
 
 def train(y, family, p, chol, m0=None, a0=None, b0=None, niter=50, tol=1e-5, decay=0.95, eps=1e-6, verbose=True):
     """Variational Bayesian
+
     Args:
         y: observations (T, N), spikes or continuous
         family: distributions (N), 'poisson' and 'gaussian' supported now
@@ -114,6 +120,7 @@ def train(y, family, p, chol, m0=None, a0=None, b0=None, niter=50, tol=1e-5, dec
         elapsed: running time
         converged: whether the algorithm converged within iteration limit
     """
+
     L, T, r = chol.shape
     N = y.shape[1]
     eyek = identity(r)

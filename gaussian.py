@@ -1,10 +1,13 @@
 import timeit
+
 import numpy as np
+from numpy import empty, full, tile
+from numpy import finfo, PINF
+from numpy import identity, diag, einsum, inner, trace, sum, mean, var, abs, sqrt
 from scipy import linalg
+
 from util import selfhistory
-from numpy import identity, diag, eye, dot, einsum, inner, outer, trace, exp, log, sum, mean, var, min, max, abs, sqrt
-from numpy import empty, empty_like, full, full_like, zeros, zeros_like, ones, ones_like, newaxis, tile
-from numpy import inf, finfo, PINF, NINF
+
 
 LB = -20
 UB = 20
