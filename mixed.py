@@ -91,10 +91,14 @@ def accumulate(accu, grad, decay):
     Returns:
 
     """
-    return decay * accu + (1 - decay) * grad ** 2
+    # return decay * accu + (1 - decay) * grad ** 2
+    return accu + grad ** 2
 
 
-def train(y, family, p, chol, m0=None, a0=None, b0=None, niter=50, tol=1e-5, decay=0.95, eps=1e-6, verbose=True):
+def train(y, family, p, chol, m0=None, a0=None, b0=None, abest=True,
+          niter=50, tol=1e-5,
+          adagrad=False, decay=0.95, eps=1e-6,
+          verbose=True):
     """Variational Bayesian
 
     Args:
@@ -134,6 +138,7 @@ def train(y, family, p, chol, m0=None, a0=None, b0=None, niter=50, tol=1e-5, dec
 
     if m0 is None:
         m0 = tile(mean(y, axis=1), (1, L))
+        m0 -= mean(m0, axis=0)
 
     if a0 is None:
         a0 = linalg.lstsq(m0, y)[0]
@@ -162,6 +167,7 @@ def train(y, family, p, chol, m0=None, a0=None, b0=None, niter=50, tol=1e-5, dec
     good_m = m.copy()
     good_a = a.copy()
     good_b = b.copy()
+    good_w = w.copy()
     #
 
     lbound = full(niter, fill_value=finfo(float).min, dtype=float)
@@ -193,8 +199,10 @@ def train(y, family, p, chol, m0=None, a0=None, b0=None, niter=50, tol=1e-5, dec
             accu_grad_m[:, l] = accumulate(accu_grad_m[:, l], grad_m, decay)
             # accu_grad_m[:, l] = accumulate(accu_grad_m[:, l], grad_m / linalg.norm(grad_m, ord=inf), decay)
 
-            # wada = (w[:, l] + sqrt(eps + accu_grad_m[:, l])).reshape((T, 1))  # adjusted by adagrad
-            wada = w[:, l].reshape((T, 1))
+            if adagrad:
+                wada = (w[:, l] + sqrt(eps + accu_grad_m[:, l])).reshape((T, 1))  # adjusted by adagrad
+            else:
+                wada = w[:, l].reshape((T, 1))
             GTWG = G.T.dot(wada * G)
 
             # eta = einsum('ijk, ki->ji', h, b) + m.dot(a)
@@ -207,42 +215,48 @@ def train(y, family, p, chol, m0=None, a0=None, b0=None, niter=50, tol=1e-5, dec
                       G.dot(GTWG.dot(linalg.solve(eyek + GTWG, (wada * G).T.dot(u), sym_pos=True)))
 
             m[:, l] = good_m[:, l] + delta_m
-            m[:, l] -= mean(m[:, l])
-            scale = linalg.norm(m[:, l], ord=inf)
-            a[l, :] *= scale
-            m[:, l] /= scale
+            if abest:
+                m[:, l] -= mean(m[:, l])
+                scale = linalg.norm(m[:, l], ord=inf)
+                a[l, :] *= scale
+                m[:, l] /= scale
 
         # estimate coefficients
-        for n in range(N):
-            eta = einsum('ijk, ki->ji', h, b) + m.dot(a)
-            lam = exp((eta + 0.5 * v.dot(a ** 2)).clip(LB, UB))
-            if family[n] == 'poisson':
-                # a
-                va = v * a[:, n]  # (T, L)
-                wv = diag(lam[:, n].dot(v))
-                grad_a = m.T.dot(y[:, n]) - (m + va).T.dot(lam[:, n])
-                accu_grad_a[:, n] = accumulate(accu_grad_a[:, n], grad_a, decay)
+        if abest:
+            for n in range(N):
+                eta = einsum('ijk, ki->ji', h, b) + m.dot(a)
+                lam = exp((eta + 0.5 * v.dot(a ** 2)).clip(LB, UB))
+                if family[n] == 'poisson':
+                    # a
+                    va = v * a[:, n]  # (T, L)
+                    wv = diag(lam[:, n].dot(v))
+                    grad_a = m.T.dot(y[:, n]) - (m + va).T.dot(lam[:, n])
+                    accu_grad_a[:, n] = accumulate(accu_grad_a[:, n], grad_a, decay)
 
-                neghess_a = (m + va).T.dot(lam[:, n, newaxis] * (m + va)) + wv
-                # delta_a = linalg.solve(neghess_a + diag(sqrt(eps + accu_grad_a[:, n])), grad_a, sym_pos=True)
-                delta_a = linalg.solve(neghess_a, grad_a, sym_pos=True)
-                a[:, n] += delta_a
+                    neghess_a = (m + va).T.dot(lam[:, n, newaxis] * (m + va)) + wv
+                    if adagrad:
+                        delta_a = linalg.solve(neghess_a + diag(sqrt(eps + accu_grad_a[:, n])), grad_a, sym_pos=True)
+                    else:
+                        delta_a = linalg.solve(neghess_a, grad_a, sym_pos=True)
+                    a[:, n] += delta_a
 
-                # b
-                grad_b = h[n, :].T.dot(y[:, n] - lam[:, n])
-                accu_grad_b[:, n] = accumulate(accu_grad_b[:, n], grad_b, decay)
-                neghess_b = h[n, :].T.dot(lam[:, n, newaxis] * h[n, :])
-                # b[:, n] += linalg.solve(neghess_b + diag(sqrt(eps + accu_grad_b[:, n])), grad_b, sym_pos=True)
-                b[:, n] += linalg.solve(neghess_b, grad_b, sym_pos=True)
-            else:
-                # a's least squares solution for Gaussian channel
-                # (m'm + diag(j'v))^-1 m'(y - Hb)
-                a[:, n] = linalg.solve(m.T.dot(m) + diag(sum(v, axis=0)), m.T.dot(y[:, n] - h[n, :].dot(b[:, n])),
-                                       sym_pos=True)
+                    # b
+                    grad_b = h[n, :].T.dot(y[:, n] - lam[:, n])
+                    accu_grad_b[:, n] = accumulate(accu_grad_b[:, n], grad_b, decay)
+                    neghess_b = h[n, :].T.dot(lam[:, n, newaxis] * h[n, :])
+                    if adagrad:
+                        b[:, n] += linalg.solve(neghess_b + diag(sqrt(eps + accu_grad_b[:, n])), grad_b, sym_pos=True)
+                    else:
+                        b[:, n] += linalg.solve(neghess_b, grad_b, sym_pos=True)
+                else:
+                    # a's least squares solution for Gaussian channel
+                    # (m'm + diag(j'v))^-1 m'(y - Hb)
+                    a[:, n] = linalg.solve(m.T.dot(m) + diag(sum(v, axis=0)), m.T.dot(y[:, n] - h[n, :].dot(b[:, n])),
+                                           sym_pos=True)
 
-                # b's least squares solution for Gaussian channel
-                # (H'H)^-1 H'(y - ma)
-                b[:, n] = linalg.solve(h[n, :].T.dot(h[n, :]), h[n, :].T.dot(y[:, n] - m.dot(a[:, n])), sym_pos=True)
+                    # b's least squares solution for Gaussian channel
+                    # (H'H)^-1 H'(y - ma)
+                    b[:, n] = linalg.solve(h[n, :].T.dot(h[n, :]), h[n, :].T.dot(y[:, n] - m.dot(a[:, n])), sym_pos=True)
 
         # update w
         eta = einsum('ijk, ki->ji', h, b) + m.dot(a)
@@ -271,12 +285,20 @@ def train(y, family, p, chol, m0=None, a0=None, b0=None, niter=50, tol=1e-5, dec
         if abs(lbound[i] - lbound[i - 1]) < tol * abs(lbound[i - 1]):
             converged = True
 
+        if i > 15 and not adagrad and lbound[i] < lbound[i - 1]:
+            adagrad = True
+            m[:] = good_m
+            a[:] = good_a
+            b[:] = good_b
+            w[:] = good_w
+
         # keep a copy of current iteration
         # no use in algorithm
         # for debug only now
         good_m[:] = m
         good_a[:] = a
         good_b[:] = b
+        good_w[:] = w
 
         i += 1
 

@@ -5,6 +5,10 @@ from numpy import zeros, arange, empty, ones, roll, empty_like
 from numpy.random import random, multivariate_normal
 from scipy import stats
 
+# lower and upper bound of exp
+LB = -20
+UB = 20
+
 
 def sqexp(t, w):
     """Squared exponential correlation
@@ -36,7 +40,7 @@ def spectral(f, w):
     return 0.5 * exp(- 0.25 * f * f / w) / sqrt(pi * w)
 
 
-def latents(L, T, std, b, dt=1.0, seed=None):
+def gp(L, T, std, b, dt=1.0, seed=None):
     """Simulate Gaussian processes
 
     Args:
@@ -72,63 +76,67 @@ def latents(L, T, std, b, dt=1.0, seed=None):
     return x, t[:T]
 
 
-def spikes(latent, alpha, beta, y0=None, seed=None):
-    """Simulate spike trains driven by latent processes
+def spikes(latent, a, b, y0=None, seed=None):
+    """Simulate y trains driven by latent processes
 
     Args:
         latent: latent processes (T, L)
-        alpha: coefficients of latent (L, N)
-        beta: coefficients of regression (1 + p*N, N)
+        a: coefficients of latent (L, N)
+        b: coefficients of regression (1 + p*N, N)
         y0: observations before epoch
-        seed:
+        seed: random seed
 
     Returns:
-        spike trains (T, N)
+        y: spike trains (T, N)
+        h: regressor (T, 1 + p*N)
+        rate: firing rates (T, N)
     """
 
     if seed is not None:
         np.random.seed(seed)
 
     T, L = latent.shape
-    _, N = alpha.shape
-    k, _ = beta.shape
-    p = (beta.shape[0] - 1) // N
+    _, N = a.shape
+    k, _ = b.shape
+    p = (b.shape[0] - 1) // N
 
-    spike = empty((T, N), dtype=float)
-    regressor = ones((T, k), dtype=float)
-    rate = spike.copy()
+    y = empty((T, N), dtype=float)
+    h = ones((T, k), dtype=float)
+    rate = y.copy()
     if y0 is not None:
         for t in range(p):
-            regressor[t, 1:(p - t) * N] = y0[t:, :].flatten()
+            h[t, 1:(p - t) * N] = y0[t:, :].flatten()
 
     for t in range(T):
-        eta = regressor[t, :].dot(beta) + latent[t, :].dot(alpha)
-        rate[t, :] = exp(eta.clip(-30, 30))
-        # spike[t, :] = (np.random.poisson(rate[t, :], size=(1, N)) > 0) * 1
-        # truncate spike to 1 if spike > 1
-        # it's equivalent to Bernoulli P(1) = (1 - e^-(lam_t))
-        spike[t, :] = stats.bernoulli.rvs(1.0 - exp(-rate[t, :]))
-        # spike[t, :] = 1 * (stats.poisson.rvs(rate[t, :]) > 0)
+        eta = h[t, :].dot(b) + latent[t, :].dot(a)
+        rate[t, :] = exp(eta.clip(LB, UB))
+        # y[t, :] = (np.random.poisson(rate[t, :], size=(1, N)) > 0) * 1
+        # truncate y to 1 if y > 1
+        # equivalent to Bernoulli P(1) = (1 - e^-(lam_t))
+        y[t, :] = stats.bernoulli.rvs(1.0 - exp(-rate[t, :]))
+        # y[t, :] = 1 * (stats.poisson.rvs(rate[t, :]) > 0)
         if t + 1 < T and p != 0:
-            regressor[t + 1, 1:] = roll(regressor[t, 1:], -N)
-            regressor[t + 1, 1 + (p - 1) * N:] = spike[t, :]
+            h[t + 1, 1:] = roll(h[t, 1:], -N)
+            h[t + 1, 1 + (p - 1) * N:] = y[t, :]
 
-    return spike, regressor, rate
+    return y, h, rate
 
 
-def gaussian(latent, a, b, K, y0=None, seed=None):
+def lfp(latent, a, b, K, y0=None, seed=None):
     """Simulate Gaussian observations driven by latent processes
 
     Args:
         latent: latent processes (T, L)
         a: coefficients of latent (L, N)
         b: coefficients of regression (1 + p*N, N)
-        K:
-        y0:
-        seed:
+        K: noise
+        y0: observations before epoch
+        seed: random seed
 
     Returns:
-
+        y: LFP
+        h: regressor
+        mu: mean
     """
     if seed is not None:
         np.random.seed(seed)

@@ -2,7 +2,7 @@ import timeit
 
 import numpy as np
 from numpy import empty, full, tile
-from numpy import finfo, PINF
+from numpy import finfo, PINF, inf
 from numpy import identity, diag, einsum, inner, trace, sum, mean, var, abs, sqrt
 from scipy import linalg
 
@@ -15,6 +15,7 @@ UB = 20
 
 def vfromw(w, chol):
     """Construct temporal slice of V from W
+
     Args:
         w: diagonals of W (T, L)
         chol: cholesky factorizations of prior covariances (L, T, r)
@@ -27,7 +28,7 @@ def vfromw(w, chol):
     v = empty((T, L), dtype=float)
     for l in range(L):
         G = chol[l, :]
-        GTWG = G.T.dot(w[:, l].reshape((T, 1)) * G)
+        GTWG = G.T.dot(w[l] * G)
         v[:, l] = sum(G * (G - G.dot(GTWG) + G.dot(GTWG.dot(linalg.solve(eyer + GTWG, GTWG, sym_pos=True)))),
                       axis=1)
     return v
@@ -35,6 +36,7 @@ def vfromw(w, chol):
 
 def elbo(y, h, chol, m, w, v, a, b, vhat):
     """Evidence Lower BOund
+
     Args:
         y: observations (T, N)
         h: autocorrelation regressor (N, T, 1 + p)
@@ -58,7 +60,7 @@ def elbo(y, h, chol, m, w, v, a, b, vhat):
 
     for l in range(L):
         G = chol[l, :]
-        GTWG = G.T.dot(w[:, l].reshape((T, 1)) * G)
+        GTWG = G.T.dot(w[l] * G)
         A = GTWG.dot(linalg.solve(eyer + GTWG, GTWG, sym_pos=True))
         m_div_G = linalg.lstsq(G, m[:, l])[0]
         tr = T - trace(GTWG) + trace(A)
@@ -69,8 +71,9 @@ def elbo(y, h, chol, m, w, v, a, b, vhat):
     return lb
 
 
-def train(y, p, chol, m0=None, a0=None, b0=None, bmask=None, niter=50, tol=1e-5, verbose=True):
+def train(y, p, chol, m0=None, a0=None, b0=None, abest=True, niter=50, tol=1e-5, verbose=True):
     """Variational Bayesian
+
     Args:
         y: observations (T, N), continuous
         p: order of autocorrelation
@@ -100,6 +103,7 @@ def train(y, p, chol, m0=None, a0=None, b0=None, bmask=None, niter=50, tol=1e-5,
 
     if m0 is None:
         m0 = tile(mean(y, axis=1), (1, L))
+        m0 -= mean(m0, axis=0)
 
     if a0 is None:
         a0 = linalg.lstsq(m0, y)[0]
@@ -115,13 +119,13 @@ def train(y, p, chol, m0=None, a0=None, b0=None, bmask=None, niter=50, tol=1e-5,
 
     eta = einsum('ijk, ki->ji', h, b) + m.dot(a)
     vhat = var(y - eta, axis=0, ddof=0)
-    w = sum(a ** 2, axis=1) / vhat
+    w = (1 / vhat).dot(a.T ** 2)
     v = vfromw(w, chol)
 
     lbound = full(niter, fill_value=finfo(float).min, dtype=float)
     lbound[0] = elbo(y, h, chol, m, w, v, a, b, vhat)
 
-    chosen = np.full(L, fill_value=True, dtype=bool)  #
+    chosen = full(L, fill_value=True, dtype=bool)  #
 
     converged = False
     i = 1
@@ -134,28 +138,29 @@ def train(y, p, chol, m0=None, a0=None, b0=None, bmask=None, niter=50, tol=1e-5,
         chosen.fill(True)
         for l in range(L):
             chosen[l] = False
-            z = (y - h.dot(b) - m[:, chosen].dot(a[chosen, :])).dot(a[l, :] / vhat)
+            z = (y - einsum('ijk, ki->ji', h, b) - m[:, chosen].dot(a[chosen, :])).dot(a[l, :] / vhat)
             G = chol[l, :]
-            GTWG = G.T.dot(w[:, l] * G)
+            GTWG = G.T.dot(w[l] * G)
             m[:, l] = (G - G.dot(GTWG) + G.dot(GTWG).dot(linalg.solve(eyek + GTWG, GTWG, sym_pos=True))).dot(G.T.dot(z))
-            m[:, l] -= np.mean(m[:, l])
-            m[:, l] /= linalg.norm(m[:, l], ord=np.inf)
-            v[:, l] = np.sum(G * (G - G.dot(GTWG) + G.dot(GTWG.dot(linalg.solve(eyek + GTWG, GTWG, sym_pos=True)))),
-                             axis=1)
+            if abest:
+                m[:, l] -= mean(m[:, l])
+                m[:, l] /= linalg.norm(m[:, l], ord=inf)
+            # v[:, l] = sum(G * (G - G.dot(GTWG) + G.dot(GTWG.dot(linalg.solve(eyek + GTWG, GTWG, sym_pos=True)))),
+            #                  axis=1)
+        if abest:
+            for n in range(N):
+                # a's least squares solution for Gaussian channel
+                # (m'm + diag(j'v))^-1 m'(y - Hb)
+                a[:, n] = linalg.solve(m.T.dot(m) + diag(sum(v, axis=0)), m.T.dot(y[:, n] - h[n, :].dot(b[:, n])),
+                                       sym_pos=True)
 
-        for n in range(N):
-            # a's least squares solution for Gaussian channel
-            # (m'm + diag(j'v))^-1 m'(y - Hb)
-            a[:, n] = linalg.solve(m.T.dot(m) + diag(sum(v, axis=0)), m.T.dot(y[:, n] - h[n, :].dot(b[:, n])),
-                                   sym_pos=True)
-
-            # b's least squares solution for Gaussian channel
-            # (H'H)^-1 H'(y - ma)
-            b[:, n] = linalg.solve(h[n, :].T.dot(h[n, :]), h[n, :].T.dot(y[:, n] - m.dot(a[:, n])), sym_pos=True)
+                # b's least squares solution for Gaussian channel
+                # (H'H)^-1 H'(y - ma)
+                b[:, n] = linalg.solve(h[n, :].T.dot(h[n, :]), h[n, :].T.dot(y[:, n] - m.dot(a[:, n])), sym_pos=True)
 
         eta = einsum('ijk, ki->ji', h, b) + m.dot(a)
         vhat = var(y - eta, axis=0, ddof=0)
-        w = sum(a ** 2, axis=1) / vhat
+        w = (1 / vhat).dot(a.T ** 2)
         v = vfromw(w, chol)
 
         lbound[i] = elbo(y, h, chol, m, w, v, a, b, vhat)
@@ -176,7 +181,7 @@ def train(y, p, chol, m0=None, a0=None, b0=None, bmask=None, niter=50, tol=1e-5,
     lv = empty((L, T, r), dtype=float)  # V = LL'
     for l in range(L):
         G = chol[l, :]
-        GTWG = G.T.dot(w[:, l].reshape((T, 1)) * G)
+        GTWG = G.T.dot(w[l] * G)
 
         A = eyek - GTWG + GTWG.dot(linalg.solve(eyek + GTWG, GTWG, sym_pos=True))  # A should be pd but numerically not
         eigval, eigvec = linalg.eigh(A)
