@@ -113,9 +113,9 @@ def train(y, p, chol, m0=None, a0=None, b0=None, abest=True, niter=50, tol=1e-5,
         for n in range(N):
             b0[:, n] = linalg.lstsq(h[n, :], y[:, n])[0]
 
-    a = a0
-    b = b0
-    m = m0
+    a = a0.copy()
+    b = b0.copy()
+    m = m0.copy()
 
     eta = einsum('ijk, ki->ji', h, b) + m.dot(a)
     vhat = var(y - eta, axis=0, ddof=0)
@@ -142,9 +142,9 @@ def train(y, p, chol, m0=None, a0=None, b0=None, abest=True, niter=50, tol=1e-5,
             G = chol[l, :]
             GTWG = G.T.dot(w[l] * G)
             m[:, l] = (G - G.dot(GTWG) + G.dot(GTWG).dot(linalg.solve(eyek + GTWG, GTWG, sym_pos=True))).dot(G.T.dot(z))
-            if abest:
-                m[:, l] -= mean(m[:, l])
-                m[:, l] /= linalg.norm(m[:, l], ord=inf)
+            # if abest:
+            m[:, l] -= mean(m[:, l])
+            m[:, l] /= linalg.norm(m[:, l], ord=inf)
             # v[:, l] = sum(G * (G - G.dot(GTWG) + G.dot(GTWG.dot(linalg.solve(eyek + GTWG, GTWG, sym_pos=True)))),
             #                  axis=1)
         if abest:

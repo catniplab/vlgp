@@ -1,7 +1,7 @@
 from numpy import exp
 from numpy import sum, dot
 from numpy import zeros, ones, diag, meshgrid, arange, eye, asarray
-from scipy.linalg import svd
+from scipy.linalg import svd, lstsq
 
 
 def makeregressor(obs, p):
@@ -163,3 +163,7 @@ def selfhistory(obs, p, y0=None):
                 h[n, t, 1:] = obs[t - p:t, n]
 
     return h
+
+
+def rotate(obj, ref):
+    return obj.dot(lstsq(obj, ref)[0])

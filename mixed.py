@@ -96,9 +96,7 @@ def accumulate(accu, grad, decay):
 
 
 def train(y, family, p, chol, m0=None, a0=None, b0=None, abest=True,
-          niter=50, tol=1e-5,
-          adagrad=False, decay=0.95, eps=1e-6,
-          verbose=True):
+          niter=50, tol=1e-5, adagrad=15, decay=0.95, eps=1e-6, verbose=True):
     """Variational Bayesian
 
     Args:
@@ -148,9 +146,13 @@ def train(y, family, p, chol, m0=None, a0=None, b0=None, abest=True,
         for n in range(N):
             b0[:, n] = linalg.lstsq(h[n, :], y[:, n])[0]
 
-    a = a0
-    b = b0
-    m = m0
+    a = a0.copy()
+    b = b0.copy()
+    m = m0.copy()
+
+    if not abest:
+        a.setflags(write=0)
+        b.setflags(write=0)
 
     U = empty((T, N), dtype=float)
     R = empty_like(y, dtype=float)
@@ -199,7 +201,7 @@ def train(y, family, p, chol, m0=None, a0=None, b0=None, abest=True,
             accu_grad_m[:, l] = accumulate(accu_grad_m[:, l], grad_m, decay)
             # accu_grad_m[:, l] = accumulate(accu_grad_m[:, l], grad_m / linalg.norm(grad_m, ord=inf), decay)
 
-            if adagrad:
+            if i > adagrad:
                 wada = (w[:, l] + sqrt(eps + accu_grad_m[:, l])).reshape((T, 1))  # adjusted by adagrad
             else:
                 wada = w[:, l].reshape((T, 1))
@@ -215,11 +217,11 @@ def train(y, family, p, chol, m0=None, a0=None, b0=None, abest=True,
                       G.dot(GTWG.dot(linalg.solve(eyek + GTWG, (wada * G).T.dot(u), sym_pos=True)))
 
             m[:, l] = good_m[:, l] + delta_m
+            m[:, l] -= mean(m[:, l])
+            scale = linalg.norm(m[:, l], ord=inf)
+            m[:, l] /= scale
             if abest:
-                m[:, l] -= mean(m[:, l])
-                scale = linalg.norm(m[:, l], ord=inf)
                 a[l, :] *= scale
-                m[:, l] /= scale
 
         # estimate coefficients
         if abest:
@@ -234,7 +236,7 @@ def train(y, family, p, chol, m0=None, a0=None, b0=None, abest=True,
                     accu_grad_a[:, n] = accumulate(accu_grad_a[:, n], grad_a, decay)
 
                     neghess_a = (m + va).T.dot(lam[:, n, newaxis] * (m + va)) + wv
-                    if adagrad:
+                    if i > adagrad:
                         delta_a = linalg.solve(neghess_a + diag(sqrt(eps + accu_grad_a[:, n])), grad_a, sym_pos=True)
                     else:
                         delta_a = linalg.solve(neghess_a, grad_a, sym_pos=True)
@@ -244,7 +246,7 @@ def train(y, family, p, chol, m0=None, a0=None, b0=None, abest=True,
                     grad_b = h[n, :].T.dot(y[:, n] - lam[:, n])
                     accu_grad_b[:, n] = accumulate(accu_grad_b[:, n], grad_b, decay)
                     neghess_b = h[n, :].T.dot(lam[:, n, newaxis] * h[n, :])
-                    if adagrad:
+                    if i > adagrad:
                         b[:, n] += linalg.solve(neghess_b + diag(sqrt(eps + accu_grad_b[:, n])), grad_b, sym_pos=True)
                     else:
                         b[:, n] += linalg.solve(neghess_b, grad_b, sym_pos=True)
@@ -285,8 +287,8 @@ def train(y, family, p, chol, m0=None, a0=None, b0=None, abest=True,
         if abs(lbound[i] - lbound[i - 1]) < tol * abs(lbound[i - 1]):
             converged = True
 
-        if i > 15 and not adagrad and lbound[i] < lbound[i - 1]:
-            adagrad = True
+        if i > adagrad and lbound[i] < lbound[i - 1]:
+            print('adagrad enabled')
             m[:] = good_m
             a[:] = good_a
             b[:] = good_b
@@ -313,5 +315,8 @@ def train(y, family, p, chol, m0=None, a0=None, b0=None, abest=True,
         eigval, eigvec = linalg.eigh(A)
         eigval.clip(0, PINF, out=eigval)  # remove negative eigenvalues
         lv[l, :] = G.dot(eigvec.dot(diag(sqrt(eigval))))
+
+    if verbose:
+        print('Exit')
 
     return lbound[:i], m, lv, a, b, stop - start, converged
