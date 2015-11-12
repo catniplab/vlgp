@@ -6,16 +6,13 @@ from numpy import identity, diag, einsum, inner, trace, exp, sum, mean, var, abs
 from numpy import inf, finfo, PINF
 from scipy import linalg
 
+from constants import *
 from util import history
-
-# Bounds for exp
-LB = -20
-UB = 20
 
 
 def firingrate(h, m, v, a, b):
     eta_x = einsum('ijk, ki->ji', h, b) + m.dot(a) + 0.5 * v.dot(a ** 2)
-    np.clip(eta_x, LB, UB, out=eta_x)
+    np.clip(eta_x, MIN_EXP, MAX_EXP, out=eta_x)
     return np.exp(eta_x)
 
 
@@ -59,7 +56,7 @@ def elbo(y, h, chol, m, w, v, a, b):
     eyer = identity(r)
 
     eta = einsum('ijk, ki->ji', h, b) + m.dot(a)
-    lam = exp((eta + 0.5 * v.dot(a ** 2)).clip(LB, UB))
+    lam = exp((eta + 0.5 * v.dot(a ** 2)).clip(MIN_EXP, MAX_EXP))
 
     lb = sum(y * eta - lam)
 
@@ -137,7 +134,7 @@ def train(y, lag, chol, m0=None, a0=None, b0=None, niter=50, tol=1e-5, decay=0.9
     R = empty_like(y, dtype=float)
 
     eta = einsum('ijk, ki->ji', h, b) + m.dot(a)
-    lam = exp(eta.clip(LB, UB))  # no a'Va at beginning
+    lam = exp(eta.clip(MIN_EXP, MAX_EXP))  # no a'Va at beginning
     w = lam.dot(a.T ** 2)
     v = vfromw(w, chol)
 
@@ -168,7 +165,7 @@ def train(y, lag, chol, m0=None, a0=None, b0=None, niter=50, tol=1e-5, decay=0.9
         for l in range(L):
             # m
             eta = einsum('ijk, ki->ji', h, b) + m.dot(a)
-            lam = exp((eta + 0.5 * v.dot(a ** 2)).clip(LB, UB))
+            lam = exp((eta + 0.5 * v.dot(a ** 2)).clip(MIN_EXP, MAX_EXP))
             G = chol[l]
             grad_m = (y - lam).dot(a[l, :]) - linalg.lstsq(G.T, linalg.lstsq(G, m[:, l])[0])[0]
             accu_grad_m[:, l] = accumulate(accu_grad_m[:, l], grad_m, decay)
@@ -190,7 +187,7 @@ def train(y, lag, chol, m0=None, a0=None, b0=None, niter=50, tol=1e-5, decay=0.9
         # estimate coefficients
         for n in range(N):
             eta = einsum('ijk, ki->ji', h, b) + m.dot(a)
-            lam = exp((eta + 0.5 * v.dot(a ** 2)).clip(LB, UB))
+            lam = exp((eta + 0.5 * v.dot(a ** 2)).clip(MIN_EXP, MAX_EXP))
             # a
             va = v * a[:, n]  # (T, L)
             wv = diag(lam[:, n].dot(v))
@@ -210,7 +207,7 @@ def train(y, lag, chol, m0=None, a0=None, b0=None, niter=50, tol=1e-5, decay=0.9
         # update w
         eta = einsum('ijk, ki->ji', h, b) + m.dot(a)
         vhat = var(y - eta, axis=0, ddof=0)
-        lam = exp((eta + 0.5 * v.dot(a ** 2)).clip(LB, UB))
+        lam = exp((eta + 0.5 * v.dot(a ** 2)).clip(MIN_EXP, MAX_EXP))
         w = lam.dot(a.T ** 2)
         v = vfromw(w, chol)
 

@@ -5,9 +5,7 @@ from numpy import zeros, arange, empty, ones, roll, empty_like
 from numpy.random import random, multivariate_normal
 from scipy import stats
 
-# lower and upper bound of exp
-EXP_LB = -20
-EXP_UB = 20
+from constants import *
 
 
 def sqexp(t, w):
@@ -105,7 +103,7 @@ def spikes(x, a, b, seed=None):
 
     for t in range(T):
         eta = x[t, :].dot(a) + einsum('ij, ji -> i', h[:, t, :], b)
-        rate[t, :] = exp(eta.clip(EXP_LB, EXP_UB))
+        rate[t, :] = exp(eta.clip(MIN_EXP, MAX_EXP))
         # truncate y to 1 if y > 1
         # equivalent to Bernoulli P(1) = (1 - e^-(lam_t))
         y[t, :] = stats.bernoulli.rvs(1.0 - exp(-rate[t, :]))

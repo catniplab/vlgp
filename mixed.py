@@ -6,11 +6,8 @@ from numpy import identity, diag, einsum, inner, trace, exp, sum, mean, var, abs
 from numpy import inf, finfo, PINF
 from scipy import linalg
 
+from constants import *
 from util import history
-
-# lower and upper bound of exp
-LB = -20
-UB = 20
 
 
 def vfromw(w, chol):
@@ -58,7 +55,7 @@ def elbo(y, h, family, chol, m, w, v, a, b, vhat):
     gaussian = family == 'gaussian'
 
     eta = einsum('ijk, ki->ji', h, b) + m.dot(a)
-    lam = exp((eta + 0.5 * v.dot(a ** 2)).clip(LB, UB))
+    lam = exp((eta + 0.5 * v.dot(a ** 2)).clip(MIN_EXP, MAX_EXP))
 
     lpois = sum(y[:, poisson] * eta[:, poisson] - lam[:, poisson])
 
@@ -157,7 +154,7 @@ def train(y, family, lag, chol, m0=None, a0=None, b0=None, abest=True,
 
     eta = einsum('ijk, ki->ji', h, b) + m.dot(a)
     vhat = var(y - eta, axis=0, ddof=0)
-    lam = exp(eta.clip(LB, UB))  # no a'Va at beginning
+    lam = exp(eta.clip(MIN_EXP, MAX_EXP))  # no a'Va at beginning
     U[:, poisson] = lam[:, poisson]
     U[:, gaussian] = 1 / vhat[gaussian]
     w = U.dot(a.T ** 2)
@@ -191,7 +188,7 @@ def train(y, family, lag, chol, m0=None, a0=None, b0=None, abest=True,
         for l in range(L):
             eta = einsum('ijk, ki->ji', h, b) + m.dot(a)
             vhat = var(y - eta, axis=0, ddof=0)
-            lam = exp((eta + 0.5 * v.dot(a ** 2)).clip(LB, UB))
+            lam = exp((eta + 0.5 * v.dot(a ** 2)).clip(MIN_EXP, MAX_EXP))
             G = chol[l]
             grad_m = (y[:, poisson] - lam[:, poisson]).dot(a[l, poisson]) + \
                      ((y[:, gaussian] - eta[:, gaussian]) /
@@ -206,7 +203,7 @@ def train(y, family, lag, chol, m0=None, a0=None, b0=None, abest=True,
             GTWG = G.T.dot(wada * G)
 
             # eta = einsum('ijk, ki->ji', h, b) + m.dot(a)
-            # lam = exp((eta + 0.5 * v.dot(a ** 2)).clip(EXP_LB, EXP_UB))
+            # lam = exp((eta + 0.5 * v.dot(a ** 2)).clip(MIN_EXP, MAX_EXP))
             R[:, poisson] = y[:, poisson] - lam[:, poisson]
             R[:, gaussian] = (y[:, gaussian] - eta[:, gaussian]) / vhat[gaussian]
 
@@ -225,7 +222,7 @@ def train(y, family, lag, chol, m0=None, a0=None, b0=None, abest=True,
         if abest:
             for n in range(N):
                 eta = einsum('ijk, ki->ji', h, b) + m.dot(a)
-                lam = exp((eta + 0.5 * v.dot(a ** 2)).clip(LB, UB))
+                lam = exp((eta + 0.5 * v.dot(a ** 2)).clip(MIN_EXP, MAX_EXP))
                 if family[n] == 'poisson':
                     # a
                     va = v * a[:, n]  # (T, L)
@@ -261,7 +258,7 @@ def train(y, family, lag, chol, m0=None, a0=None, b0=None, abest=True,
         # update w
         eta = einsum('ijk, ki->ji', h, b) + m.dot(a)
         vhat = var(y - eta, axis=0, ddof=0)
-        lam = exp((eta + 0.5 * v.dot(a ** 2)).clip(LB, UB))
+        lam = exp((eta + 0.5 * v.dot(a ** 2)).clip(MIN_EXP, MAX_EXP))
         U[:, poisson] = lam[:, poisson]
         U[:, gaussian] = 1 / vhat[gaussian]
         w = U.dot(a.T ** 2)

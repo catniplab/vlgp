@@ -40,55 +40,6 @@ def sqexpcov(n, w, var=1.0):
     return var * exp(- w * (i - j) ** 2)
 
 
-def likelihood(spike, latent, alpha, beta, intercept=True):
-    """Poisson likelihood
-
-    Args:
-        spike:
-        latent:
-        alpha:
-        beta:
-        intercept:
-
-    Returns:
-
-    """
-
-    T, N = spike.shape
-    L, _ = latent.shape
-    k, _ = beta.shape
-    p = (k - intercept) // N
-
-    regressor = makeregressor(spike, p, intercept)
-
-    lograte = dot(regressor, beta) + dot(latent, alpha)
-    return sum(spike * lograte - exp(lograte))
-
-
-# def cartesian(arrays):
-#     """Cartesian product
-#
-#     Args:
-#         arrays:
-#
-#     Returns:
-#
-#     """
-#     arrays = [np.asarray(x) for x in arrays]
-#     shape = (len(x) for x in arrays)
-#     dtype = arrays[0].dtype
-#
-#     ix = np.indices(shape)
-#     ix = ix.reshape(len(arrays), -1).T
-#
-#     out = np.empty_like(ix, dtype=dtype)
-#
-#     for n, arr in enumerate(arrays):
-#         out[:, n] = arrays[n][ix[:, n]]
-#
-#     return out
-
-
 def varimax(x, gamma=1.0, q=20, tol=1e-5):
     """Varimax rotation
 

@@ -9,10 +9,6 @@ from scipy import linalg
 from util import history
 
 
-LB = -20
-UB = 20
-
-
 def vfromw(w, chol):
     """Construct temporal slice of V from W
 
