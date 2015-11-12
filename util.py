@@ -1,7 +1,7 @@
-from numpy import exp
+from numpy import exp, arcsin
 from numpy import sum, dot
 from numpy import zeros, ones, diag, meshgrid, arange, eye, asarray
-from scipy.linalg import svd, lstsq
+from scipy.linalg import svd, lstsq, orth, norm
 from statsmodels.tools import add_constant
 from statsmodels.tsa.tsatools import lagmat
 
@@ -160,3 +160,12 @@ def history(obs, lag):
 
 def rotate(obj, ref):
     return obj.dot(lstsq(obj, ref)[0])
+
+
+def subspace(A, B):
+    oA = orth(A)
+    oB = orth(B)
+    if oA.shape[1] < oB.shape[1]:
+        oA, oB = oB.copy(), oA.copy()
+    oB -= oA.dot(oA.T.dot(oB))
+    return arcsin(min(1, norm(oB, ord=2)))
