@@ -6,8 +6,8 @@ from numpy.random import random, multivariate_normal
 from scipy import stats
 
 # lower and upper bound of exp
-LB = -30
-UB = 30
+EXP_LB = -20
+EXP_UB = 20
 
 
 def sqexp(t, w):
@@ -75,19 +75,19 @@ def gp(b, T, std, dt=1.0, seed=None):
     return x, t[:T]
 
 
-def spikes(x, a, b, y0=None, seed=None):
+def spikes(x, a, b, seed=None):
     """Simulate y trains driven by x processes
 
     Args:
         x: x processes (T, L)
         a: coefficients of x (L, N)
-        b: coefficients of regression (1 + p*N, N)
-        y0: observations before epoch (p, N)
+        b: coefficients of regression (1 + lag*N, N)
+        y0: observations before epoch (lag, N)
         seed: random seed
 
     Returns:
         y: spike trains (T, N)
-        h: regressor (T, 1 + p*N)
+        h: regressor (T, 1 + lag*N)
         rate: firing rates (T, N)
     """
 
@@ -96,36 +96,34 @@ def spikes(x, a, b, y0=None, seed=None):
 
     T, L = x.shape
     _, N = a.shape
-    p = (b.shape[0] - 1) // N
+    lag = b.shape[0] - 1
 
     y = empty((T, N), dtype=float)
-    h = ones((N, T, b.shape[0]), dtype=float)
+    h = zeros((N, T, b.shape[0]), dtype=float)
+    h[:, :, 0] = 1
     rate = empty_like(y, dtype=float)
-    if y0 is not None:
-        for t in range(p):
-            h[:, t, 1:p - t + 1] = y0[t:, :].T
 
     for t in range(T):
-        eta = einsum('ij, ji -> i', h[:, t, :], b) + x[t, :].dot(a)
-        rate[t, :] = exp(eta.clip(LB, UB))
+        eta = x[t, :].dot(a) + einsum('ij, ji -> i', h[:, t, :], b)
+        rate[t, :] = exp(eta.clip(EXP_LB, EXP_UB))
         # truncate y to 1 if y > 1
         # equivalent to Bernoulli P(1) = (1 - e^-(lam_t))
         y[t, :] = stats.bernoulli.rvs(1.0 - exp(-rate[t, :]))
         # y[t, :] = 1 * (stats.poisson.rvs(rate[t, :]) > 0)
-        if t + 1 < T and p != 0:
-            h[:, t + 1, 1:] = roll(h[:, t, 1:], -1, axis=1)
-            h[:, t + 1, -1] = y[t, :]
+        if t + 1 < T and lag > 0:
+            h[:, t + 1, 2:] = h[:, t, 1:lag]  # roll rightward
+            h[:, t + 1, 1] = y[t, :]
 
     return y, h, rate
 
 
-def lfp(x, a, b, K, y0=None, seed=None):
+def lfp(x, a, b, K, seed=None):
     """Simulate Gaussian observations driven by x processes
 
     Args:
         x: x processes (T, L)
         a: coefficients of x (L, N)
-        b: coefficients of regression (1 + p*N, N)
+        b: coefficients of regression (1 + lag*N, N)
         K: noise
         y0: observations before epoch
         seed: random seed
@@ -140,20 +138,18 @@ def lfp(x, a, b, K, y0=None, seed=None):
 
     T, L = x.shape
     _, N = a.shape
-    p = (b.shape[0] - 1) // N
+    lag = b.shape[0] - 1
 
     y = empty((T, N), dtype=float)
     mu = empty_like(y, dtype=float)
-    h = ones((N, T, b.shape[0]), dtype=float)
-    if y0 is not None:
-        for t in range(p):
-            h[:, t, 1:p - t + 1] = y0[t:, :].T
+    h = zeros((N, T, b.shape[0]), dtype=float)
+    h[:, :, 0] = 1
 
     for t in range(T):
         mu[t, :] = x[t, :].dot(a) + einsum('ij, ji -> i', h[:, t, :], b)
         y[t, :] = multivariate_normal(mu[t, :], K)
-        if t + 1 < T and p != 0:
-            h[:, t + 1, 1:] = roll(h[:, t, 1:], -1, axis=1)
-            h[:, t + 1, -1] = y[t, :]
+        if t + 1 < T and lag > 0:
+            h[:, t + 1, 2:] = h[:, t, 1:lag]  # roll rightward
+            h[:, t + 1, 1] = y[t, :]
 
     return y, h, mu

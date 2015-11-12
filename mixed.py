@@ -6,7 +6,7 @@ from numpy import identity, diag, einsum, inner, trace, exp, sum, mean, var, abs
 from numpy import inf, finfo, PINF
 from scipy import linalg
 
-from util import selfhistory
+from util import history
 
 # lower and upper bound of exp
 LB = -20
@@ -95,18 +95,18 @@ def accumulate(accu, grad, decay):
     return accu + grad ** 2
 
 
-def train(y, family, p, chol, m0=None, a0=None, b0=None, abest=True,
+def train(y, family, lag, chol, m0=None, a0=None, b0=None, abest=True,
           niter=50, tol=1e-5, adagrad=15, decay=0.95, eps=1e-6, verbose=True):
     """Variational Bayesian
 
     Args:
         y: observations (T, N), spikes or continuous
         family: distributions (N), 'poisson' and 'gaussian' supported now
-        p: order of autocorrelation
+        lag: order of autocorrelation
         chol: cholesky factorizations of prior covariances (L, T, r)
         m0: initial posterior mean (T, L)
         a0: initial latent coefficients (L, N)
-        b0: initial autocorrelation coefficients (1 + p, N)
+        b0: initial autocorrelation coefficients (1 + lag, N)
         niter: max number of iterations
         tol: relative tolerance of convergence
         decay: adagrad
@@ -118,7 +118,7 @@ def train(y, family, p, chol, m0=None, a0=None, b0=None, abest=True,
         m: posterior mean (T, L)
         lv: L matrices in factorization of V = LL' (L, T, r)
         a: latent coefficients (L, N)
-        b: autocorrelation coefficients (1 + p, N)
+        b: autocorrelation coefficients (1 + lag, N)
         elapsed: running time
         converged: whether the algorithm converged within iteration limit
     """
@@ -130,9 +130,7 @@ def train(y, family, p, chol, m0=None, a0=None, b0=None, abest=True,
     poisson = family == 'poisson'
     gaussian = family == 'gaussian'
 
-    y0 = zeros(N, dtype=float)
-    y0[gaussian] = mean(y[:, gaussian], axis=0)
-    h = selfhistory(y, p, y0)
+    h = history(y, lag)
 
     if m0 is None:
         m0 = tile(mean(y, axis=1), (1, L))
@@ -142,7 +140,7 @@ def train(y, family, p, chol, m0=None, a0=None, b0=None, abest=True,
         a0 = linalg.lstsq(m0, y)[0]
 
     if b0 is None:
-        b0 = empty((1 + p, N), dtype=float)
+        b0 = empty((1 + lag, N), dtype=float)
         for n in range(N):
             b0[:, n] = linalg.lstsq(h[n, :], y[:, n])[0]
 
@@ -208,7 +206,7 @@ def train(y, family, p, chol, m0=None, a0=None, b0=None, abest=True,
             GTWG = G.T.dot(wada * G)
 
             # eta = einsum('ijk, ki->ji', h, b) + m.dot(a)
-            # lam = exp((eta + 0.5 * v.dot(a ** 2)).clip(LB, UB))
+            # lam = exp((eta + 0.5 * v.dot(a ** 2)).clip(EXP_LB, EXP_UB))
             R[:, poisson] = y[:, poisson] - lam[:, poisson]
             R[:, gaussian] = (y[:, gaussian] - eta[:, gaussian]) / vhat[gaussian]
 

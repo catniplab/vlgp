@@ -6,7 +6,7 @@ from numpy import finfo, PINF, inf
 from numpy import identity, diag, einsum, inner, trace, sum, mean, var, abs, sqrt
 from scipy import linalg
 
-from util import selfhistory
+from util import history
 
 
 LB = -20
@@ -71,16 +71,16 @@ def elbo(y, h, chol, m, w, v, a, b, vhat):
     return lb
 
 
-def train(y, p, chol, m0=None, a0=None, b0=None, abest=True, niter=50, tol=1e-5, verbose=True):
+def train(y, lag, chol, m0=None, a0=None, b0=None, abest=True, niter=50, tol=1e-5, verbose=True):
     """Variational Bayesian
 
     Args:
         y: observations (T, N), continuous
-        p: order of autocorrelation
+        lag: order of autocorrelation
         chol: cholesky factorizations of prior covariances (L, T, r)
         m0: initial posterior mean (T, L)
         a0: initial latent coefficients (L, N)
-        b0: initial autocorrelation coefficients (1 + p, N)
+        b0: initial autocorrelation coefficients (1 + lag, N)
         niter: max number of iterations
         tol: relative tolerance of convergence
         verbose: detailed output
@@ -90,7 +90,7 @@ def train(y, p, chol, m0=None, a0=None, b0=None, abest=True, niter=50, tol=1e-5,
         m: posterior mean (T, L)
         lv: L matrices in factorization of V = LL' (L, T, r)
         a: latent coefficients (L, N)
-        b: autocorrelation coefficients (1 + p, N)
+        b: autocorrelation coefficients (1 + lag, N)
         elapsed: running time
         converged: whether the algorithm converged within iteration limit
     """
@@ -99,7 +99,7 @@ def train(y, p, chol, m0=None, a0=None, b0=None, abest=True, niter=50, tol=1e-5,
     eyek = identity(r)
 
     y0 = mean(y, axis=0)
-    h = selfhistory(y, p, y0)
+    h = history(y, lag)
 
     if m0 is None:
         m0 = tile(mean(y, axis=1), (1, L))
@@ -109,7 +109,7 @@ def train(y, p, chol, m0=None, a0=None, b0=None, abest=True, niter=50, tol=1e-5,
         a0 = linalg.lstsq(m0, y)[0]
 
     if b0 is None:
-        b0 = empty((1 + p, N), dtype=float)
+        b0 = empty((1 + lag, N), dtype=float)
         for n in range(N):
             b0[:, n] = linalg.lstsq(h[n, :], y[:, n])[0]
 
