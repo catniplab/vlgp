@@ -6,8 +6,8 @@ from numpy.random import random, multivariate_normal
 from scipy import stats
 
 # lower and upper bound of exp
-LB = -20
-UB = 20
+LB = -30
+UB = 30
 
 
 def sqexp(t, w):
