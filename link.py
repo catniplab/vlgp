@@ -1,5 +1,5 @@
 from numpy import vectorize, exp, finfo
-from .constant import *
+from constant import *
 
 
 def rectlin(eta):

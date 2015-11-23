@@ -5,7 +5,7 @@ from numpy import zeros, arange, empty, ones, roll, empty_like
 from numpy.random import random, multivariate_normal
 from scipy import stats
 
-from .link import *
+from link import *
 
 def sqexp(t, w):
     """Squared exponential correlation
