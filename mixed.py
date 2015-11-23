@@ -6,7 +6,7 @@ from numpy import identity, diag, einsum, inner, trace, exp, sum, mean, var, abs
 from numpy import inf, finfo, PINF
 from scipy import linalg
 
-from constants import *
+from constant import *
 from util import history
 
 
@@ -168,6 +168,7 @@ def train(y, family, lag, chol, m0=None, a0=None, b0=None, abest=True,
     #
 
     lbound = full(niter, fill_value=finfo(float).min, dtype=float)
+    elapsed = zeros(niter, dtype=float)
     lbound[0] = elbo(y, h, family, chol, m, w, v, a, b, vhat)
 
     # adagrad
@@ -266,6 +267,9 @@ def train(y, family, lag, chol, m0=None, a0=None, b0=None, abest=True,
 
         lbound[i] = elbo(y, h, family, chol, m, w, v, a, b, vhat)
 
+        tit = timeit.default_timer() - iter_start
+        elapsed[i] = tit
+
         if verbose:
             print('lower bound = {:.5f}\n'
                   'increment = {:.10f}\n'
@@ -273,7 +277,7 @@ def train(y, family, lag, chol, m0=None, a0=None, b0=None, abest=True,
                   'change in a = {:.10f}\n'
                   'change in b = {:.10f}\n'
                   'change in m = {:.10f}\n'.format(lbound[i], lbound[i] - lbound[i - 1],
-                                                   timeit.default_timer() - iter_start,
+                                                   tit,
                                                    linalg.norm(good_a - a, ord=inf),
                                                    linalg.norm(good_b - b, ord=inf),
                                                    linalg.norm(good_m - m, ord=inf)))
@@ -314,4 +318,4 @@ def train(y, family, lag, chol, m0=None, a0=None, b0=None, abest=True,
     if verbose:
         print('Exit')
 
-    return lbound[:i], m, lv, a, b, stop - start, converged
+    return lbound[:i], m, lv, a, b, stop - start, converged, i, elapsed

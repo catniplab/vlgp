@@ -6,7 +6,7 @@ from numpy import identity, diag, einsum, inner, trace, exp, sum, mean, var, abs
 from numpy import inf, finfo, PINF
 from scipy import linalg
 
-from constants import *
+from constant import *
 from util import history
 
 
