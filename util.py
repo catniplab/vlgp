@@ -1,7 +1,7 @@
-from numpy import exp, arcsin
+from numpy import exp
 from numpy import sum, dot
-from numpy import zeros, ones, diag, meshgrid, arange, eye, asarray
-from scipy.linalg import svd, lstsq, orth, norm
+from numpy import zeros, ones, diag, meshgrid, arange, eye, asarray, atleast_3d, rollaxis
+from scipy.linalg import svd, lstsq
 from statsmodels.tools import add_constant
 from statsmodels.tsa.tsatools import lagmat
 
@@ -14,7 +14,7 @@ def makeregressor(obs, p):
         p: order of auto/cross-regression
 
     Returns:
-        full regressive matrix (T, 1 + p*N)
+        full design matrix (T, 1 + p*N)
     """
 
     T, N = obs.shape
@@ -28,12 +28,15 @@ def makeregressor(obs, p):
 
 
 def sqexpcov(n, w, var=1.0):
-    """
-    Construct square exponential covariance matrix
-    :param n: size
-    :param w: inverse of squared lengthscale
-    :param var: variance
-    :return: (n, n) covariance matrix
+    """Construct square exponential covariance matrix
+
+    Args:
+        n: size of the matrix
+        w: scale
+        var: variance
+
+    Returns:
+        covariance
     """
 
     i, j = meshgrid(arange(n), arange(n))
@@ -53,7 +56,7 @@ def varimax(x, gamma=1.0, q=20, tol=1e-5):
         rotated matrix
     """
 
-    p,k = x.shape
+    p, k = x.shape
     rotation = eye(k)
     d = 0
     for i in range(q):
@@ -67,56 +70,59 @@ def varimax(x, gamma=1.0, q=20, tol=1e-5):
     return dot(x, rotation)
 
 
-def raster(y):
-    """Raster plot
-
-    Args:
-        y: spike trains (T, N)
-
-    Returns:
-
-    """
-    from matplotlib.pyplot import figure, xlim, ylim, vlines, xticks, yticks, gca
-
-    T, N = y.shape
-    figure(figsize=(10, 6))
-    ylim(0, N)
-    xlim(0, T)
-    for n in range(N):
-        vlines(arange(T)[y[:, n] > 0], n, n + 1, color='black')
-    xticks([])
-    yticks([])
-    gca().invert_yaxis()
-
-
 def history(obs, lag):
     """Construct autoregressive matrices
 
     Args:
-        obs: observations (T, N)
+        obs: observations (ntime, nchannel)
         lag: order of autoregression
 
     Returns:
-        autoregressive matrices (N, T, 1 + lag)
+        autoregression matrices (nchannel, ntime, 1 + lag)
     """
 
-    T, N = obs.shape
-    h = zeros((N, T, 1 + lag), dtype=float)
+    ntime, nchannel = obs.shape
+    h = zeros((nchannel, ntime, 1 + lag), dtype=float)
 
-    for n in range(N):
+    for n in range(nchannel):
         h[n, :] = add_constant(lagmat(obs[:, n], maxlag=lag))
 
     return h
 
 
+def regmat(y, lag=0):
+    """Autoregression matrices
+
+    Args:
+        y: observation
+        lag: lag
+
+    Returns:
+        autoregression matrices (nchannel, ntrial, ntime, 1 + lag)
+    """
+
+    y = asarray(y)
+    if y.ndim < 3:
+        y = atleast_3d(y)
+        y = rollaxis(y, axis=-1)
+    ntrial, ntime, nchannel = y.shape
+    h = zeros((nchannel, ntrial, ntime, 1 + lag))
+    for n in range(nchannel):
+        for m in range(ntrial):
+            h[n, m, :] = add_constant(lagmat(y[m, :, n], maxlag=lag))
+    return h
+
+
 def rotate(obj, ref):
+    """Rotation
+
+    Args:
+        obj:
+        ref:
+
+    Returns:
+
+    """
     return obj.dot(lstsq(obj, ref)[0])
 
 
-def subspace(A, B):
-    oA = orth(A)
-    oB = orth(B)
-    if oA.shape[1] < oB.shape[1]:
-        oA, oB = oB.copy(), oA.copy()
-    oB -= oA.dot(oA.T.dot(oB))
-    return arcsin(min(1, norm(oB, ord=2)))

@@ -7,69 +7,68 @@ from scipy import stats
 
 from link import *
 
-def sqexp(t, w):
+
+def sqexp(t, omega):
     """Squared exponential correlation
 
     Args:
         t: lag
-        w: inverse of squared lengthscale
+        omega: inverse of squared lengthscale
 
     Returns:
-
+        correlation
     """
 
-    return exp(- w * t ** 2)
+    return exp(- omega * t ** 2)
 
 
-def spectral(f, w):
+def spectral(f, omega):
     """Spectral density of squared exponential covariance function
 
     Args:
         f: frequency
-        w: inverse of squared lengthscale
+        omega: inverse of squared lengthscale
 
     Returns:
-
+        power
     """
 
-    # TODO(yuan): change w to l^2
-
-    return 0.5 * exp(- 0.25 * f * f / w) / sqrt(pi * w)
+    return 0.5 * exp(- 0.25 * f * f / omega) / sqrt(pi * omega)
 
 
-def gp(b, T, std, dt=1.0, seed=None):
-    """Simulate Gaussian processes
+def gp(omega, ntime, std, dt=1.0, seed=None):
+    """Simulate SE Gaussian processes
 
     Args:
-        b: scale
-        T: duration
+        omega: scale
+        ntime: duration
         std: standard deviation
-        dt: unit
+        dt: time resolution
         seed: random number seed
 
     Returns:
-        x: simulation (T, L)
-        ticks: ticks (N,)
+        x: simulation (ntime, L)
+        ticks: ticks (ntime,)
     """
 
     if seed is not None:
         np.random.seed(seed)
 
-    x = zeros((T, b.shape[0]), dtype=float)
+    x = zeros((ntime, omega.shape[0]), dtype=float)
 
-    M = int(2 ** ceil(log2(T)))
+    M = int(2 ** ceil(log2(ntime)))
     T0 = M * dt
     dw = 2 * pi / T0
     wu = 2 * pi / dt
     t = arange(0, T0, dt)
     w = arange(0, wu, dw)
 
-    for l in range(b.shape[0]):
-        B = 2 * sqrt(spectral(w, b[l]) * dw) * exp(1j * random(M) * 2 * pi)
+    for l in range(omega.shape[0]):
+        B = 2 * sqrt(spectral(w, omega[l]) * dw) * exp(1j * random(M) * 2 * pi)
         B[0] = 0
-        x[:, l] = std * T * fft.ifft(B, T).real
+        x[:, l] = std * ntime * fft.ifft(B, ntime).real
 
-    return x, t[:T]
+    return x, t[:ntime]
 
 
 def spikes(x, a, b, link=sexp, seed=None):
@@ -118,16 +117,16 @@ def spike(x, a, b, link=sexp, seed=None):
     """Simulate spike trains driven by latent processes
 
     Args:
-        x: latent processes (ntime, nlatent)
+        x: latent processes (ntrial, ntime, nlatent)
         a: coefficients of x (nlatent, nchannel)
         b: coefficients of regression (1 + lag*nchannel, nchannel)
         link: link function
         seed: random seed
 
     Returns:
-        y: spike trains (ntime, nchannel)
-        h: autoregressor (ntime, 1 + lag*nchannel)
-        rate: firing rates (ntime, nchannel)
+        y: spike trains (ntrial, ntime, nchannel)
+        h: autoregressor (nchannel, ntrial, ntime, 1 + lag*nchannel)
+        rate: firing rates (ntrial, ntime, nchannel)
     """
 
     if seed is not None:
@@ -166,36 +165,86 @@ def lfp(x, a, b, K, link=identity, seed=None):
     """Simulate LFPs driven by latent processes
 
     Args:
-        x: latent processes (T, L)
-        a: coefficients of x (L, N)
-        b: coefficients of regression (1 + lag*N, N)
-        K: noise
+        x: latent processes (ntrial, ntime, nlatent)
+        a: coefficients of x (nlatent, nchannel)
+        b: coefficients of regression (1 + lag*nchannel, nchannel)
+        K: noise matrix
         link: link function
         seed: random seed
 
     Returns:
-        y: LFPs
-        h: autoregressor
-        mu: mean
+        y: LFPs (ntrial, ntime, nchannel)
+        h: autoregressor (nchannel, ntrial, ntime, 1 + lag*nchannel)
+        mu: mean (ntrial, ntime, nchannel)
     """
     if seed is not None:
         np.random.seed(seed)
 
-    T, L = x.shape
-    _, N = a.shape
+    x = np.asarray(x)
+    if x.ndim < 3:
+        x = np.atleast_3d(x)
+        x = np.rollaxis(x, axis=-1)
+
+    ntrial, ntime, nlatent = x.shape
+    nchannel = a.shape[1]
     lag = b.shape[0] - 1
 
-    y = empty((T, N), dtype=float)
+    y = empty((ntrial, ntime, nchannel), dtype=float)
+    h = zeros((nchannel, ntrial, ntime, 1+lag), dtype=float)
+    h[:, :, :, 0] = 1
     mu = empty_like(y, dtype=float)
-    h = zeros((N, T, b.shape[0]), dtype=float)
-    h[:, :, 0] = 1
 
-    for t in range(T):
-        mu[t, :] = identity(x[t, :].dot(a) + einsum('ij, ji -> i', h[:, t, :], b))
-        y[t, :] = multivariate_normal(mu[t, :], K)
-        if t + 1 < T and lag > 0:
-            h[:, t + 1, 2:] = h[:, t, 1:lag]  # roll rightward
-            h[:, t + 1, 1] = y[t, :]
+    for m in range(ntrial):
+        for t in range(ntime):
+            mu[m, t, :] = link(x[m, t, :].dot(a) + einsum('ij, ji -> i', h[:, m, t, :], b))
+            y[m, t, :] = multivariate_normal(mu[m, t, :], K)
+            if t + 1 < ntime and lag > 0:
+                h[:, m, t + 1, 2:] = h[:, m, t, 1:lag]  # roll rightward
+                h[:, m, t + 1, 1] = y[m, t, :]
+
+    return y, h, mu
+
+
+def observation(x, a, b, dist=multivariate_normal, link=identity, seed=None, *args):
+    """Simulate observations driven by latent processes
+
+    Args:
+        x: latent processes (ntrial, ntime, nlatent)
+        a: coefficients of x (nlatent, nchannel)
+        b: coefficients of regression (1 + lag*nchannel, nchannel)
+        dist: distribution
+        link: link function
+        seed: random seed
+        args: arguments for random number generation
+    Returns:
+        y: observations (ntrial, ntime, nchannel)
+        h: autoregressor (nchannel, ntrial, ntime, 1 + lag*nchannel)
+        mu: mean (ntrial, ntime, nchannel)
+    """
+    if seed is not None:
+        np.random.seed(seed)
+
+    x = np.asarray(x)
+    if x.ndim < 3:
+        x = np.atleast_3d(x)
+        x = np.rollaxis(x, axis=-1)
+
+    ntrial, ntime, nlatent = x.shape
+    nchannel = a.shape[1]
+    lag = b.shape[0] - 1
+
+    y = empty((ntrial, ntime, nchannel), dtype=float)
+    h = zeros((nchannel, ntrial, ntime, 1+lag), dtype=float)
+    h[:, :, :, 0] = 1
+    mu = empty_like(y, dtype=float)
+
+    for m in range(ntrial):
+        for t in range(ntime):
+            mu[m, t, :] = link(x[m, t, :].dot(a) + einsum('ij, ji -> i', h[:, m, t, :], b))
+            y[m, t, :] = dist(mu[m, t, :], *args)
+            if t + 1 < ntime and lag > 0:
+                h[:, m, t + 1, 2:] = h[:, m, t, 1:lag]  # roll rightward
+                h[:, m, t + 1, 1] = y[m, t, :]
 
     return y, h, mu
 
@@ -213,7 +262,7 @@ def lorenz(n, dt=0.01, s=10, r=28, b=2.667, x0=None, constraint=True):
         constraint: demean, rescale
 
     Returns:
-
+        3-dimenional dynamics
     """
     from numpy import empty, inf
     from numpy.linalg import norm

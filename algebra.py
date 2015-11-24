@@ -2,12 +2,15 @@ import warnings
 from numpy import sqrt, exp
 from numpy import sum
 from numpy import zeros, ones, arange
+from numpy.core.umath import arcsin
+from scipy.linalg import orth, norm
 
 
 def ichol_gauss(n, omega, r, tol=1e-6):
     """Incomplete Cholesky factorization of squared exponential covariance
 
     K = GG'
+
     Args:
         n: size of covariance matrix
         omega: inverse of 2 * squared lengthscale
@@ -48,6 +51,9 @@ def ichol(a, tol=1e-6):
     """Incomplete Cholesky factorization
 
     This version allows zero diagonal elements.
+    The direct implementation of the version in wikipedia,
+    https://en.wikipedia.org/wiki/Incomplete_Cholesky_factorization,
+    encounters divided by zero.
 
     Args:
         a: square matrix
@@ -79,3 +85,24 @@ def ichol(a, tol=1e-6):
 
         i += 1
     return G[pvec.argsort(), :]
+
+
+def subspace(a, b):
+    """Angle between two subspaces
+
+    Find the angle between two subspaces specified by the columns of a and b
+    Ported from MATLAB subspace
+
+    Args:
+        a: subspace
+        b: subspace
+
+    Returns:
+        angle in radian
+    """
+    oa = orth(a)
+    ob = orth(b)
+    if oa.shape[1] < ob.shape[1]:
+        oa, ob = ob.copy(), oa.copy()
+    ob -= oa.dot(oa.T.dot(ob))
+    return arcsin(min(1, norm(ob, ord=2)))
