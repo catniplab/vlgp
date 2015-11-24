@@ -114,6 +114,54 @@ def spikes(x, a, b, link=sexp, seed=None):
     return y, h, rate
 
 
+def spike(x, a, b, link=sexp, seed=None):
+    """Simulate spike trains driven by latent processes
+
+    Args:
+        x: latent processes (ntime, nlatent)
+        a: coefficients of x (nlatent, nchannel)
+        b: coefficients of regression (1 + lag*nchannel, nchannel)
+        link: link function
+        seed: random seed
+
+    Returns:
+        y: spike trains (ntime, nchannel)
+        h: autoregressor (ntime, 1 + lag*nchannel)
+        rate: firing rates (ntime, nchannel)
+    """
+
+    if seed is not None:
+        np.random.seed(seed)
+
+    x = np.asarray(x)
+    if x.ndim < 3:
+        x = np.atleast_3d(x)
+        x = np.rollaxis(x, axis=-1)
+
+    ntrial, ntime, nlatent = x.shape
+    nchannel = a.shape[1]
+    lag = b.shape[0] - 1
+
+    y = empty((ntrial, ntime, nchannel), dtype=float)
+    h = zeros((nchannel, ntrial, ntime, 1+lag), dtype=float)
+    h[:, :, :, 0] = 1
+    rate = empty_like(y, dtype=float)
+
+    for m in range(ntrial):
+        for t in range(ntime):
+            eta = x[m, t, :].dot(a) + einsum('ij, ji -> i', h[:, m, t, :], b)
+            rate[m, t, :] = link(eta)
+            # truncate y to 1 if y > 1
+            # equivalent to Bernoulli P(1) = (1 - e^-(lam_t))
+            # y[t, :] = stats.bernoulli.rvs(1.0 - exp(-rate[t, :]))
+            y[m, t, :] = stats.poisson.rvs(rate[m, t, :]).clip(0, 1)
+            if t + 1 < ntime and lag > 0:
+                h[:, m, t + 1, 2:] = h[:, m, t, 1:lag]  # roll rightward
+                h[:, m, t + 1, 1] = y[m, t, :]
+
+    return y, h, rate
+
+
 def lfp(x, a, b, K, link=identity, seed=None):
     """Simulate LFPs driven by latent processes
 

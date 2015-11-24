@@ -7,8 +7,10 @@ from scipy import linalg
 from sklearn.decomposition.factor_analysis import FactorAnalysis
 from statsmodels.tools import add_constant
 from statsmodels.tsa.tsatools import lagmat
-from scipy.linalg import norm, lstsq
+from scipy.linalg import lstsq
+from numpy.linalg import norm
 
+from link import sexp
 from constant import *
 from algebra import ichol_gauss
 
@@ -36,7 +38,7 @@ def elbo(data, prior, posterior, param):
     lfp = channel == 'lfp'
 
     eta = mu.dot(a) + einsum('ijk, ki -> ji', h.reshape(nchannel, ntime * ntrial, lag), b)
-    lam = exp((eta + 0.5 * v.dot(a ** 2)).clip(MIN_EXP, MAX_EXP))
+    lam = sexp(eta + 0.5 * v.dot(a ** 2))
 
     llspike = sum(y[:, spike] * eta[:, spike] - lam[:, spike])
 
@@ -79,7 +81,7 @@ def accumulate(accu, grad, decay=0):
 
 def inferpost(data, prior, posterior, param, optim):
     nchannel, ntrial, ntime, lag = data['h'].shape  # neuron, trial, time, lag
-    nlatent, _, rank = prior['chol'].shape  # latent, trial, time, rank
+    nlatent, _, rank = prior['chol'].shape  # latent, time, rank
 
     channel = data['channel']
 
@@ -90,7 +92,7 @@ def inferpost(data, prior, posterior, param, optim):
     noise = param['noise']
 
     accu_grad_mu = optim['accu_grad_mu']
-    decay = optim['decay']
+    adadecay = optim['adadecay']
     adagrad = optim['adagrad']
     eps = optim['eps']
 
@@ -98,7 +100,7 @@ def inferpost(data, prior, posterior, param, optim):
     lfp = channel == 'lfp'
 
     eyer = identity(rank)
-    R = empty((ntime, nchannel), dtype=float)
+    res = empty((ntime, nchannel), dtype=float)
     U = empty((ntime, nchannel), dtype=float)
 
     for m in range(ntrial):
@@ -109,16 +111,17 @@ def inferpost(data, prior, posterior, param, optim):
         w = posterior['w'][m, :, :]
         v = posterior['v'][m, :, :]
 
+        # eta = mu.dot(a) + einsum('ijk, ki -> ji', h, b)  # (neuron, time, lag) . (lag, neuron)
+        # lam = exp((eta + 0.5 * v.dot(a ** 2)).clip(MIN_EXP, MAX_EXP))
         for l in range(nlatent):
             eta = mu.dot(a) + einsum('ijk, ki -> ji', h, b)  # (neuron, time, lag) . (lag, neuron)
-            # noise = var(y - eta, axis=0, ddof=0)
-            lam = exp((eta + 0.5 * v.dot(a ** 2)).clip(MIN_EXP, MAX_EXP))
+            lam = sexp(eta + 0.5 * v.dot(a ** 2))
             G = chol[l, :, :]
             grad_mu = (y[:, spike] - lam[:, spike]).dot(a[l, spike]) + \
                       ((y[:, lfp] - eta[:, lfp]) /
                        noise[lfp]).dot(a[l, lfp]) - linalg.lstsq(G.T, linalg.lstsq(G, mu[:, l])[0])[0]
 
-            accu_grad_mu[:, l, m] = accumulate(accu_grad_mu[:, l, m], grad_mu, decay)
+            accu_grad_mu[m, :, l] = accumulate(accu_grad_mu[m, :, l], grad_mu, adadecay)
 
             if adagrad:
                 wada = (w[:, l] + sqrt(eps + accu_grad_mu[:, l])).reshape((ntime, 1))  # adjusted by adagrad
@@ -126,10 +129,10 @@ def inferpost(data, prior, posterior, param, optim):
                 wada = w[:, l].reshape((ntime, 1))
             GTWG = G.T.dot(wada * G)
 
-            R[:, spike] = y[:, spike] - lam[:, spike]
-            R[:, lfp] = (y[:, lfp] - eta[:, lfp]) / noise[lfp]
+            res[:, spike] = y[:, spike] - lam[:, spike]
+            res[:, lfp] = (y[:, lfp] - eta[:, lfp]) / noise[lfp]
 
-            u = G.dot(G.T.dot(R.dot(a[l, :]))) - mu[:, l]
+            u = G.dot(G.T.dot(res.dot(a[l, :]))) - mu[:, l]
             delta_mu = u - G.dot((wada * G).T.dot(u)) + \
                       G.dot(GTWG.dot(linalg.solve(eyer + GTWG, (wada * G).T.dot(u), sym_pos=True)))
 
@@ -139,8 +142,7 @@ def inferpost(data, prior, posterior, param, optim):
             mu[:, l] /= scale
 
         eta = mu.dot(a) + einsum('ijk, ki -> ji', h, b)
-        # noise = var(y[:, :, m] - eta, axis=0, ddof=0)
-        lam = exp((eta + 0.5 * v.dot(a ** 2)).clip(MIN_EXP, MAX_EXP))
+        lam = sexp(eta + 0.5 * v.dot(a ** 2))
         U[:, spike] = lam[:, spike]
         U[:, lfp] = 1 / noise[lfp]
         w[:, :] = U.dot(a.T ** 2)
@@ -152,11 +154,11 @@ def inferpost(data, prior, posterior, param, optim):
 
 
 def inferparam(data, prior, posterior, param, optim):
-    nchannel, ntrial, ntime, lag = data['h'].shape  # neuron, trial, time, lag
-    nlatent, _, rank = prior['chol'].shape  # latent, trial, time, rank
+    nchannel, ntrial, ntime, lag1 = data['h'].shape  # neuron, trial, time, lag + 1
+    nlatent, _, rank = prior['chol'].shape  # latent, time, rank
 
     y = data['y'].reshape((-1, nchannel))  # concatenate trials
-    h = data['h'].reshape((nchannel, -1, lag))  # concatenate trials
+    h = data['h'].reshape((nchannel, -1, lag1))  # concatenate trials
     channel = data['channel']
 
     mu = posterior['mu'].reshape((-1, nlatent))
@@ -166,21 +168,21 @@ def inferparam(data, prior, posterior, param, optim):
     b = param['b']
     noise = param['noise']
 
-    decay = optim['decay']
+    adadecay = optim['adadecay']
     adagrad = optim['adagrad']
     eps = optim['eps']
     accu_grad_a = optim['accu_grad_a']
     accu_grad_b = optim['accu_grad_b']
 
     for n in range(nchannel):
-        eta = mu.dot(a) + einsum('ijk, ki -> ji', h.reshape(nchannel, ntime * ntrial, lag), b)
-        lam = exp((eta + 0.5 * v.dot(a ** 2)).clip(MIN_EXP, MAX_EXP))
+        eta = mu.dot(a) + einsum('ijk, ki -> ji', h, b)
+        lam = sexp(eta + 0.5 * v.dot(a ** 2))
         if channel[n] == 'spike':
             # a
             va = v * a[:, n]  # (ntime, nlatent)
             wv = diag(lam[:, n].dot(v))
             grad_a = mu.T.dot(y[:, n]) - (mu + va).T.dot(lam[:, n])
-            accu_grad_a[:, n] = accumulate(accu_grad_a[:, n], grad_a, decay)
+            accu_grad_a[:, n] = accumulate(accu_grad_a[:, n], grad_a, adadecay)
 
             neghess_a = (mu + va).T.dot(lam[:, n, newaxis] * (mu + va)) + wv
             if adagrad:
@@ -191,7 +193,7 @@ def inferparam(data, prior, posterior, param, optim):
 
             # b
             grad_b = h[n, :].T.dot(y[:, n] - lam[:, n])
-            accu_grad_b[:, n] = accumulate(accu_grad_b[:, n], grad_b, decay)
+            accu_grad_b[:, n] = accumulate(accu_grad_b[:, n], grad_b, adadecay)
             neghess_b = h[n, :].T.dot(lam[:, n, newaxis] * h[n, :])
             if adagrad:
                 b[:, n] += linalg.solve(neghess_b + diag(sqrt(eps + accu_grad_b[:, n])), grad_b, sym_pos=True)
@@ -208,11 +210,11 @@ def inferparam(data, prior, posterior, param, optim):
             b[:, n] = linalg.solve(h[n, :].T.dot(h[n, :]), h[n, :].T.dot(y[:, n] - mu.dot(a[:, n])), sym_pos=True)
         else:
             print('Undefined channel')
-
     noise[:] = var(y - eta, axis=0, ddof=0)
 
 
 def inference(data, prior, posterior, param, optim):
+    print('Inference starting')
 
     # for backtracking
     goodposterior = {'mu': posterior['mu'].copy(),
@@ -271,16 +273,45 @@ def inference(data, prior, posterior, param, optim):
         iter_end = timeit.default_timer()
         elapsed[i, 2] = iter_end - iter_start
 
+        print('Iteration[{}], posterior elapsed: {:.2f}, parameter elapsed: {:.2f}, total elapsed: {:.2f}, ELBO: {:.4f}'.format(i, elapsed[i, 0], elapsed[i, 1], elapsed[i, 2], lb[i]))
+
         i += 1
     infer_end = timeit.default_timer()
     optim['elapsed'] = elapsed[:i, :]
     optim['tot'] = infer_end - infer_start
 
+    print('Inference ending')
+    print('{} iterations, ELBO: {:.4f}, elapsed: {:.2f}, converged: {}'.format(i - 1, lb[i - 1], optim['tot'], optim['converged']))
+
     return lb[:i], posterior, param, optim
 
 
 def multitrials(spike, lfp, sigma, omega, lag=0, r=500, niter=50, iadagrad=5, tol=1e-5):
-    y = dstack(spike, lfp)
+    assert not (spike is None and lfp is None)
+
+    if spike is None:
+        spike = empty((0, 0, 0))
+
+    if lfp is None:
+        lfp = empty((0, 0, 0))
+
+    spike = np.asarray(spike)
+    lfp = np.asarray(lfp)
+
+    if spike.ndim < 3:
+        spike = np.atleast_3d(spike)
+        spike = np.rollaxis(spike, axis=-1)
+    if lfp.ndim < 3:
+        lfp = np.atleast_3d(lfp)
+        lfp = np.rollaxis(lfp, axis=-1)
+
+    if lfp.size == 0:
+        y = spike
+    elif spike.size == 0:
+        y = lfp
+    else:
+        print(spike.shape, lfp.shape)
+        y = dstack((spike, lfp))
     ntrial, ntime, nchannel = y.shape
 
     channel = array(['spike'] * spike.shape[-1] + ['lfp'] * lfp.shape[-1])
@@ -296,7 +327,7 @@ def multitrials(spike, lfp, sigma, omega, lag=0, r=500, niter=50, iadagrad=5, to
     nlatent = sigma.shape[0]
     chol = empty((nlatent, ntime, r), dtype=float)
     for l in range(nlatent):
-        chol[l, :] = ichol_gauss(ntime, omega, r)
+        chol[l, :] = ichol_gauss(ntime, omega[l], r) * sigma[l]
     prior = {'chol': chol}
 
     # initialize posterior
@@ -320,6 +351,11 @@ def multitrials(spike, lfp, sigma, omega, lag=0, r=500, niter=50, iadagrad=5, to
     optim = {'niter': niter,
              'iadagrad': iadagrad,
              'adagrad': False,
+             'adadecay': 0,
+             'eps': 1e-6,
+             'accu_grad_mu': zeros_like(mu),
+             'accu_grad_a': zeros_like(a),
+             'accu_grad_b': zeros_like(b),
              'tol': tol,
              'converged': False}
 
