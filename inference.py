@@ -233,14 +233,17 @@ def inference(data, prior, posterior, param, optim):
     while not optim['converged'] and i < optim['niter']:
         # infer posterior
         iter_start = timeit.default_timer()
+
         post_start = timeit.default_timer()
-        inferpost(data, prior, posterior, param, optim)
+        if optim['infer'] != 'param':
+            inferpost(data, prior, posterior, param, optim)
         post_end = timeit.default_timer()
         elapsed[i, 0] = post_end - post_start
 
         # infer parameter
         param_start = timeit.default_timer()
-        inferparam(data, prior, posterior, param, optim)
+        if optim['infer'] != 'posterior':
+            inferparam(data, prior, posterior, param, optim)
         param_end = timeit.default_timer()
         elapsed[i, 1] = param_end - param_start
 
@@ -286,7 +289,7 @@ def inference(data, prior, posterior, param, optim):
     return lb[:i], posterior, param, optim
 
 
-def multitrials(spike, lfp, sigma, omega, lag=0, r=500, niter=50, iadagrad=5, tol=1e-5):
+def multitrials(spike, lfp, sigma, omega, lag=0, rank=500, niter=50, iadagrad=5, tol=1e-5):
     assert not (spike is None and lfp is None)
 
     if spike is None:
@@ -325,9 +328,9 @@ def multitrials(spike, lfp, sigma, omega, lag=0, r=500, niter=50, iadagrad=5, to
 
     assert sigma.shape == omega.shape
     nlatent = sigma.shape[0]
-    chol = empty((nlatent, ntime, r), dtype=float)
+    chol = empty((nlatent, ntime, rank), dtype=float)
     for l in range(nlatent):
-        chol[l, :] = ichol_gauss(ntime, omega[l], r) * sigma[l]
+        chol[l, :] = ichol_gauss(ntime, omega[l], rank) * sigma[l]
     prior = {'chol': chol}
 
     # initialize posterior
@@ -348,7 +351,9 @@ def multitrials(spike, lfp, sigma, omega, lag=0, r=500, niter=50, iadagrad=5, to
     noise = var(y, axis=0, ddof=0)
     param = {'a': a, 'b': b, 'noise': noise}
 
+    infer = 'both'
     optim = {'niter': niter,
+             'infer': infer,
              'iadagrad': iadagrad,
              'adagrad': False,
              'adadecay': 0,
