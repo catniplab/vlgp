@@ -11,8 +11,7 @@ from scipy.linalg import lstsq
 from numpy.linalg import norm
 
 from link import sexp
-from constant import *
-from algebra import ichol_gauss
+from algebra import ichol_gauss, subspace
 
 
 def elbo(data, prior, posterior, param):
@@ -226,19 +225,24 @@ def inference(data, prior, posterior, param, optim):
 
     lb = empty(optim['niter'], dtype=float)
     elapsed = empty((optim['niter'], 3), dtype=float)
+    loadingangle = empty(optim['niter'], dtype=float) if param.get('truea') is not None else None
+    latentangle = empty(optim['niter'], dtype=float) if data.get('x') is not None else None
 
     lb[0] = elbo(data, prior, posterior, param)
     i = 1
     infer_start = timeit.default_timer()
     while not optim['converged'] and i < optim['niter']:
-        # infer posterior
         iter_start = timeit.default_timer()
 
+        # infer posterior
         post_start = timeit.default_timer()
         if optim['infer'] != 'param':
             inferpost(data, prior, posterior, param, optim)
         post_end = timeit.default_timer()
         elapsed[i, 0] = post_end - post_start
+        x = data.get('x')
+        if latentangle is not None:
+            latentangle[i] = subspace(x.reshape(-1, x.shape[-1]), posterior['mu'].reshape(-1, x.shape[-1]))
 
         # infer parameter
         param_start = timeit.default_timer()
@@ -246,6 +250,9 @@ def inference(data, prior, posterior, param, optim):
             inferparam(data, prior, posterior, param, optim)
         param_end = timeit.default_timer()
         elapsed[i, 1] = param_end - param_start
+        truea = param.get('truea')
+        if loadingangle is not None:
+            loadingangle[i] = subspace(truea.T, param['a'].T)
 
         lb[i] = elbo(data, prior, posterior, param)
         if lb[i] < lb[i - 1]:
@@ -280,16 +287,20 @@ def inference(data, prior, posterior, param, optim):
 
         i += 1
     infer_end = timeit.default_timer()
-    optim['elapsed'] = elapsed[:i, :]
-    optim['tot'] = infer_end - infer_start
 
     print('Inference ending')
-    print('{} iterations, ELBO: {:.4f}, elapsed: {:.2f}, converged: {}'.format(i - 1, lb[i - 1], optim['tot'], optim['converged']))
 
-    return lb[:i], posterior, param, optim
+    stat = {'ELBO': lb[:i], 'elapsed': elapsed[:i, :], 'loadingangle': loadingangle[:i], 'latentangle': latentangle[:i],
+            'totalelapsed': infer_end - infer_start}
+
+    print('{} iterations, ELBO: {:.4f}, elapsed: {:.2f}, converged: {}'.format(i - 1, lb[i - 1], stat['totalelapsed'],
+                                                                               optim['converged']))
+
+    result = {'stat': stat, 'prior': prior, 'posterior': posterior, 'parameter': param, 'optim': optim}
+    return result
 
 
-def multitrials(spike, lfp, sigma, omega, lag=0, rank=500, niter=50, iadagrad=5, tol=1e-5):
+def multitrials(spike, lfp, sigma, omega, x=None, ta=None, tb=None, lag=0, rank=500, niter=50, iadagrad=5, tol=1e-5):
     assert not (spike is None and lfp is None)
 
     if spike is None:
@@ -324,7 +335,7 @@ def multitrials(spike, lfp, sigma, omega, lag=0, rank=500, niter=50, iadagrad=5,
     for n in range(nchannel):
         for m in range(ntrial):
             h[n, m, :] = add_constant(lagmat(y[m, :, n], maxlag=lag))
-    data = {'y': y, 'h': h, 'channel': channel}
+    data = {'x': x, 'y': y, 'h': h, 'channel': channel}
 
     assert sigma.shape == omega.shape
     nlatent = sigma.shape[0]
@@ -349,7 +360,7 @@ def multitrials(spike, lfp, sigma, omega, lag=0, rank=500, niter=50, iadagrad=5,
 
     y = y.reshape((-1, nchannel))
     noise = var(y, axis=0, ddof=0)
-    param = {'a': a, 'b': b, 'noise': noise}
+    param = {'a': a, 'b': b, 'noise': noise, 'truea':ta, 'trueb': tb}
 
     infer = 'both'
     optim = {'niter': niter,
@@ -365,3 +376,27 @@ def multitrials(spike, lfp, sigma, omega, lag=0, rank=500, niter=50, iadagrad=5,
              'converged': False}
 
     return inference(data, prior, posterior, param, optim)
+
+
+def predict(spike, prior, param, optim):
+    spike = np.asarray(spike)
+    if spike.ndim < 3:
+        spike = np.atleast_3d(spike)
+        spike = np.rollaxis(spike, axis=-1)
+    ntrial, ntime, nchannel = spike.shape
+    data = {'y': spike}
+    nlatent = prior['chol'].shape[0]
+
+    fa = FactorAnalysis(n_components=nlatent, svd_method='lapack')
+    mu = fa.fit_transform(spike.reshape((-1, nchannel)))
+    mu -= mu.mean(axis=0)
+    # a = fa.components_ * norm(mu, ord=inf, axis=0, keepdims=True).T
+    mu /= norm(mu, ord=inf, axis=0)
+    mu = mu.reshape((ntrial, ntime, nlatent))
+    posterior = {'mu': mu, 'w': zeros((ntrial, ntime, nlatent)), 'v': zeros((ntrial, ntime, nlatent))}
+
+    optim['infer'] = 'posterior'
+
+    result = inference(data, prior, posterior, param, optim)
+    result['posterior']['mu']
+    return result
