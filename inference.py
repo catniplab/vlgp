@@ -223,10 +223,10 @@ def inference(data, prior, posterior, param, optim):
                  'b': param['b'].copy(),
                  'noise': param['noise'].copy()}
 
-    lb = empty(optim['niter'], dtype=float)
-    elapsed = empty((optim['niter'], 3), dtype=float)
-    loadingangle = empty(optim['niter'], dtype=float) if param.get('truea') is not None else None
-    latentangle = empty(optim['niter'], dtype=float) if data.get('x') is not None else None
+    lb = zeros(optim['niter'], dtype=float)
+    elapsed = zeros((optim['niter'], 3), dtype=float)
+    loadingangle = zeros(optim['niter'], dtype=float) if param.get('truea') is not None else None
+    latentangle = zeros(optim['niter'], dtype=float) if data.get('x') is not None else None
 
     lb[0] = elbo(data, prior, posterior, param)
     i = 1
