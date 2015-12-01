@@ -242,7 +242,9 @@ def inference(data, prior, posterior, param, optim):
         elapsed[i, 0] = post_end - post_start
         x = data.get('x')
         if latentangle is not None:
-            latentangle[i] = subspace(x.reshape(-1, x.shape[-1]), posterior['mu'].reshape(-1, x.shape[-1]))
+            for m in range(x.shape[0]):
+                latentangle[i] = subspace(x.reshape(-1, x.shape[-1]), posterior['mu'].reshape(-1, x.shape[-1]))
+                # latentangle[i, m] = subspace(x[m, :], posterior['mu'][m, :])
 
         # infer parameter
         param_start = timeit.default_timer()
