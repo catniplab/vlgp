@@ -1,4 +1,4 @@
-from numpy import exp
+from numpy import exp, column_stack, roll, atleast_2d
 from numpy import sum, dot
 from numpy import zeros, ones, diag, meshgrid, arange, eye, asarray, atleast_3d, rollaxis
 from scipy.linalg import svd, lstsq
@@ -125,3 +125,24 @@ def rotate(obj, ref):
     """
     return obj.dot(lstsq(obj, ref)[0])
 
+
+def add_constant(x):
+    x = asarray(x)
+    x = column_stack((x, ones((x.shape[0], 1))))
+    return roll(x, 1, 1)
+
+
+def lagmat(x, lag):
+    x = asarray(x)
+    x = atleast_2d(x)
+    nobs, nvar = x.shape
+    dropidx = nvar
+    if lag >= nobs:
+        raise ValueError("lag should be < nobs")
+    lm = zeros((nobs + lag, nvar * (lag + 1)))
+    for k in range(0, int(lag+1)):
+        lm[lag - k:nobs + lag - k, nvar * (lag - k):nvar * (lag - k + 1)] = x
+    startobs = 0
+    stopobs = nobs + lag - k
+
+    return lm[startobs:stopobs, dropidx:]

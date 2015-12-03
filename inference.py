@@ -7,13 +7,13 @@ from numpy import identity, diag, einsum, inner, trace, exp, sum, mean, var, abs
 from numpy import inf, finfo, PINF
 from scipy import linalg
 from sklearn.decomposition.factor_analysis import FactorAnalysis
-from statsmodels.tools import add_constant
 from statsmodels.tsa.tsatools import lagmat
 from scipy.linalg import lstsq
 from numpy.linalg import norm
 
 from link import sexp
 from algebra import ichol_gauss, subspace
+from util import add_constant
 
 
 def elbo(data, prior, posterior, param):
