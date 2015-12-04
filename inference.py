@@ -292,7 +292,8 @@ def inference(data, prior, posterior, param, opt):
         iter_end = timeit.default_timer()
         elapsed[i, 2] = iter_end - iter_start
 
-        print('Iteration[{}], posterior elapsed: {:.2f}, parameter elapsed: {:.2f}, total elapsed: {:.2f}, ELBO: {:.4f}'.format(i, elapsed[i, 0], elapsed[i, 1], elapsed[i, 2], lb[i]))
+        if opt['verbose']:
+            print('Iteration[{}], posterior elapsed: {:.2f}, parameter elapsed: {:.2f}, total elapsed: {:.2f}, ELBO: {:.4f}'.format(i, elapsed[i, 0], elapsed[i, 1], elapsed[i, 2], lb[i]))
 
         i += 1
     infer_end = timeit.default_timer()
@@ -310,7 +311,8 @@ def inference(data, prior, posterior, param, opt):
     return result
 
 
-def multitrials(spike, lfp, sigma, omega, x=None, ta=None, tb=None, lag=0, rank=500, niter=50, iadagrad=5, tol=1e-5):
+def multitrials(spike, lfp, sigma, omega, x=None, ta=None, tb=None, lag=0, rank=500, niter=50, iadagrad=5, tol=1e-5,
+                verbose=True):
     assert not (spike is None and lfp is None)
 
     if spike is None:
@@ -381,7 +383,8 @@ def multitrials(spike, lfp, sigma, omega, x=None, ta=None, tb=None, lag=0, rank=
            'accu_grad_mu': zeros_like(mu),
            'accu_grad_a': zeros_like(a),
            'accu_grad_b': zeros_like(b),
-           'tol': tol}
+           'tol': tol,
+           'verbose': verbose}
 
     output = inference(data, prior, posterior, param, opt)
     result = {'ELBO': output['stat']['ELBO'], 'LL': output['stat']['LL'], 'elapsed': output['stat']['elapsed'],
