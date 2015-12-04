@@ -2,7 +2,7 @@ import timeit
 import warnings
 
 import numpy as np
-from numpy import empty, empty_like, full, zeros, zeros_like, newaxis, tile, dstack, array, arange, array_equal, asarray
+from numpy import empty, empty_like, full, zeros, zeros_like, newaxis, tile, dstack, array, arange, array_equal, asarray, atleast_3d
 from numpy import identity, diag, einsum, inner, trace, exp, sum, mean, var, abs, sqrt, log
 from numpy import inf, finfo, PINF
 from scipy import linalg
@@ -13,7 +13,7 @@ from numpy.linalg import norm
 
 from link import sexp
 from algebra import ichol_gauss, subspace
-from util import add_constant
+from util import add_constant, rotate
 
 
 def elbo(data, prior, posterior, param):
@@ -38,7 +38,7 @@ def elbo(data, prior, posterior, param):
     spike = channel == 'spike'
     lfp = channel == 'lfp'
 
-    eta = mu.dot(a) + einsum('ijk, ki -> ji', h.reshape(nchannel, ntime * ntrial, lag), b)
+    eta = mu.dot(a) + einsum('ijk, ki -> ji', h.reshape((nchannel, ntime * ntrial, lag)), b)
     lam = sexp(eta + 0.5 * v.dot(a ** 2))
 
     llspike = sum(y[:, spike] * eta[:, spike] - lam[:, spike])
@@ -248,7 +248,9 @@ def inference(data, prior, posterior, param, opt):
         elapsed[i, 0] = post_end - post_start
         x = data.get('x')
         if x is not None:
-            latentAngle[i] = subspace(x.reshape(-1, x.shape[-1]), posterior['mu'].reshape(-1, x.shape[-1]))
+            latentAngle[i] = subspace(rotate(posterior['mu'].reshape((-1, posterior['mu'].shape[-1])),
+                                             x.reshape((-1, x.shape[-1]))),
+                                      x.reshape((-1, x.shape[-1])))
 
         # infer parameter
         param_start = timeit.default_timer()
@@ -504,6 +506,77 @@ def gpvb(spike, lfp,
     ntrial = spike.shape[0] if spike.ndim == 3 else 1
     if lfp is None:
         lfp = empty((ntrial, 0, 0))
+
+    if testidx is None:
+        training = makedataset(spike, lfp, x, lag)
+        result = multitrials(spike, lfp, sigma, omega, x, truea, trueb, lag, rank, niter, adafter, tol)
+        model = {'training': training, 'prior': result['prior'], 'parameter': result['parameter']}
+        model['training']['stat'] = result['stat']
+        model['training']['mu'] = result['posterior']['mu']
+        model['training']['w'] = result['posterior']['w']
+    else:
+        testidx = asarray(testidx)
+        testmask = full(ntrial, fill_value=False, dtype=bool)
+        testmask[testidx] = True
+        training = makedataset(spike[~testmask, :, :], lfp[~testmask, :, :], x, lag)
+        test = makedataset(spike[testmask, :, :], lfp[testmask, :, :], x, lag)
+
+        result = multitrials(spike[~testmask, :, :], lfp[~testmask, :, :], sigma, omega, x[~testmask, :, :] if x is not None else None, truea, trueb, lag, rank,
+                             niter, adafter, tol)
+        model = {'training': training, 'prior': result['prior'], 'parameter': result['parameter'], 'test': test}
+        model['training']['stat'] = result['stat']
+        model['training']['mu'] = result['posterior']['mu']
+        model['training']['w'] = result['posterior']['w']
+        leaveoneout(model, result['opt'])
+
+    return model
+
+
+def vLGP(obs, channel,
+         sigma, omega, rank=500, x=None,
+         lag=0, truea=None, trueb=None,
+         runtest=False,
+         niter=50, tol=1e-5, adafter=5, adadecay=0, adaeps=1e-6):
+    """vLGP
+
+    Args:
+        obs: observation array (trial, time, channel)
+        channel: channel type array, 'spike' or 'lfp'
+        sigma: prior standard deviation array
+        omega: prior scale array
+        rank: incomplete Cholesky decomposition rank of prior
+        x: true latent [optional]
+        lag: autoregression lag
+        truea: true loading matrix (latent, channel) [optinal]
+        trueb: true regression coefficients (*, channel) [optional]
+        runtest: leave-one-out
+        niter: max no. of iterations
+        tol: convergence criterion
+        adafter: when to start using adagrad
+        adadecay: exponential decay of adagrad, 0 means accumulate all previous gradients
+        adaeps: epsilon for adagrad avoiding zero gradient.
+
+    Returns:
+        model: data and inference
+        stat: statistics of algorithm
+    """
+
+    obs = asarray(obs)
+    if obs.ndim == 1:
+        obs = obs[..., None]
+    if obs.ndim == 2:
+        obs = obs[None, ...]
+    ntrial, ntime, nchannel = obs.shape
+    nlatent = sigma.shape[0]
+    chol = empty((nlatent, ntime, rank))
+    for i in range(nlatent):
+        chol[i, :] = ichol_gauss(ntime, omega[i], rank) * sigma[i]
+
+    model = {'obs': obs, 'channel': channel,  # observation
+             'x': x, 'sigma': sigma, 'omega': omega, 'chol': chol,  # prior
+             'alphahat': None, 'betahat': None, 'noisehat': None, 'alpha': truea, 'beta': None, 'noise': None,  # parameter
+             'mu': None, 'w': None, 'v': None  # posterior
+             }
 
     if testidx is None:
         training = makedataset(spike, lfp, x, lag)
