@@ -45,7 +45,9 @@ def elbo(data, prior, posterior, param):
 
     lllfp = - 0.5 * sum(((y[:, lfp] - eta[:, lfp]) ** 2 + v.dot(a[:, lfp] ** 2)) / noise[lfp] + log(noise[lfp]))
 
-    lb = llspike + lllfp
+    ll = llspike + lllfp
+
+    lb = ll
 
     for m in range(ntrial):
         mu = posterior['mu'][m, :, :]
@@ -60,7 +62,7 @@ def elbo(data, prior, posterior, param):
 
             lb += -0.5 * inner(mu_div_G, mu_div_G) - 0.5 * tr + 0.5 * lndet
 
-    return lb
+    return lb, ll
 
 
 def accumulate(accu, grad, decay=0):
@@ -226,11 +228,12 @@ def inference(data, prior, posterior, param, opt):
                  'noise': param['noise'].copy()}
 
     lb = zeros(opt['niter'], dtype=float)
+    ll = zeros(opt['niter'], dtype=float)
     elapsed = zeros((opt['niter'], 3), dtype=float)
     loadingAngle = zeros(opt['niter'], dtype=float)
     latentAngle = zeros(opt['niter'], dtype=float)
 
-    lb[0] = elbo(data, prior, posterior, param)
+    lb[0], ll[0] = elbo(data, prior, posterior, param)
     i = 1
     converged = False
     infer_start = timeit.default_timer()
@@ -245,8 +248,7 @@ def inference(data, prior, posterior, param, opt):
         elapsed[i, 0] = post_end - post_start
         x = data.get('x')
         if x is not None:
-            for m in range(x.shape[0]):
-                latentAngle[i] = subspace(x.reshape(-1, x.shape[-1]), posterior['mu'].reshape(-1, x.shape[-1]))
+            latentAngle[i] = subspace(x.reshape(-1, x.shape[-1]), posterior['mu'].reshape(-1, x.shape[-1]))
 
         # infer parameter
         param_start = timeit.default_timer()
@@ -258,7 +260,7 @@ def inference(data, prior, posterior, param, opt):
         if truea is not None:
             loadingAngle[i] = subspace(truea.T, param['a'].T)
 
-        lb[i] = elbo(data, prior, posterior, param)
+        lb[i], ll[i] = elbo(data, prior, posterior, param)
         if lb[i] < lb[i - 1]:
             # backtracking
             posterior['mu'][:] = goodposterior['mu'][:]
@@ -267,6 +269,7 @@ def inference(data, prior, posterior, param, opt):
             param['a'][:] = goodparam['a'][:]
             param['b'][:] = goodparam['b'][:]
             param['noise'][:] = param['noise'][:]
+            lb[i] = lb[i - 1]
             print('ELBO decreased. Backtracking.')
 
             if i > opt['iadagrad'] and not opt['adagrad']:
@@ -295,7 +298,7 @@ def inference(data, prior, posterior, param, opt):
     print('Inference ending\n')
 
     stat = {'ELBO': lb[:i], 'elapsed': elapsed[:i, :], 'loadingAngle': loadingAngle[:i], 'latentAngle': latentAngle[:i],
-            'totalElapsed': infer_end - infer_start, 'converged': converged}
+            'totalElapsed': infer_end - infer_start, 'converged': converged, 'LL': ll[:i]}
 
     print('{} iterations, ELBO: {:.4f}, elapsed: {:.2f}, converged: {}\n'.format(i - 1, lb[i - 1], stat['totalElapsed'],
                                                                                  stat['converged']))
@@ -516,7 +519,7 @@ def gpvb(spike, lfp,
         training = makedataset(spike[~testmask, :, :], lfp[~testmask, :, :], x, lag)
         test = makedataset(spike[testmask, :, :], lfp[testmask, :, :], x, lag)
 
-        result = multitrials(spike[~testmask, :, :], lfp[~testmask, :, :], sigma, omega, x[~testmask, :, :], truea, trueb, lag, rank,
+        result = multitrials(spike[~testmask, :, :], lfp[~testmask, :, :], sigma, omega, x[~testmask, :, :] if x is not None else None, truea, trueb, lag, rank,
                              niter, adafter, tol)
         model = {'training': training, 'prior': result['prior'], 'parameter': result['parameter'], 'test': test}
         model['training']['stat'] = result['stat']
