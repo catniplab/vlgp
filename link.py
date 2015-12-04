@@ -1,15 +1,20 @@
-from numpy import vectorize, exp, finfo
-from constant import *
+from numpy import vectorize, exp, finfo, log1p, inf
+
+MIN_EXP = -20
+MAX_EXP = 20
 
 
-def rectlin(eta):
-    vfun = vectorize(lambda x: x if x > 0 else finfo(float).tiny)
-    return vfun(eta)
+def rectlin(x):
+    return x.clip(0, inf)
 
 
-def sexp(eta):
-    return exp(eta.clip(MIN_EXP, MAX_EXP))
+def sexp(x):
+    return exp(x.clip(MIN_EXP, MAX_EXP))
 
 
-def identity(eta):
-    return eta
+def identity(x):
+    return x
+
+
+def log1exp(x):
+    return log1p(exp(x))

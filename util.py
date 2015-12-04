@@ -1,4 +1,4 @@
-from numpy import exp, column_stack, roll, atleast_2d
+from numpy import exp, column_stack, roll, atleast_2d, pi
 from numpy import sum, dot
 from numpy import zeros, ones, diag, meshgrid, arange, eye, asarray, atleast_3d, rollaxis
 from scipy.linalg import svd, lstsq
@@ -146,3 +146,11 @@ def lagmat(x, lag):
     stopobs = nobs + lag - k
 
     return lm[startobs:stopobs, dropidx:]
+
+
+def rad2deg(r):
+    return r * 180 / pi
+
+
+def deg2rad(d):
+    return d * pi / 180

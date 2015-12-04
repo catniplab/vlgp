@@ -299,8 +299,9 @@ def inference(data, prior, posterior, param, opt):
 
     print('Inference ending\n')
 
-    stat = {'ELBO': lb[:i], 'elapsed': elapsed[:i, :], 'loadingAngle': loadingAngle[:i], 'latentAngle': latentAngle[:i],
-            'totalElapsed': infer_end - infer_start, 'converged': converged, 'LL': ll[:i]}
+    stat = {'ELBO': lb[:i], 'elapsed': elapsed[1:i, :], 'loadingAngle': loadingAngle[1:i],
+            'latentAngle': latentAngle[1:i], 'totalElapsed': infer_end - infer_start, 'converged': converged,
+            'LL': ll[:i]}
 
     print('{} iterations, ELBO: {:.4f}, elapsed: {:.2f}, converged: {}\n'.format(i - 1, lb[i - 1], stat['totalElapsed'],
                                                                                  stat['converged']))
@@ -382,7 +383,15 @@ def multitrials(spike, lfp, sigma, omega, x=None, ta=None, tb=None, lag=0, rank=
            'accu_grad_b': zeros_like(b),
            'tol': tol}
 
-    return inference(data, prior, posterior, param, opt)
+    output = inference(data, prior, posterior, param, opt)
+    result = {'ELBO': output['stat']['ELBO'], 'LL': output['stat']['LL'], 'elapsed': output['stat']['elapsed'],
+              'latentAngle': output['stat']['latentAngle'], 'loadingAngle': output['stat']['loadingAngle'],
+              'mu': output['posterior']['mu'], 'w': output['posterior']['w'], 'v': output['posterior']['v'],
+              'ahat': output['parameter']['a'], 'bhat': output['parameter']['b'],
+              'nhat': output['parameter']['noise'],
+              'sigma': sigma, 'omega': omega, 'chol': prior['chol'],
+              'y': data['y'], 'channel': data['channel'], 'x': data['x']}
+    return result
 
 
 def leaveoneout(model, opt):
@@ -516,7 +525,7 @@ def gpvb(spike, lfp,
         model['training']['w'] = result['posterior']['w']
     else:
         testidx = asarray(testidx)
-        testmask = full(ntrial, fill_value=False, dtype=bool)
+        testmask = full(ntrial, fill_value=False, dtype='bool')
         testmask[testidx] = True
         training = makedataset(spike[~testmask, :, :], lfp[~testmask, :, :], x, lag)
         test = makedataset(spike[testmask, :, :], lfp[testmask, :, :], x, lag)
@@ -577,27 +586,5 @@ def vLGP(obs, channel,
              'alphahat': None, 'betahat': None, 'noisehat': None, 'alpha': truea, 'beta': None, 'noise': None,  # parameter
              'mu': None, 'w': None, 'v': None  # posterior
              }
-
-    if testidx is None:
-        training = makedataset(spike, lfp, x, lag)
-        result = multitrials(spike, lfp, sigma, omega, x, truea, trueb, lag, rank, niter, adafter, tol)
-        model = {'training': training, 'prior': result['prior'], 'parameter': result['parameter']}
-        model['training']['stat'] = result['stat']
-        model['training']['mu'] = result['posterior']['mu']
-        model['training']['w'] = result['posterior']['w']
-    else:
-        testidx = asarray(testidx)
-        testmask = full(ntrial, fill_value=False, dtype=bool)
-        testmask[testidx] = True
-        training = makedataset(spike[~testmask, :, :], lfp[~testmask, :, :], x, lag)
-        test = makedataset(spike[testmask, :, :], lfp[testmask, :, :], x, lag)
-
-        result = multitrials(spike[~testmask, :, :], lfp[~testmask, :, :], sigma, omega, x[~testmask, :, :] if x is not None else None, truea, trueb, lag, rank,
-                             niter, adafter, tol)
-        model = {'training': training, 'prior': result['prior'], 'parameter': result['parameter'], 'test': test}
-        model['training']['stat'] = result['stat']
-        model['training']['mu'] = result['posterior']['mu']
-        model['training']['w'] = result['posterior']['w']
-        leaveoneout(model, result['opt'])
 
     return model
