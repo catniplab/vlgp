@@ -2,7 +2,7 @@ def dynplot(x, ncol=4, figsize=None):
     import matplotlib as mpl
     import matplotlib.pyplot as plt
     from numpy import asarray, atleast_3d, rollaxis
-    from mathf import ceil
+    from math import ceil
 
     x = asarray(x)
     if x.ndim < 3:
@@ -15,12 +15,17 @@ def dynplot(x, ncol=4, figsize=None):
     if ntrial < ncol:
         ncol = ntrial
     nrow = ceil(ntrial / ncol)
+
+    ymin = x.min() * 1.1
+    ymax = x.max() * 1.1
+
     plt.figure(figsize=(ncol * figsize[0], figsize[1] * nrow))
     for m in range(ntrial):
         i = m // ncol
         j = m % ncol
         ax = plt.subplot2grid((nrow, ncol), (i, j))
         ax.plot(x[m, :])
+        plt.ylim([ymin, ymax])
         plt.title('Trial {}'.format(m))
     plt.tight_layout()
 
