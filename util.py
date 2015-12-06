@@ -2,8 +2,6 @@ from numpy import exp, column_stack, roll, atleast_2d, pi
 from numpy import sum, dot
 from numpy import zeros, ones, diag, meshgrid, arange, eye, asarray, atleast_3d, rollaxis
 from scipy.linalg import svd, lstsq
-from statsmodels.tools import add_constant
-from statsmodels.tsa.tsatools import lagmat
 
 
 def makeregressor(obs, p):
@@ -127,12 +125,29 @@ def rotate(obj, ref):
 
 
 def add_constant(x):
+    """Add an all-one column to matrix
+
+    Args:
+        x: matrix
+
+    Returns:
+
+    """
     x = asarray(x)
     x = column_stack((x, ones((x.shape[0], 1))))
     return roll(x, 1, 1)
 
 
 def lagmat(x, lag):
+    """Make autoregression matrix
+
+    Args:
+        x: vector
+        lag:
+
+    Returns:
+
+    """
     x = asarray(x)
     x = atleast_2d(x)
     nobs, nvar = x.shape
@@ -154,3 +169,16 @@ def rad2deg(r):
 
 def deg2rad(d):
     return d * pi / 180
+
+
+def align(x):
+    x = asarray(x)
+    ax = x.copy()
+    if ax.ndim < 3:
+        return ax
+    else:
+        ntrial = ax.shape[0]
+        for i in range(1, ntrial):
+            diff = ax[i - 1, -1, :] - ax[i, 0, :]
+            ax[i, :, :] += diff
+    return ax

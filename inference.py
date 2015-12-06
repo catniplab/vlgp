@@ -12,7 +12,7 @@ from scipy.linalg import lstsq
 from numpy.linalg import norm
 
 from link import sexp
-from algebra import ichol_gauss, subspace
+from mathf import ichol_gauss, subspace
 from util import add_constant, rotate
 
 

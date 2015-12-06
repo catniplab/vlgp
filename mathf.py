@@ -1,9 +1,29 @@
 import warnings
-from numpy import sqrt, exp
 from numpy import sum
 from numpy import zeros, ones, arange
 from numpy.core.umath import arcsin
 from scipy.linalg import orth, norm
+from numpy import vectorize, exp, finfo, log1p, inf, sqrt
+
+
+MIN_EXP = -20
+MAX_EXP = 20
+
+
+def rectlin(x):
+    return x.clip(0, inf)
+
+
+def sexp(x):
+    return exp(x.clip(MIN_EXP, MAX_EXP))
+
+
+def identity(x):
+    return x
+
+
+def log1exp(x):
+    return log1p(exp(x))
 
 
 def ichol_gauss(n, omega, r, tol=1e-6):
