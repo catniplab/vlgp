@@ -522,14 +522,14 @@ def makeopt(infer='both', niter=50, iadagrad=5, adadecay=0, adaeps=1e-6, tol=1e-
     return opt
 
 
-def gpvb(spike, lfp,
-         sigma, omega, rank=500,
-         x=None,
-         lag=0,
-         truea=None, trueb=None,
-         testidx=None,
-         niter=50, tol=1e-5,
-         adafter=5, adadecay=0, adaeps=1e-6):
+def predict(spike, lfp,
+            sigma, omega, rank=500,
+            x=None,
+            lag=0,
+            truea=None, trueb=None,
+            testidx=None,
+            niter=50, tol=1e-5,
+            adafter=5, adadecay=0, adaeps=1e-6):
     ntrial = spike.shape[0] if spike.ndim == 3 else 1
     if lfp is None:
         lfp = empty((ntrial, 0, 0))
@@ -601,7 +601,7 @@ def vLGP(obs, channel,
 
     model = {'obs': obs, 'channel': channel,  # observation
              'x': x, 'sigma': sigma, 'omega': omega, 'chol': chol,  # prior
-             'alphahat': None, 'betahat': None, 'noisehat': None, 'alpha': truea, 'beta': None, 'noise': None,  # parameter
+             'ahat': None, 'bhat': None, 'noisehat': None, 'a': truea, 'b': None, 'noise': None,  # parameter
              'mu': None, 'w': None, 'v': None  # posterior
              }
 

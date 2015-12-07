@@ -34,7 +34,7 @@ def rasterplot(spike, ncol=4, figsize=None, margin=0.1):
     import matplotlib as mpl
     import matplotlib.pyplot as plt
     from numpy import asarray, atleast_3d, rollaxis, arange
-    from mathf import ceil
+    from math import ceil
 
     spike = asarray(spike)
     if spike.ndim < 3:
