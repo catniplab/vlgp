@@ -217,7 +217,8 @@ def inferparam(data, prior, posterior, param, optim):
 
 
 def inference(data, prior, posterior, param, opt):
-    print('\nInference starting')
+    if opt['verbose']:
+        print('\nInference starting')
 
     # for backtracking
     goodposterior = {'mu': posterior['mu'].copy(),
@@ -233,7 +234,19 @@ def inference(data, prior, posterior, param, opt):
     loadingAngle = zeros(opt['niter'], dtype=float)
     latentAngle = zeros(opt['niter'], dtype=float)
 
+    x = data.get('x')
+    alpha = param.get('truea')
+
     lb[0], ll[0] = elbo(data, prior, posterior, param)
+    if alpha is not None:
+        loadingAngle[0] = subspace(alpha.T, param['a'].T)
+    if x is not None:
+        rotated = empty_like(x)
+        # rotate trial by trial
+        for m in range(x.shape[0]):
+            rotated[m, :] = rotate(add_constant(posterior['mu'][m, :]), x[m, :])
+        latentAngle[0] = subspace(rotated.reshape((-1, x.shape[-1])), x.reshape((-1, x.shape[-1])))
+
     i = 1
     converged = False
     infer_start = timeit.default_timer()
@@ -246,11 +259,10 @@ def inference(data, prior, posterior, param, opt):
             inferpost(data, prior, posterior, param, opt)
         post_end = timeit.default_timer()
         elapsed[i, 0] = post_end - post_start
-        x = data.get('x')
         if x is not None:
-            latentAngle[i] = subspace(rotate(posterior['mu'].reshape((-1, posterior['mu'].shape[-1])),
-                                             x.reshape((-1, x.shape[-1]))),
-                                      x.reshape((-1, x.shape[-1])))
+            for m in range(x.shape[0]):
+                rotated[m, :] = rotate(add_constant(posterior['mu'][m, :]), x[m, :])
+            latentAngle[i] = subspace(rotated.reshape((-1, x.shape[-1])), x.reshape((-1, x.shape[-1])))
 
         # infer parameter
         param_start = timeit.default_timer()
@@ -258,9 +270,8 @@ def inference(data, prior, posterior, param, opt):
             inferparam(data, prior, posterior, param, opt)
         param_end = timeit.default_timer()
         elapsed[i, 1] = param_end - param_start
-        truea = param.get('truea')
-        if truea is not None:
-            loadingAngle[i] = subspace(truea.T, param['a'].T)
+        if alpha is not None:
+            loadingAngle[i] = subspace(alpha.T, param['a'].T)
 
         lb[i], ll[i] = elbo(data, prior, posterior, param)
         if lb[i] < lb[i - 1]:
@@ -272,11 +283,13 @@ def inference(data, prior, posterior, param, opt):
             param['b'][:] = goodparam['b'][:]
             param['noise'][:] = param['noise'][:]
             lb[i] = lb[i - 1]
-            print('ELBO decreased. Backtracking.')
+            if opt['verbose']:
+                print('ELBO decreased. Backtracking.')
 
             if i > opt['iadagrad'] and not opt['adagrad']:
                 opt['adagrad'] = True
-                print('Adagrad enabled.')
+                if opt['verbose']:
+                    print('Hessian adjustment enabled.')
             else:
                 converged = True
         elif abs(lb[i] - lb[i-1]) < opt['tol'] * abs(lb[i-1]):
@@ -293,15 +306,17 @@ def inference(data, prior, posterior, param, opt):
         elapsed[i, 2] = iter_end - iter_start
 
         if opt['verbose']:
-            print('Iteration[{}], posterior elapsed: {:.2f}, parameter elapsed: {:.2f}, total elapsed: {:.2f}, ELBO: {:.4f}'.format(i, elapsed[i, 0], elapsed[i, 1], elapsed[i, 2], lb[i]))
+            print('[{}], posterior elapsed: {:.2f}, parameter elapsed: {:.2f}, '
+                  'ELBO: {:.4f}, LL: {:.4f}'.format(i, elapsed[i, 0], elapsed[i, 1], elapsed[i, 2], lb[i], ll[i]))
 
         i += 1
     infer_end = timeit.default_timer()
 
-    print('Inference ending\n')
+    if opt['verbose']:
+        print('Inference ending\n')
 
-    stat = {'ELBO': lb[:i], 'elapsed': elapsed[1:i, :], 'loadingAngle': loadingAngle[1:i],
-            'latentAngle': latentAngle[1:i], 'totalElapsed': infer_end - infer_start, 'converged': converged,
+    stat = {'ELBO': lb[:i], 'elapsed': elapsed[:i, :], 'loadingAngle': loadingAngle[:i],
+            'latentAngle': latentAngle[:i], 'totalElapsed': infer_end - infer_start, 'converged': converged,
             'LL': ll[:i]}
 
     print('{} iterations, ELBO: {:.4f}, elapsed: {:.2f}, converged: {}\n'.format(i - 1, lb[i - 1], stat['totalElapsed'],
