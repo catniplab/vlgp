@@ -6,34 +6,35 @@ from numpy import empty, empty_like, full, zeros, zeros_like, newaxis, tile, dst
 from numpy import identity, diag, einsum, inner, trace, exp, sum, mean, var, abs, sqrt, log
 from numpy import inf, finfo, PINF
 from scipy import linalg
+from scipy.optimize import minimize
+from scipy.stats import stats
 from sklearn.decomposition.factor_analysis import FactorAnalysis
 from statsmodels.tsa.tsatools import lagmat
 from scipy.linalg import lstsq
-from numpy.linalg import norm
-
+from numpy.linalg import norm, slogdet
 from link import sexp
 from mathf import ichol_gauss, subspace
 from util import add_constant, rotate
 
 
-def elbo(data, prior, posterior, param):
-    nchannel, ntrial, ntime, lag = data['h'].shape  # neuron, trial, time, lag
-    nlatent, _, rank = prior['chol'].shape  # latent, trial, time, rank
+def elbo(obj):
+    nchannel, ntrial, ntime, lag = obj['h'].shape  # neuron, trial, time, lag
+    nlatent, _, rank = obj['chol'].shape  # latent, time, rank
 
     eyer = identity(rank)
 
-    y = data['y'].reshape((-1, nchannel))  # concatenate trials
-    h = data['h'].reshape((nchannel, -1, lag))  # concatenate trials
-    channel = data['channel']
+    y = obj['y'].reshape((-1, nchannel))  # concatenate trials
+    h = obj['h'].reshape((nchannel, -1, lag))  # concatenate trials
+    channel = obj['channel']
 
-    chol = prior['chol']
+    chol = obj['chol']
 
-    mu = posterior['mu'].reshape((-1, nlatent))
-    v = posterior['v'].reshape((-1, nlatent))
+    mu = obj['mu'].reshape((-1, nlatent))
+    v = obj['v'].reshape((-1, nlatent))
 
-    a = param['a']
-    b = param['b']
-    noise = param['noise']
+    a = obj['a']
+    b = obj['b']
+    noise = obj['noise']
 
     spike = channel == 'spike'
     lfp = channel == 'lfp'
@@ -49,24 +50,24 @@ def elbo(data, prior, posterior, param):
 
     lb = ll
 
-    for m in range(ntrial):
-        mu = posterior['mu'][m, :, :]
-        w = posterior['w'][m, :, :]
+    for itrial in range(ntrial):
+        mu = obj['mu'][itrial, :]
+        w = obj['w'][itrial, :]
         for l in range(nlatent):
             G = chol[l, :]
-            GTWG = G.T.dot(w[:, l].reshape((ntime, 1)) * G)
-            A = GTWG.dot(linalg.solve(eyer + GTWG, GTWG, sym_pos=True))
-            mu_div_G = linalg.lstsq(G, mu[:, l])[0]
-            tr = ntime - trace(GTWG) + trace(A)
-            lndet = np.linalg.slogdet(eyer - GTWG + A)[1]
+            GtWG = G.T.dot(w[:, l].reshape((ntime, 1)) * G)
+            A = GtWG.dot(linalg.solve(eyer + GtWG, GtWG, sym_pos=True))
+            G_mldiv_mu = linalg.lstsq(G, mu[:, l])[0]
+            tr = ntime - trace(GtWG) + trace(A)
+            lndet = slogdet(eyer - GtWG + A)[1]
 
-            lb += -0.5 * inner(mu_div_G, mu_div_G) - 0.5 * tr + 0.5 * lndet
+            lb += -0.5 * inner(G_mldiv_mu, G_mldiv_mu) - 0.5 * tr + 0.5 * lndet
 
     return lb, ll
 
 
 def accumulate(accu, grad, decay=0):
-    """adagrad
+    """Accumulate gradient for Hessian adjustment
 
     Args:
         accu: accumulation matrix
@@ -82,22 +83,22 @@ def accumulate(accu, grad, decay=0):
         return accu + grad ** 2
 
 
-def inferpost(data, prior, posterior, param, optim):
-    nchannel, ntrial, ntime, lag = data['h'].shape  # neuron, trial, time, lag
-    nlatent, _, rank = prior['chol'].shape  # latent, time, rank
+def inferpost(obj, opt):
+    nchannel, ntrial, ntime, lag = obj['h'].shape  # neuron, trial, time, lag
+    nlatent, _, rank = obj['chol'].shape  # latent, time, rank
 
-    channel = data['channel']
+    channel = obj['channel']
 
-    chol = prior['chol']
+    chol = obj['chol']
 
-    a = param['a']
-    b = param['b']
-    noise = param['noise']
+    a = obj['a']
+    b = obj['b']
+    noise = obj['noise']
 
-    accu_grad_mu = optim['accu_grad_mu']
-    adadecay = optim['adadecay']
-    adagrad = optim['adagrad']
-    eps = optim['eps']
+    accu_grad_mu = opt['accu_grad_mu']
+    decay = opt['decay']
+    adjhess = opt['adjhess']
+    eps = opt['eps']
 
     spike = channel == 'spike'
     lfp = channel == 'lfp'
@@ -106,270 +107,143 @@ def inferpost(data, prior, posterior, param, optim):
     res = empty((ntime, nchannel), dtype=float)
     U = empty((ntime, nchannel), dtype=float)
 
-    for m in range(ntrial):
+    for itrial in range(ntrial):
         # trial-wise
-        y = data['y'][m, :, :]
-        h = data['h'][:, m, :, :]
-        mu = posterior['mu'][m, :, :]
-        w = posterior['w'][m, :, :]
-        v = posterior['v'][m, :, :]
+        y = obj['y'][itrial, :]
+        h = obj['h'][:, itrial, :, :]
+        mu = obj['mu'][itrial, :]
+        w = obj['w'][itrial, :]
+        v = obj['v'][itrial, :]
+        L = obj['L'][itrial, :]
 
         # eta = mu.dot(a) + einsum('ijk, ki -> ji', h, b)  # (neuron, time, lag) . (lag, neuron)
         # lam = exp((eta + 0.5 * v.dot(a ** 2)).clip(MIN_EXP, MAX_EXP))
-        for l in range(nlatent):
+        for ilatent in range(nlatent):
             eta = mu.dot(a) + einsum('ijk, ki -> ji', h, b)  # (neuron, time, lag) . (lag, neuron)
             lam = sexp(eta + 0.5 * v.dot(a ** 2))
-            G = chol[l, :, :]
-            grad_mu = (y[:, spike] - lam[:, spike]).dot(a[l, spike]) + \
+            G = chol[ilatent, :, :]
+            grad_mu = (y[:, spike] - lam[:, spike]).dot(a[ilatent, spike]) + \
                       ((y[:, lfp] - eta[:, lfp]) /
-                       noise[lfp]).dot(a[l, lfp]) - linalg.lstsq(G.T, linalg.lstsq(G, mu[:, l])[0])[0]
+                       noise[lfp]).dot(a[ilatent, lfp]) - linalg.lstsq(G.T, linalg.lstsq(G, mu[:, ilatent])[0])[0]
 
-            accu_grad_mu[m, :, l] = accumulate(accu_grad_mu[m, :, l], grad_mu, adadecay)
+            accu_grad_mu[itrial, :, ilatent] = accumulate(accu_grad_mu[itrial, :, ilatent], grad_mu, decay)
 
-            if adagrad:
-                wada = (w[:, l] + sqrt(eps + accu_grad_mu[m, :, l])).reshape((ntime, 1))  # adjusted by adagrad
+            if adjhess:
+                wadj = (w[:, ilatent] + sqrt(eps + accu_grad_mu[itrial, :, ilatent])).reshape((ntime, 1))  # adjusted Hessian
             else:
-                wada = w[:, l].reshape((ntime, 1))
-            GTWG = G.T.dot(wada * G)
+                wadj = w[:, ilatent].reshape((ntime, 1))
+            GtWG = G.T.dot(wadj * G)
 
             res[:, spike] = y[:, spike] - lam[:, spike]
             res[:, lfp] = (y[:, lfp] - eta[:, lfp]) / noise[lfp]
 
-            u = G.dot(G.T.dot(res.dot(a[l, :]))) - mu[:, l]
-            delta_mu = u - G.dot((wada * G).T.dot(u)) + \
-                      G.dot(GTWG.dot(linalg.solve(eyer + GTWG, (wada * G).T.dot(u), sym_pos=True)))
+            u = G.dot(G.T.dot(res.dot(a[ilatent, :]))) - mu[:, ilatent]
+            delta_mu = u - G.dot((wadj * G).T.dot(u)) + \
+                      G.dot(GtWG.dot(linalg.solve(eyer + GtWG, (wadj * G).T.dot(u), sym_pos=True)))
 
-            mu[:, l] += delta_mu
-            mu[:, l] -= mean(mu[:, l])
-            scale = linalg.norm(mu[:, l], ord=inf)
-            mu[:, l] /= scale
+            mu[:, ilatent] += delta_mu
+            mu[:, ilatent] -= mean(mu[:, ilatent])
+            scale = linalg.norm(mu[:, ilatent], ord=inf)
+            mu[:, ilatent] /= scale
 
         eta = mu.dot(a) + einsum('ijk, ki -> ji', h, b)
         lam = sexp(eta + 0.5 * v.dot(a ** 2))
         U[:, spike] = lam[:, spike]
         U[:, lfp] = 1 / noise[lfp]
         w[:, :] = U.dot(a.T ** 2)
-        for l in range(nlatent):
-            G = chol[l, :, :]
-            GTWG = G.T.dot(w[:, l].reshape((ntime, 1)) * G)
-            v[:, l] = sum(G * (G - G.dot(GTWG) + G.dot(GTWG.dot(linalg.solve(eyer + GTWG, GTWG, sym_pos=True)))),
+        for ilatent in range(nlatent):
+            G = chol[ilatent, :, :]
+            GtWG = G.T.dot(w[:, ilatent].reshape((ntime, 1)) * G)
+            v[:, ilatent] = sum(G * (G - G.dot(GtWG) + G.dot(GtWG.dot(linalg.solve(eyer + GtWG, GtWG, sym_pos=True)))),
                           axis=1)
 
+            A = eyer - GtWG + GtWG.dot(linalg.solve(eyer + GtWG, GtWG, sym_pos=True))  # A should be PD but numerically not
+            eigval, eigvec = linalg.eigh(A)
+            eigval.clip(0, PINF, out=eigval)  # remove negative eigenvalues
+            L[ilatent, :] = G.dot(eigvec.dot(diag(sqrt(eigval))))  # lower posterior covariance
 
-def inferparam(data, prior, posterior, param, optim):
-    nchannel, ntrial, ntime, lag1 = data['h'].shape  # neuron, trial, time, lag + 1
-    nlatent, _, rank = prior['chol'].shape  # latent, time, rank
 
-    y = data['y'].reshape((-1, nchannel))  # concatenate trials
-    h = data['h'].reshape((nchannel, -1, lag1))  # concatenate trials
-    channel = data['channel']
+def inferparam(obj, opt):
+    nchannel, ntrial, ntime, lag1 = obj['h'].shape  # neuron, trial, time, lag + 1
+    nlatent, _, rank = obj['chol'].shape  # latent, time, rank
 
-    mu = posterior['mu'].reshape((-1, nlatent))
-    v = posterior['v'].reshape((-1, nlatent))
+    y = obj['y'].reshape((-1, nchannel))  # concatenate trials
+    h = obj['h'].reshape((nchannel, -1, lag1))  # concatenate trials
+    channel = obj['channel']
 
-    a = param['a']
-    b = param['b']
-    noise = param['noise']
+    mu = obj['mu'].reshape((-1, nlatent))
+    v = obj['v'].reshape((-1, nlatent))
 
-    adadecay = optim['adadecay']
-    adagrad = optim['adagrad']
-    eps = optim['eps']
-    accu_grad_a = optim['accu_grad_a']
-    accu_grad_b = optim['accu_grad_b']
+    a = obj['a']
+    b = obj['b']
+    noise = obj['noise']
 
-    for n in range(nchannel):
+    decay = opt['decay']
+    adjhess = opt['adjhess']
+    eps = opt['eps']
+    accu_grad_a = opt['accu_grad_a']
+    accu_grad_b = opt['accu_grad_b']
+
+    for ichannel in range(nchannel):
         eta = mu.dot(a) + einsum('ijk, ki -> ji', h, b)
         lam = sexp(eta + 0.5 * v.dot(a ** 2))
-        if channel[n] == 'spike':
+        if channel[ichannel] == 'spike':
             # a
-            va = v * a[:, n]  # (ntime, nlatent)
-            wv = diag(lam[:, n].dot(v))
-            grad_a = mu.T.dot(y[:, n]) - (mu + va).T.dot(lam[:, n])
-            accu_grad_a[:, n] = accumulate(accu_grad_a[:, n], grad_a, adadecay)
+            va = v * a[:, ichannel]  # (ntime, nlatent)
+            wv = diag(lam[:, ichannel].dot(v))
+            grad_a = mu.T.dot(y[:, ichannel]) - (mu + va).T.dot(lam[:, ichannel])
+            accu_grad_a[:, ichannel] = accumulate(accu_grad_a[:, ichannel], grad_a, decay)
 
-            neghess_a = (mu + va).T.dot(lam[:, n, newaxis] * (mu + va)) + wv
-            if adagrad:
-                delta_a = linalg.solve(neghess_a + diag(sqrt(eps + accu_grad_a[:, n])), grad_a, sym_pos=True)
+            neghess_a = (mu + va).T.dot(lam[:, ichannel, newaxis] * (mu + va)) + wv
+            if adjhess:
+                delta_a = linalg.solve(neghess_a + diag(sqrt(eps + accu_grad_a[:, ichannel])), grad_a, sym_pos=True)
             else:
                 delta_a = linalg.solve(neghess_a, grad_a, sym_pos=True)
-            a[:, n] += delta_a
+            a[:, ichannel] += delta_a
 
             # b
-            grad_b = h[n, :].T.dot(y[:, n] - lam[:, n])
-            accu_grad_b[:, n] = accumulate(accu_grad_b[:, n], grad_b, adadecay)
-            neghess_b = h[n, :].T.dot(lam[:, n, newaxis] * h[n, :])
-            if adagrad:
-                b[:, n] += linalg.solve(neghess_b + diag(sqrt(eps + accu_grad_b[:, n])), grad_b, sym_pos=True)
+            grad_b = h[ichannel, :].T.dot(y[:, ichannel] - lam[:, ichannel])
+            accu_grad_b[:, ichannel] = accumulate(accu_grad_b[:, ichannel], grad_b, decay)
+            neghess_b = h[ichannel, :].T.dot(lam[:, ichannel, newaxis] * h[ichannel, :])
+            if adjhess:
+                b[:, ichannel] += linalg.solve(neghess_b + diag(sqrt(eps + accu_grad_b[:, ichannel])), grad_b, sym_pos=True)
             else:
-                b[:, n] += linalg.solve(neghess_b, grad_b, sym_pos=True)
-        elif channel[n] == 'lfp':
+                b[:, ichannel] += linalg.solve(neghess_b, grad_b, sym_pos=True)
+        elif channel[ichannel] == 'lfp':
             # a's least squares solution for Gaussian channel
             # (m'm + diag(j'v))^-1 m'(y - Hb)
-            a[:, n] = linalg.solve(mu.T.dot(mu) + diag(sum(v, axis=0)), mu.T.dot(y[:, n] - h[n, :].dot(b[:, n])),
+            a[:, ichannel] = linalg.solve(mu.T.dot(mu) + diag(sum(v, axis=0)), mu.T.dot(y[:, ichannel] - h[ichannel, :].dot(b[:, ichannel])),
                                    sym_pos=True)
 
             # b's least squares solution for Gaussian channel
             # (H'H)^-1 H'(y - ma)
-            b[:, n] = linalg.solve(h[n, :].T.dot(h[n, :]), h[n, :].T.dot(y[:, n] - mu.dot(a[:, n])), sym_pos=True)
+            b[:, ichannel] = linalg.solve(h[ichannel, :].T.dot(h[ichannel, :]), h[ichannel, :].T.dot(y[:, ichannel] - mu.dot(a[:, ichannel])), sym_pos=True)
         else:
             print('Undefined channel')
     noise[:] = var(y - eta, axis=0, ddof=0)
 
 
-def inference(data, prior, posterior, param, opt):
-    if opt['verbose']:
-        print('\nInference starting')
+def fit(y, channel, sigma, omega, x=None, alpha=None, beta=None, lag=0, rank=500, niter=50, nadjhess=5, tol=1e-5,
+        verbose=False):
+    assert sigma.shape == omega.shape
 
-    # for backtracking
-    goodposterior = {'mu': posterior['mu'].copy(),
-                     'w': posterior['w'].copy(),
-                     'v': posterior['v'].copy()}
-    goodparam = {'a': param['a'].copy(),
-                 'b': param['b'].copy(),
-                 'noise': param['noise'].copy()}
-
-    lb = zeros(opt['niter'], dtype=float)
-    ll = zeros(opt['niter'], dtype=float)
-    elapsed = zeros((opt['niter'], 3), dtype=float)
-    loadingAngle = zeros(opt['niter'], dtype=float)
-    latentAngle = zeros(opt['niter'], dtype=float)
-
-    x = data.get('x')
-    alpha = param.get('truea')
-
-    lb[0], ll[0] = elbo(data, prior, posterior, param)
-    if alpha is not None:
-        loadingAngle[0] = subspace(alpha.T, param['a'].T)
-    if x is not None:
-        rotated = empty_like(x)
-        # rotate trial by trial
-        for m in range(x.shape[0]):
-            rotated[m, :] = rotate(add_constant(posterior['mu'][m, :]), x[m, :])
-        latentAngle[0] = subspace(rotated.reshape((-1, x.shape[-1])), x.reshape((-1, x.shape[-1])))
-
-    i = 1
-    converged = False
-    infer_start = timeit.default_timer()
-    while not converged and i < opt['niter']:
-        iter_start = timeit.default_timer()
-
-        # infer posterior
-        post_start = timeit.default_timer()
-        if opt['infer'] != 'param':
-            inferpost(data, prior, posterior, param, opt)
-        post_end = timeit.default_timer()
-        elapsed[i, 0] = post_end - post_start
-        if x is not None:
-            for m in range(x.shape[0]):
-                rotated[m, :] = rotate(add_constant(posterior['mu'][m, :]), x[m, :])
-            latentAngle[i] = subspace(rotated.reshape((-1, x.shape[-1])), x.reshape((-1, x.shape[-1])))
-
-        # infer parameter
-        param_start = timeit.default_timer()
-        if opt['infer'] != 'posterior':
-            inferparam(data, prior, posterior, param, opt)
-        param_end = timeit.default_timer()
-        elapsed[i, 1] = param_end - param_start
-        if alpha is not None:
-            loadingAngle[i] = subspace(alpha.T, param['a'].T)
-
-        lb[i], ll[i] = elbo(data, prior, posterior, param)
-        if lb[i] < lb[i - 1]:
-            # backtracking
-            posterior['mu'][:] = goodposterior['mu'][:]
-            posterior['w'][:] = goodposterior['w'][:]
-            posterior['v'][:] = goodposterior['v'][:]
-            param['a'][:] = goodparam['a'][:]
-            param['b'][:] = goodparam['b'][:]
-            param['noise'][:] = param['noise'][:]
-            lb[i] = lb[i - 1]
-            if opt['verbose']:
-                print('ELBO decreased. Backtracking.')
-
-            if i > opt['iadagrad'] and not opt['adagrad']:
-                opt['adagrad'] = True
-                if opt['verbose']:
-                    print('Hessian adjustment enabled.')
-            else:
-                converged = True
-        elif abs(lb[i] - lb[i-1]) < opt['tol'] * abs(lb[i-1]):
-            converged = True
-
-        goodposterior['mu'][:] = posterior['mu'][:]
-        goodposterior['w'][:] = posterior['w'][:]
-        goodposterior['v'][:] = posterior['v'][:]
-        goodparam['a'][:] = param['a'][:]
-        goodparam['b'][:] = param['b'][:]
-        goodparam['noise'][:] = param['noise'][:]
-
-        iter_end = timeit.default_timer()
-        elapsed[i, 2] = iter_end - iter_start
-
-        if opt['verbose']:
-            print('[{}], posterior elapsed: {:.2f}, parameter elapsed: {:.2f}, '
-                  'ELBO: {:.4f}, LL: {:.4f}'.format(i, elapsed[i, 0], elapsed[i, 1], elapsed[i, 2], lb[i], ll[i]))
-
-        i += 1
-    infer_end = timeit.default_timer()
-
-    if opt['verbose']:
-        print('Inference ending\n')
-
-    stat = {'ELBO': lb[:i], 'elapsed': elapsed[:i, :], 'loadingAngle': loadingAngle[:i],
-            'latentAngle': latentAngle[:i], 'totalElapsed': infer_end - infer_start, 'converged': converged,
-            'LL': ll[:i]}
-
-    print('{} iterations, ELBO: {:.4f}, elapsed: {:.2f}, converged: {}\n'.format(i - 1, lb[i - 1], stat['totalElapsed'],
-                                                                                 stat['converged']))
-
-    result = {'stat': stat, 'prior': prior, 'posterior': posterior, 'parameter': param, 'opt': opt}
-    return result
-
-
-def multitrials(spike, lfp, sigma, omega, x=None, ta=None, tb=None, lag=0, rank=500, niter=50, iadagrad=5, tol=1e-5,
-                verbose=True):
-    assert not (spike is None and lfp is None)
-
-    if spike is None:
-        spike = empty((0, 0, 0))
-
-    if lfp is None:
-        lfp = empty((0, 0, 0))
-
-    spike = np.asarray(spike)
-    lfp = np.asarray(lfp)
-
-    if spike.ndim < 3:
-        spike = np.atleast_3d(spike)
-        spike = np.rollaxis(spike, axis=-1)
-    if lfp.ndim < 3:
-        lfp = np.atleast_3d(lfp)
-        lfp = np.rollaxis(lfp, axis=-1)
-
-    if lfp.size == 0:
-        y = spike
-    elif spike.size == 0:
-        y = lfp
-    else:
-        print(spike.shape, lfp.shape)
-        y = dstack((spike, lfp))
+    y = asarray(y)
+    if y.ndim < 2:
+        y = y[..., None]
+    if y.ndim < 3:
+        y = y[None, ...]
+    channel = asarray(channel)
     ntrial, ntime, nchannel = y.shape
-
-    channel = array(['spike'] * spike.shape[-1] + ['lfp'] * lfp.shape[-1])
+    nlatent = sigma.shape[0]
 
     h = empty((nchannel, ntrial, ntime, 1 + lag), dtype=float)
+    for ichannel in range(nchannel):
+        for itrial in range(ntrial):
+            h[ichannel, itrial, :] = add_constant(lagmat(y[itrial, :, ichannel], maxlag=lag))
 
-    for n in range(nchannel):
-        for m in range(ntrial):
-            h[n, m, :] = add_constant(lagmat(y[m, :, n], maxlag=lag))
-    data = {'x': x, 'y': y, 'h': h, 'channel': channel}
-
-    assert sigma.shape == omega.shape
-    nlatent = sigma.shape[0]
     chol = empty((nlatent, ntime, rank), dtype=float)
     for l in range(nlatent):
         chol[l, :] = ichol_gauss(ntime, omega[l], rank) * sigma[l]
-    prior = {'chol': chol}
 
     # initialize posterior
     fa = FactorAnalysis(n_components=nlatent, svd_method='lapack')
@@ -378,22 +252,25 @@ def multitrials(spike, lfp, sigma, omega, x=None, ta=None, tb=None, lag=0, rank=
     a = fa.components_ * norm(mu, ord=inf, axis=0, keepdims=True).T
     mu /= norm(mu, ord=inf, axis=0)
     mu = mu.reshape((ntrial, ntime, nlatent))
-    posterior = {'mu': mu, 'w': zeros((ntrial, ntime, nlatent)), 'v': zeros((ntrial, ntime, nlatent))}
+    L = empty((ntrial, nlatent, ntime, rank))
 
     # initialize parameters
     b = empty((1 + lag, nchannel), dtype=float)
-    for n in range(nchannel):
-        b[:, n] = lstsq(h.reshape((nchannel, -1, 1 + lag))[n, :], y.reshape((-1, nchannel))[:, n])[0]
+    for ichannel in range(nchannel):
+        b[:, ichannel] = lstsq(h.reshape((nchannel, -1, 1 + lag))[ichannel, :], y.reshape((-1, nchannel))[:, ichannel])[0]
 
-    y = y.reshape((-1, nchannel))
-    noise = var(y, axis=0, ddof=0)
-    param = {'a': a, 'b': b, 'noise': noise, 'truea':ta, 'trueb': tb}
+    noise = var(y.reshape((-1, nchannel)), axis=0, ddof=0)
+
+    obj = {'y': y, 'channel': channel, 'h': h,
+           'sigma': sigma, 'omega': omega, 'chol': chol,
+           'mu': mu, 'w': zeros((ntrial, ntime, nlatent)), 'v': zeros((ntrial, ntime, nlatent)), 'L': L, 'x': x,
+           'a': a, 'b': b, 'noise': noise, 'alpha': alpha, 'beta': beta}
 
     opt = {'niter': niter,
            'infer': 'both',
-           'iadagrad': iadagrad,
-           'adagrad': False,
-           'adadecay': 0,
+           'nadjhess': nadjhess,
+           'adjhess': False,
+           'decay': 0,
            'eps': 1e-6,
            'accu_grad_mu': zeros_like(mu),
            'accu_grad_a': zeros_like(a),
@@ -401,208 +278,241 @@ def multitrials(spike, lfp, sigma, omega, x=None, ta=None, tb=None, lag=0, rank=
            'tol': tol,
            'verbose': verbose}
 
-    output = inference(data, prior, posterior, param, opt)
-    result = {'ELBO': output['stat']['ELBO'], 'LL': output['stat']['LL'], 'elapsed': output['stat']['elapsed'],
-              'latentAngle': output['stat']['latentAngle'], 'loadingAngle': output['stat']['loadingAngle'],
-              'mu': output['posterior']['mu'], 'w': output['posterior']['w'], 'v': output['posterior']['v'],
-              'ahat': output['parameter']['a'], 'bhat': output['parameter']['b'],
-              'nhat': output['parameter']['noise'],
-              'sigma': sigma, 'omega': omega, 'chol': prior['chol'],
-              'y': data['y'], 'channel': data['channel'], 'x': data['x']}
-    return result
+    inference = infer(obj, opt)
+    return inference
 
 
-def leaveoneout(model, opt):
-    test = model['test']
-    y = test['y']
-    h = test['h']
-    channel = test['channel']
-    yhat = zeros_like(y)
-    model['test']['yhat'] = yhat
+def infer(obj, opt):
+    """Main inference procedure
 
+    Args:
+        obj:
+        opt:
+
+    Returns:
+
+    """
+    if opt['verbose']:
+        print('\nInference starts.')
+
+    # for backtracking
+    good_mu = obj['mu'].copy()
+    good_w = obj['w'].copy()
+    good_v = obj['v'].copy()
+    good_a = obj['a'].copy()
+    good_b = obj['b'].copy()
+    good_noise = obj['noise'].copy()
+
+    lb = zeros(opt['niter'], dtype=float)
+    ll = zeros(opt['niter'], dtype=float)
+    elapsed = zeros((opt['niter'], 3), dtype=float)
+    loading_angle = zeros(opt['niter'], dtype=float)
+    latent_angle = zeros(opt['niter'], dtype=float)
+
+    x = obj.get('x')
+    alpha = obj.get('alpha')
+
+    lb[0], ll[0] = elbo(obj)
+    if alpha is not None:
+        loading_angle[0] = subspace(alpha.T, obj['a'].T)
+    if x is not None:
+        rotated = empty_like(x)
+        # rotate trial by trial
+        for itrial in range(x.shape[0]):
+            rotated[itrial, :] = rotate(add_constant(obj['mu'][itrial, :]), x[itrial, :])
+        latent_angle[0] = subspace(rotated.reshape((-1, x.shape[-1])), x.reshape((-1, x.shape[-1])))
+
+    iiter = 1
+    converged = False
+    infer_start = timeit.default_timer()
+    while not converged and iiter < opt['niter']:
+        iter_start = timeit.default_timer()
+
+        # infer posterior
+        post_start = timeit.default_timer()
+        if opt['infer'] != 'param':
+            inferpost(obj, opt)
+        post_end = timeit.default_timer()
+        elapsed[iiter, 0] = post_end - post_start
+        if x is not None:
+            for itrial in range(x.shape[0]):
+                rotated[itrial, :] = rotate(add_constant(obj['mu'][itrial, :]), x[itrial, :])
+            latent_angle[iiter] = subspace(rotated.reshape((-1, x.shape[-1])), x.reshape((-1, x.shape[-1])))
+
+        # infer parameter
+        param_start = timeit.default_timer()
+        if opt['infer'] != 'posterior':
+            inferparam(obj, opt)
+        param_end = timeit.default_timer()
+        elapsed[iiter, 1] = param_end - param_start
+        if alpha is not None:
+            loading_angle[iiter] = subspace(alpha.T, obj['a'].T)
+
+        lb[iiter], ll[iiter] = elbo(obj)
+        if lb[iiter] < lb[iiter - 1]:
+            # backtracking
+            obj['mu'][:] = good_mu
+            obj['w'][:] = good_w
+            obj['v'][:] = good_v
+            obj['a'][:] = good_a
+            obj['b'][:] = good_b
+            obj['noise'][:] = good_noise
+            lb[iiter] = lb[iiter - 1]
+            if opt['verbose']:
+                print('ELBO decreased. Backtracking.')
+            if iiter > opt['nadjhess'] and not opt['adjhess']:
+                opt['adjhess'] = True
+                if opt['verbose']:
+                    print('Hessian adjustment enabled.')
+            else:
+                converged = True
+        elif abs(lb[iiter] - lb[iiter-1]) < opt['tol'] * abs(lb[iiter-1]):
+            converged = True
+
+        good_mu[:] = obj['mu']
+        good_w[:] = obj['w']
+        good_v[:] = obj['v']
+        good_a[:] = obj['a']
+        good_b[:] = obj['b']
+        good_noise[:] = obj['noise']
+
+        iter_end = timeit.default_timer()
+        elapsed[iiter, 2] = iter_end - iter_start
+
+        if opt['verbose']:
+            print('[{}], posterior elapsed: {:.2f}, parameter elapsed: {:.2f}, '
+                  'ELBO: {:.4f}, LL: {:.4f}'.format(iiter, elapsed[iiter, 0], elapsed[iiter, 1], lb[iiter], ll[iiter]))
+
+        iiter += 1
+    infer_end = timeit.default_timer()
+
+    if opt['verbose']:
+        print('Inference ends.\n')
+        print('{} iterations, ELBO: {:.4f}, elapsed: {:.2f}, converged: {}\n'.format(iiter - 1,
+                                                                                     lb[iiter - 1],
+                                                                                     infer_end - infer_start,
+                                                                                     converged))
+    obj['ELBO'] = lb[:iiter]
+    obj['Elapsed'] = elapsed[:iiter, :]
+    obj['LoadingAngle'] = loading_angle[:iiter]
+    obj['LatentAngle'] = latent_angle[:iiter]
+    obj['LL'] = ll[:iiter]
+    return obj
+
+
+def leave_one_out(trial, model, opt):
+    """Leave-one-out
+
+    Predict each spike train
+
+    Args:
+        trial:
+        model:
+        opt:
+
+    Returns:
+
+    """
+    y = trial['y']
+    h = trial['h']
+    channel = model['channel']
+    yhat = trial['yhat']
     ntrial, ntime, nchannel = y.shape
-    nlatent = model['training']['mu'].shape[-1]
+    nlatent = model['mu'].shape[-1]
 
-    a = model['parameter']['a']
-    b = model['parameter']['b']
+    a = model['a']
+    b = model['b']
 
-    for n, ch in enumerate(channel):
-        exceptn = arange(nchannel) != n
+    for ichannel in range(nchannel):
+        exceptn = arange(nchannel) != ichannel
         ytrain = y[:, :, exceptn]
         htrain = h[exceptn, :]
-        hn = h[n, :]
+        hn = h[ichannel, :]
 
-        data = {'y': ytrain, 'h': htrain, 'channel': channel[exceptn]}
+        obj = {'y': ytrain, 'h': htrain, 'channel': channel[exceptn]}
 
         # initialize posterior
         fa = FactorAnalysis(n_components=nlatent, svd_method='lapack')
-        mu = fa.fit_transform(data['y'].reshape((-1, nchannel - 1)))
+        mu = fa.fit_transform(obj['y'].reshape((-1, nchannel - 1)))
         mu -= mu.mean(axis=0)
         mu /= norm(mu, ord=inf, axis=0)
         mu = mu.reshape((ntrial, ntime, nlatent))
-        posterior = {'mu': mu, 'w': zeros((ntrial, ntime, nlatent)), 'v': zeros((ntrial, ntime, nlatent))}
+        obj['mu'] = mu
+        obj['w'] = zeros((ntrial, ntime, nlatent))
+        obj['v'] = zeros((ntrial, ntime, nlatent))
+        obj['sigma'] = model['sigma'].copy()
+        obj['omega'] = model['omega'].copy()
+        obj['chol'] = model['chol'].copy()
+        obj['L'] = model['L'].copy()
 
-        # initialize parameters
-        param = {'a': model['parameter']['a'][:, exceptn], 'b': model['parameter']['b'][:, exceptn],
-                 'noise': model['parameter']['noise'][exceptn]}
+        # set parameters
+        obj['a'] = model['a'][:, exceptn]
+        obj['b'] = model['b'][:, exceptn]
+        obj['noise'] = model['noise'][exceptn]
 
         opt['infer'] = 'posterior'
 
-        result = inference(data, model['prior'], posterior, param, opt)
+        inference = infer(obj, opt)
 
-        if channel[n] == 'spike':
-            yhat[:, :, n] = sexp(result['posterior']['mu'].reshape((-1, nlatent)).dot(a[:, n]) + hn.reshape((ntime, -1)).dot(b[:, n]))
+        if channel[ichannel] == 'spike':
+            yhat[:, :, ichannel] = sexp(inference['mu'].reshape((-1, nlatent)).dot(a[:, ichannel]) + hn.reshape((ntime, -1)).dot(b[:, ichannel]))
         else:
-            yhat[:, :, n] = result['posterior']['mu'].reshape((-1, nlatent)).dot(a[:, n]) + hn.reshape((ntime, -1)).dot(b[:, n])
+            yhat[:, :, ichannel] = inference['mu'].reshape((-1, nlatent)).dot(a[:, ichannel]) + hn.reshape((ntime, -1)).dot(b[:, ichannel])
 
-    return model
-
-
-def makedataset(spike, lfp, x=None, lag=0):
-    assert not (spike is None and lfp is None)
-
-    if spike is None:
-        spike = empty((0, 0, 0))
-    if lfp is None:
-        lfp = empty((0, 0, 0))
-
-    spike = np.asarray(spike)
-    lfp = np.asarray(lfp)
-
-    if spike.ndim < 3:
-        spike = np.atleast_3d(spike)
-        spike = np.rollaxis(spike, axis=-1)
-    if lfp.ndim < 3:
-        lfp = np.atleast_3d(lfp)
-        lfp = np.rollaxis(lfp, axis=-1)
-
-    if lfp.size == 0:
-        y = spike
-    elif spike.size == 0:
-        y = lfp
-    else:
-        print(spike.shape, lfp.shape)
-        y = dstack((spike, lfp))
-
-    ntrial, ntime, nchannel = y.shape
-
-    channel = array(['spike'] * spike.shape[-1] + ['lfp'] * lfp.shape[-1])
-
-    h = empty((nchannel, ntrial, ntime, 1 + lag), dtype=float)
-    for n in range(nchannel):
-        for m in range(ntrial):
-            h[n, m, :] = add_constant(lagmat(y[m, :, n], maxlag=lag))
-
-    data = {'x': x, 'y': y, 'h': h, 'channel': channel}
-    return data
+    return trial
 
 
-def makeprior(sigma, omega, ntime, rank=500):
-    assert sigma.shape == omega.shape
-
-    if rank > ntime:
-        rank = ntime
-    nlatent = sigma.shape[0]
-    chol = empty((nlatent, ntime, rank), dtype=float)
-    for l in range(nlatent):
-        chol[l, :] = ichol_gauss(ntime, omega[l], rank) * sigma[l]
-
-    prior = {'chol': chol, 'sigma': sigma, 'omega': omega}
-    return prior
-
-
-def makeopt(infer='both', niter=50, iadagrad=5, adadecay=0, adaeps=1e-6, tol=1e-5):
-    opt = {'niter': niter,
-           'infer': 'both',
-           'iadagrad': iadagrad,
-           'adagrad': False,
-           'adadecay': adadecay,
-           'eps': adaeps,
-           'tol': tol}
-    return opt
-
-
-def predict(spike, lfp,
-            sigma, omega, rank=500,
-            x=None,
-            lag=0,
-            truea=None, trueb=None,
-            testidx=None,
-            niter=50, tol=1e-5,
-            adafter=5, adadecay=0, adaeps=1e-6):
-    ntrial = spike.shape[0] if spike.ndim == 3 else 1
-    if lfp is None:
-        lfp = empty((ntrial, 0, 0))
-
-    if testidx is None:
-        training = makedataset(spike, lfp, x, lag)
-        result = multitrials(spike, lfp, sigma, omega, x, truea, trueb, lag, rank, niter, adafter, tol)
-        model = {'training': training, 'prior': result['prior'], 'parameter': result['parameter']}
-        model['training']['stat'] = result['stat']
-        model['training']['mu'] = result['posterior']['mu']
-        model['training']['w'] = result['posterior']['w']
-    else:
-        testidx = asarray(testidx)
-        testmask = full(ntrial, fill_value=False, dtype='bool')
-        testmask[testidx] = True
-        training = makedataset(spike[~testmask, :, :], lfp[~testmask, :, :], x, lag)
-        test = makedataset(spike[testmask, :, :], lfp[testmask, :, :], x, lag)
-
-        result = multitrials(spike[~testmask, :, :], lfp[~testmask, :, :], sigma, omega, x[~testmask, :, :] if x is not None else None, truea, trueb, lag, rank,
-                             niter, adafter, tol)
-        model = {'training': training, 'prior': result['prior'], 'parameter': result['parameter'], 'test': test}
-        model['training']['stat'] = result['stat']
-        model['training']['mu'] = result['posterior']['mu']
-        model['training']['w'] = result['posterior']['w']
-        leaveoneout(model, result['opt'])
-
-    return model
-
-
-def vLGP(obs, channel,
-         sigma, omega, rank=500, x=None,
-         lag=0, truea=None, trueb=None,
-         runtest=False,
-         niter=50, tol=1e-5, adafter=5, adadecay=0, adaeps=1e-6):
-    """vLGP
+def cv(y, channel, sigma, omega, lag=0, rank=500, niter=50, nadjhess=5, tol=1e-5):
+    """Use each trial as testset
 
     Args:
-        obs: observation array (trial, time, channel)
-        channel: channel type array, 'spike' or 'lfp'
-        sigma: prior standard deviation array
-        omega: prior scale array
-        rank: incomplete Cholesky decomposition rank of prior
-        x: true latent [optional]
-        lag: autoregression lag
-        truea: true loading matrix (latent, channel) [optinal]
-        trueb: true regression coefficients (*, channel) [optional]
-        runtest: leave-one-out
-        niter: max no. of iterations
-        tol: convergence criterion
-        adafter: when to start using adagrad
-        adadecay: exponential decay of adagrad, 0 means accumulate all previous gradients
-        adaeps: epsilon for adagrad avoiding zero gradient.
+        y:
+        channel:
+        sigma:
+        omega:
+        lag:
+        rank:
+        niter:
+        nadjhess:
+        tol:
 
     Returns:
-        model: data and inference
-        stat: statistics of algorithm
+
     """
+    assert sigma.shape == omega.shape
 
-    obs = asarray(obs)
-    if obs.ndim == 1:
-        obs = obs[..., None]
-    if obs.ndim == 2:
-        obs = obs[None, ...]
-    ntrial, ntime, nchannel = obs.shape
-    nlatent = sigma.shape[0]
-    chol = empty((nlatent, ntime, rank))
-    for i in range(nlatent):
-        chol[i, :] = ichol_gauss(ntime, omega[i], rank) * sigma[i]
+    y = asarray(y)
+    if y.ndim < 2:
+        y = y[..., None]
+    if y.ndim < 3:
+        y = y[None, ...]
+    channel = asarray(channel)
+    ntrial, ntime, nchannel = y.shape
 
-    model = {'obs': obs, 'channel': channel,  # observation
-             'x': x, 'sigma': sigma, 'omega': omega, 'chol': chol,  # prior
-             'ahat': None, 'bhat': None, 'noisehat': None, 'a': truea, 'b': None, 'noise': None,  # parameter
-             'mu': None, 'w': None, 'v': None  # posterior
-             }
+    h = empty((nchannel, ntrial, ntime, 1 + lag), dtype=float)
+    for ichannel in range(nchannel):
+        for itrial in range(ntrial):
+            h[ichannel, itrial, :] = add_constant(lagmat(y[itrial, :, ichannel], maxlag=lag))
 
-    return model
+    yhat = empty_like(y)
+    # do leave-one-out trial by trial
+    for itrial in range(ntrial):
+        test_trial = {'y': y[itrial, :][None, ...], 'h': h[:, itrial, :, :][:, None, :, :], 'yhat': yhat[itrial, :][None, ...]}
+        itrain = arange(ntrial) != itrial
+        model = fit(y[itrain, :], channel, sigma, omega, x=None, alpha=None, beta=None, lag=lag, rank=rank, niter=niter,
+                    nadjhess=nadjhess, tol=tol, verbose=False)
+        opt = {'niter': niter,
+               'infer': 'both',
+               'nadjhess': nadjhess,
+               'adjhess': False,
+               'decay': 0,
+               'eps': 1e-6,
+               'accu_grad_mu': zeros_like(model['mu']),
+               'accu_grad_a': zeros_like(model['a']),
+               'accu_grad_b': zeros_like(model['b']),
+               'tol': tol,
+               'verbose': False}
+        leave_one_out(test_trial, model, opt)
+    ll = stats.poisson.logpmf(y.ravel(), yhat.ravel()).reshape(y.shape)
+    result = {'y': y, 'yhat': yhat, 'LL': ll}
+    return result
