@@ -1,5 +1,4 @@
-from numpy import exp, column_stack, roll, atleast_2d, pi
-from numpy import sum, dot
+from numpy import exp, column_stack, roll, atleast_2d, pi, sum, dot
 from numpy import zeros, ones, diag, meshgrid, arange, eye, asarray, atleast_3d, rollaxis
 from scipy.linalg import svd, lstsq
 
@@ -149,7 +148,9 @@ def lagmat(x, lag):
 
     """
     x = asarray(x)
-    x = atleast_2d(x)
+    # x = atleast_2d(x)
+    if x.ndim < 2:
+        x = x[..., None]
     nobs, nvar = x.shape
     dropidx = nvar
     if lag >= nobs:

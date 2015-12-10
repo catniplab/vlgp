@@ -1,20 +1,16 @@
 import timeit
-import warnings
 
-import numpy as np
-from numpy import empty, empty_like, full, zeros, zeros_like, newaxis, tile, dstack, array, arange, array_equal, asarray, atleast_3d
-from numpy import identity, diag, einsum, inner, trace, exp, sum, mean, var, abs, sqrt, log
-from numpy import inf, finfo, PINF
-from scipy import linalg
-from scipy.optimize import minimize
+from numpy import identity, einsum, trace, inner, empty, mean, inf, diag, newaxis, var, asarray, zeros, zeros_like, \
+    empty_like, arange, sum
+from numpy.core.umath import sqrt, PINF, log
+from numpy.linalg import norm, slogdet
+from scipy.linalg import lstsq, eigh, solve
 from scipy.stats import stats
 from sklearn.decomposition.factor_analysis import FactorAnalysis
-from statsmodels.tsa.tsatools import lagmat
-from scipy.linalg import lstsq
-from numpy.linalg import norm, slogdet
-from link import sexp
-from mathf import ichol_gauss, subspace
-from util import add_constant, rotate
+
+from hyper import learn_hyper
+from mathf import ichol_gauss, subspace, sexp
+from util import add_constant, rotate, lagmat
 
 
 def elbo(obj):
@@ -56,8 +52,8 @@ def elbo(obj):
         for l in range(nlatent):
             G = chol[l, :]
             GtWG = G.T.dot(w[:, l].reshape((ntime, 1)) * G)
-            A = GtWG.dot(linalg.solve(eyer + GtWG, GtWG, sym_pos=True))
-            G_mldiv_mu = linalg.lstsq(G, mu[:, l])[0]
+            A = GtWG.dot(solve(eyer + GtWG, GtWG, sym_pos=True))
+            G_mldiv_mu = lstsq(G, mu[:, l])[0]
             tr = ntime - trace(GtWG) + trace(A)
             lndet = slogdet(eyer - GtWG + A)[1]
 
@@ -124,7 +120,7 @@ def inferpost(obj, opt):
             G = chol[ilatent, :, :]
             grad_mu = (y[:, spike] - lam[:, spike]).dot(a[ilatent, spike]) + \
                       ((y[:, lfp] - eta[:, lfp]) /
-                       noise[lfp]).dot(a[ilatent, lfp]) - linalg.lstsq(G.T, linalg.lstsq(G, mu[:, ilatent])[0])[0]
+                       noise[lfp]).dot(a[ilatent, lfp]) - lstsq(G.T, lstsq(G, mu[:, ilatent])[0])[0]
 
             accu_grad_mu[itrial, :, ilatent] = accumulate(accu_grad_mu[itrial, :, ilatent], grad_mu, decay)
 
@@ -139,11 +135,11 @@ def inferpost(obj, opt):
 
             u = G.dot(G.T.dot(res.dot(a[ilatent, :]))) - mu[:, ilatent]
             delta_mu = u - G.dot((wadj * G).T.dot(u)) + \
-                      G.dot(GtWG.dot(linalg.solve(eyer + GtWG, (wadj * G).T.dot(u), sym_pos=True)))
+                      G.dot(GtWG.dot(solve(eyer + GtWG, (wadj * G).T.dot(u), sym_pos=True)))
 
             mu[:, ilatent] += delta_mu
             mu[:, ilatent] -= mean(mu[:, ilatent])
-            scale = linalg.norm(mu[:, ilatent], ord=inf)
+            scale = norm(mu[:, ilatent], ord=inf)
             mu[:, ilatent] /= scale
 
         eta = mu.dot(a) + einsum('ijk, ki -> ji', h, b)
@@ -154,11 +150,11 @@ def inferpost(obj, opt):
         for ilatent in range(nlatent):
             G = chol[ilatent, :, :]
             GtWG = G.T.dot(w[:, ilatent].reshape((ntime, 1)) * G)
-            v[:, ilatent] = sum(G * (G - G.dot(GtWG) + G.dot(GtWG.dot(linalg.solve(eyer + GtWG, GtWG, sym_pos=True)))),
+            v[:, ilatent] = sum(G * (G - G.dot(GtWG) + G.dot(GtWG.dot(solve(eyer + GtWG, GtWG, sym_pos=True)))),
                           axis=1)
 
-            A = eyer - GtWG + GtWG.dot(linalg.solve(eyer + GtWG, GtWG, sym_pos=True))  # A should be PD but numerically not
-            eigval, eigvec = linalg.eigh(A)
+            A = eyer - GtWG + GtWG.dot(solve(eyer + GtWG, GtWG, sym_pos=True))  # A should be PD but numerically not
+            eigval, eigvec = eigh(A)
             eigval.clip(0, PINF, out=eigval)  # remove negative eigenvalues
             L[ilatent, :] = G.dot(eigvec.dot(diag(sqrt(eigval))))  # lower posterior covariance
 
@@ -196,9 +192,9 @@ def inferparam(obj, opt):
 
             neghess_a = (mu + va).T.dot(lam[:, ichannel, newaxis] * (mu + va)) + wv
             if adjhess:
-                delta_a = linalg.solve(neghess_a + diag(sqrt(eps + accu_grad_a[:, ichannel])), grad_a, sym_pos=True)
+                delta_a = solve(neghess_a + diag(sqrt(eps + accu_grad_a[:, ichannel])), grad_a, sym_pos=True)
             else:
-                delta_a = linalg.solve(neghess_a, grad_a, sym_pos=True)
+                delta_a = solve(neghess_a, grad_a, sym_pos=True)
             a[:, ichannel] += delta_a
 
             # b
@@ -206,80 +202,21 @@ def inferparam(obj, opt):
             accu_grad_b[:, ichannel] = accumulate(accu_grad_b[:, ichannel], grad_b, decay)
             neghess_b = h[ichannel, :].T.dot(lam[:, ichannel, newaxis] * h[ichannel, :])
             if adjhess:
-                b[:, ichannel] += linalg.solve(neghess_b + diag(sqrt(eps + accu_grad_b[:, ichannel])), grad_b, sym_pos=True)
+                b[:, ichannel] += solve(neghess_b + diag(sqrt(eps + accu_grad_b[:, ichannel])), grad_b, sym_pos=True)
             else:
-                b[:, ichannel] += linalg.solve(neghess_b, grad_b, sym_pos=True)
+                b[:, ichannel] += solve(neghess_b, grad_b, sym_pos=True)
         elif channel[ichannel] == 'lfp':
             # a's least squares solution for Gaussian channel
             # (m'm + diag(j'v))^-1 m'(y - Hb)
-            a[:, ichannel] = linalg.solve(mu.T.dot(mu) + diag(sum(v, axis=0)), mu.T.dot(y[:, ichannel] - h[ichannel, :].dot(b[:, ichannel])),
+            a[:, ichannel] = solve(mu.T.dot(mu) + diag(sum(v, axis=0)), mu.T.dot(y[:, ichannel] - h[ichannel, :].dot(b[:, ichannel])),
                                    sym_pos=True)
 
             # b's least squares solution for Gaussian channel
             # (H'H)^-1 H'(y - ma)
-            b[:, ichannel] = linalg.solve(h[ichannel, :].T.dot(h[ichannel, :]), h[ichannel, :].T.dot(y[:, ichannel] - mu.dot(a[:, ichannel])), sym_pos=True)
+            b[:, ichannel] = solve(h[ichannel, :].T.dot(h[ichannel, :]), h[ichannel, :].T.dot(y[:, ichannel] - mu.dot(a[:, ichannel])), sym_pos=True)
         else:
             print('Undefined channel')
     noise[:] = var(y - eta, axis=0, ddof=0)
-
-
-def fit(y, channel, sigma, omega, x=None, alpha=None, beta=None, lag=0, rank=500, niter=50, nadjhess=5, tol=1e-5,
-        verbose=False):
-    assert sigma.shape == omega.shape
-
-    y = asarray(y)
-    if y.ndim < 2:
-        y = y[..., None]
-    if y.ndim < 3:
-        y = y[None, ...]
-    channel = asarray(channel)
-    ntrial, ntime, nchannel = y.shape
-    nlatent = sigma.shape[0]
-
-    h = empty((nchannel, ntrial, ntime, 1 + lag), dtype=float)
-    for ichannel in range(nchannel):
-        for itrial in range(ntrial):
-            h[ichannel, itrial, :] = add_constant(lagmat(y[itrial, :, ichannel], maxlag=lag))
-
-    chol = empty((nlatent, ntime, rank), dtype=float)
-    for l in range(nlatent):
-        chol[l, :] = ichol_gauss(ntime, omega[l], rank) * sigma[l]
-
-    # initialize posterior
-    fa = FactorAnalysis(n_components=nlatent, svd_method='lapack')
-    mu = fa.fit_transform(y.reshape((-1, nchannel)))
-    mu -= mu.mean(axis=0)
-    a = fa.components_ * norm(mu, ord=inf, axis=0, keepdims=True).T
-    mu /= norm(mu, ord=inf, axis=0)
-    mu = mu.reshape((ntrial, ntime, nlatent))
-    L = empty((ntrial, nlatent, ntime, rank))
-
-    # initialize parameters
-    b = empty((1 + lag, nchannel), dtype=float)
-    for ichannel in range(nchannel):
-        b[:, ichannel] = lstsq(h.reshape((nchannel, -1, 1 + lag))[ichannel, :], y.reshape((-1, nchannel))[:, ichannel])[0]
-
-    noise = var(y.reshape((-1, nchannel)), axis=0, ddof=0)
-
-    obj = {'y': y, 'channel': channel, 'h': h,
-           'sigma': sigma, 'omega': omega, 'chol': chol,
-           'mu': mu, 'w': zeros((ntrial, ntime, nlatent)), 'v': zeros((ntrial, ntime, nlatent)), 'L': L, 'x': x,
-           'a': a, 'b': b, 'noise': noise, 'alpha': alpha, 'beta': beta}
-
-    opt = {'niter': niter,
-           'infer': 'both',
-           'nadjhess': nadjhess,
-           'adjhess': False,
-           'decay': 0,
-           'eps': 1e-6,
-           'accu_grad_mu': zeros_like(mu),
-           'accu_grad_a': zeros_like(a),
-           'accu_grad_b': zeros_like(b),
-           'tol': tol,
-           'verbose': verbose}
-
-    inference = infer(obj, opt)
-    return inference
 
 
 def infer(obj, opt):
@@ -376,6 +313,12 @@ def infer(obj, opt):
         good_b[:] = obj['b']
         good_noise[:] = obj['noise']
 
+        if opt['hyper']:
+            nlatent, ntime, rank = obj['chol'].shape
+            obj['omega'] = learn_hyper(obj)
+            for ilatent in range(nlatent):
+                obj['chol'][ilatent, :] = ichol_gauss(ntime, obj['omega'][ilatent], rank) * obj['sigma'][ilatent]
+
         iter_end = timeit.default_timer()
         elapsed[iiter, 2] = iter_end - iter_start
 
@@ -398,6 +341,66 @@ def infer(obj, opt):
     obj['LatentAngle'] = latent_angle[:iiter]
     obj['LL'] = ll[:iiter]
     return obj
+
+
+def fit(y, channel, sigma, omega, x=None, alpha=None, beta=None, lag=0, rank=500, niter=50, nadjhess=5, tol=1e-5,
+        verbose=False, hyper=False):
+    assert sigma.shape == omega.shape
+
+    y = asarray(y)
+    if y.ndim < 2:
+        y = y[..., None]
+    if y.ndim < 3:
+        y = y[None, ...]
+    channel = asarray(channel)
+    ntrial, ntime, nchannel = y.shape
+    nlatent = sigma.shape[0]
+
+    h = empty((nchannel, ntrial, ntime, 1 + lag), dtype=float)
+    for ichannel in range(nchannel):
+        for itrial in range(ntrial):
+            h[ichannel, itrial, :] = add_constant(lagmat(y[itrial, :, ichannel], lag=lag))
+
+    chol = empty((nlatent, ntime, rank), dtype=float)
+    for ilatent in range(nlatent):
+        chol[ilatent, :] = ichol_gauss(ntime, omega[ilatent], rank) * sigma[ilatent]
+
+    # initialize posterior
+    fa = FactorAnalysis(n_components=nlatent, svd_method='lapack')
+    mu = fa.fit_transform(y.reshape((-1, nchannel)))
+    mu -= mu.mean(axis=0)
+    a = fa.components_ * norm(mu, ord=inf, axis=0, keepdims=True).T
+    mu /= norm(mu, ord=inf, axis=0)
+    mu = mu.reshape((ntrial, ntime, nlatent))
+    L = empty((ntrial, nlatent, ntime, rank))
+
+    # initialize parameters
+    b = empty((1 + lag, nchannel), dtype=float)
+    for ichannel in range(nchannel):
+        b[:, ichannel] = lstsq(h.reshape((nchannel, -1, 1 + lag))[ichannel, :], y.reshape((-1, nchannel))[:, ichannel])[0]
+
+    noise = var(y.reshape((-1, nchannel)), axis=0, ddof=0)
+
+    obj = {'y': y, 'channel': channel, 'h': h,
+           'sigma': sigma, 'omega': omega, 'chol': chol, 'sigma0': sigma, 'omega0': omega,
+           'mu': mu, 'w': zeros((ntrial, ntime, nlatent)), 'v': zeros((ntrial, ntime, nlatent)), 'L': L, 'x': x,
+           'a': a, 'b': b, 'noise': noise, 'alpha': alpha, 'beta': beta}
+
+    opt = {'niter': niter,
+           'infer': 'both',
+           'nadjhess': nadjhess,
+           'adjhess': False,
+           'decay': 0,
+           'eps': 1e-6,
+           'accu_grad_mu': zeros_like(mu),
+           'accu_grad_a': zeros_like(a),
+           'accu_grad_b': zeros_like(b),
+           'tol': tol,
+           'verbose': verbose,
+           'hyper': hyper}
+
+    inference = infer(obj, opt)
+    return inference
 
 
 def leave_one_out(trial, model, opt):
@@ -492,7 +495,7 @@ def cv(y, channel, sigma, omega, lag=0, rank=500, niter=50, nadjhess=5, tol=1e-5
     h = empty((nchannel, ntrial, ntime, 1 + lag), dtype=float)
     for ichannel in range(nchannel):
         for itrial in range(ntrial):
-            h[ichannel, itrial, :] = add_constant(lagmat(y[itrial, :, ichannel], maxlag=lag))
+            h[ichannel, itrial, :] = add_constant(lagmat(y[itrial, :, ichannel], lag=lag))
 
     yhat = empty_like(y)
     # do leave-one-out trial by trial

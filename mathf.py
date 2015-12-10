@@ -1,10 +1,8 @@
 import warnings
-from numpy import sum
-from numpy import zeros, ones, arange
-from numpy.core.umath import arcsin
-from scipy.linalg import orth, norm
-from numpy import vectorize, exp, finfo, log1p, inf, sqrt
 
+from numpy import inf, arange, ones, zeros, sum
+from numpy.core.umath import arcsin, exp, log1p, sqrt
+from scipy.linalg import orth, norm
 
 MIN_EXP = -20
 MAX_EXP = 20
