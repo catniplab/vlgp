@@ -1,9 +1,10 @@
-def dynplot(x, ncol=4, figsize=None):
-    import matplotlib as mpl
-    import matplotlib.pyplot as plt
-    from numpy import asarray, atleast_3d, rollaxis
-    from math import ceil
+import matplotlib as mpl
+import matplotlib.pyplot as plt
+from numpy import asarray, atleast_3d, rollaxis, arange
+from math import ceil
 
+
+def dynplot(x, ncol=4, figsize=None):
     x = asarray(x)
     if x.ndim < 3:
         x = atleast_3d(x)
@@ -31,11 +32,6 @@ def dynplot(x, ncol=4, figsize=None):
 
 
 def rasterplot(spike, ncol=4, figsize=None, margin=0.1):
-    import matplotlib as mpl
-    import matplotlib.pyplot as plt
-    from numpy import asarray, atleast_3d, rollaxis, arange
-    from math import ceil
-
     spike = asarray(spike)
     if spike.ndim < 3:
         spike = atleast_3d(spike)

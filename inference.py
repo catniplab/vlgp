@@ -1,13 +1,11 @@
 import timeit
-
 from numpy import identity, einsum, trace, inner, empty, mean, inf, diag, newaxis, var, asarray, zeros, zeros_like, \
-    empty_like, arange, sum
+    empty_like, arange, sum, array, full_like
 from numpy.core.umath import sqrt, PINF, log
 from numpy.linalg import norm, slogdet
 from scipy.linalg import lstsq, eigh, solve
 from scipy.stats import stats
 from sklearn.decomposition.factor_analysis import FactorAnalysis
-
 from hyper import learn_hyper
 from mathf import ichol_gauss, subspace, sexp
 from util import add_constant, rotate, lagmat
@@ -125,7 +123,8 @@ def inferpost(obj, opt):
             accu_grad_mu[itrial, :, ilatent] = accumulate(accu_grad_mu[itrial, :, ilatent], grad_mu, decay)
 
             if adjhess:
-                wadj = (w[:, ilatent] + sqrt(eps + accu_grad_mu[itrial, :, ilatent])).reshape((ntime, 1))  # adjusted Hessian
+                wadj = (w[:, ilatent] + sqrt(eps + accu_grad_mu[itrial, :, ilatent])).reshape(
+                    (ntime, 1))  # adjusted Hessian
             else:
                 wadj = w[:, ilatent].reshape((ntime, 1))
             GtWG = G.T.dot(wadj * G)
@@ -135,7 +134,7 @@ def inferpost(obj, opt):
 
             u = G.dot(G.T.dot(res.dot(a[ilatent, :]))) - mu[:, ilatent]
             delta_mu = u - G.dot((wadj * G).T.dot(u)) + \
-                      G.dot(GtWG.dot(solve(eyer + GtWG, (wadj * G).T.dot(u), sym_pos=True)))
+                       G.dot(GtWG.dot(solve(eyer + GtWG, (wadj * G).T.dot(u), sym_pos=True)))
 
             mu[:, ilatent] += delta_mu
             mu[:, ilatent] -= mean(mu[:, ilatent])
@@ -151,7 +150,7 @@ def inferpost(obj, opt):
             G = chol[ilatent, :, :]
             GtWG = G.T.dot(w[:, ilatent].reshape((ntime, 1)) * G)
             v[:, ilatent] = sum(G * (G - G.dot(GtWG) + G.dot(GtWG.dot(solve(eyer + GtWG, GtWG, sym_pos=True)))),
-                          axis=1)
+                                axis=1)
 
             A = eyer - GtWG + GtWG.dot(solve(eyer + GtWG, GtWG, sym_pos=True))  # A should be PD but numerically not
             eigval, eigvec = eigh(A)
@@ -208,12 +207,14 @@ def inferparam(obj, opt):
         elif channel[ichannel] == 'lfp':
             # a's least squares solution for Gaussian channel
             # (m'm + diag(j'v))^-1 m'(y - Hb)
-            a[:, ichannel] = solve(mu.T.dot(mu) + diag(sum(v, axis=0)), mu.T.dot(y[:, ichannel] - h[ichannel, :].dot(b[:, ichannel])),
+            a[:, ichannel] = solve(mu.T.dot(mu) + diag(sum(v, axis=0)),
+                                   mu.T.dot(y[:, ichannel] - h[ichannel, :].dot(b[:, ichannel])),
                                    sym_pos=True)
 
             # b's least squares solution for Gaussian channel
             # (H'H)^-1 H'(y - ma)
-            b[:, ichannel] = solve(h[ichannel, :].T.dot(h[ichannel, :]), h[ichannel, :].T.dot(y[:, ichannel] - mu.dot(a[:, ichannel])), sym_pos=True)
+            b[:, ichannel] = solve(h[ichannel, :].T.dot(h[ichannel, :]),
+                                   h[ichannel, :].T.dot(y[:, ichannel] - mu.dot(a[:, ichannel])), sym_pos=True)
         else:
             print('Undefined channel')
     noise[:] = var(y - eta, axis=0, ddof=0)
@@ -303,8 +304,10 @@ def infer(obj, opt):
                     print('Hessian adjustment enabled.')
             else:
                 converged = True
-        elif abs(lb[iiter] - lb[iiter-1]) < opt['tol'] * abs(lb[iiter-1]):
+        elif abs(lb[iiter] - lb[iiter - 1]) < opt['tol'] * abs(lb[iiter - 1]):
             converged = True
+        else:
+            opt['adjhess'] = False
 
         good_mu[:] = obj['mu']
         good_w[:] = obj['w']
@@ -377,7 +380,8 @@ def fit(y, channel, sigma, omega, x=None, alpha=None, beta=None, lag=0, rank=500
     # initialize parameters
     b = empty((1 + lag, nchannel), dtype=float)
     for ichannel in range(nchannel):
-        b[:, ichannel] = lstsq(h.reshape((nchannel, -1, 1 + lag))[ichannel, :], y.reshape((-1, nchannel))[:, ichannel])[0]
+        b[:, ichannel] = lstsq(h.reshape((nchannel, -1, 1 + lag))[ichannel, :], y.reshape((-1, nchannel))[:, ichannel])[
+            0]
 
     noise = var(y.reshape((-1, nchannel)), axis=0, ddof=0)
 
@@ -458,9 +462,12 @@ def leave_one_out(trial, model, opt):
         inference = infer(obj, opt)
 
         if channel[ichannel] == 'spike':
-            yhat[:, :, ichannel] = sexp(inference['mu'].reshape((-1, nlatent)).dot(a[:, ichannel]) + hn.reshape((ntime, -1)).dot(b[:, ichannel]))
+            yhat[:, :, ichannel] = sexp(
+                inference['mu'].reshape((-1, nlatent)).dot(a[:, ichannel]) + hn.reshape((ntime, -1)).dot(
+                    b[:, ichannel]))
         else:
-            yhat[:, :, ichannel] = inference['mu'].reshape((-1, nlatent)).dot(a[:, ichannel]) + hn.reshape((ntime, -1)).dot(b[:, ichannel])
+            yhat[:, :, ichannel] = inference['mu'].reshape((-1, nlatent)).dot(a[:, ichannel]) + hn.reshape(
+                (ntime, -1)).dot(b[:, ichannel])
 
     return trial
 
@@ -500,7 +507,8 @@ def cv(y, channel, sigma, omega, lag=0, rank=500, niter=50, nadjhess=5, tol=1e-5
     yhat = empty_like(y)
     # do leave-one-out trial by trial
     for itrial in range(ntrial):
-        test_trial = {'y': y[itrial, :][None, ...], 'h': h[:, itrial, :, :][:, None, :, :], 'yhat': yhat[itrial, :][None, ...]}
+        test_trial = {'y': y[itrial, :][None, ...], 'h': h[:, itrial, :, :][:, None, :, :],
+                      'yhat': yhat[itrial, :][None, ...]}
         itrain = arange(ntrial) != itrial
         model = fit(y[itrain, :], channel, sigma, omega, x=None, alpha=None, beta=None, lag=lag, rank=rank, niter=niter,
                     nadjhess=nadjhess, tol=tol, verbose=False)
