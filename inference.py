@@ -4,7 +4,7 @@ from numpy import identity, einsum, trace, inner, empty, mean, inf, diag, newaxi
 from numpy.core.umath import sqrt, PINF, log
 from numpy.linalg import norm, slogdet
 from scipy.linalg import lstsq, eigh, solve
-from scipy.stats import stats
+from scipy import stats
 from sklearn.decomposition.factor_analysis import FactorAnalysis
 from hyper import learn_hyper
 from mathf import ichol_gauss, subspace, sexp
@@ -456,7 +456,7 @@ def leave_one_out(trial, model, opt):
         obj['a'] = model['a'][:, exceptn]
         obj['b'] = model['b'][:, exceptn]
         obj['noise'] = model['noise'][exceptn]
-
+        opt['hyper'] = False
         opt['infer'] = 'posterior'
 
         inference = infer(obj, opt)
@@ -511,7 +511,7 @@ def cv(y, channel, sigma, omega, lag=0, rank=500, niter=50, nadjhess=5, tol=1e-5
                       'yhat': yhat[itrial, :][None, ...]}
         itrain = arange(ntrial) != itrial
         model = fit(y[itrain, :], channel, sigma, omega, x=None, alpha=None, beta=None, lag=lag, rank=rank, niter=niter,
-                    nadjhess=nadjhess, tol=tol, verbose=False)
+                    nadjhess=nadjhess, tol=tol, verbose=False, hyper=False)
         opt = {'niter': niter,
                'infer': 'both',
                'nadjhess': nadjhess,
