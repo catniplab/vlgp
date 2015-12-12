@@ -1,6 +1,6 @@
-from numpy import exp, column_stack, roll, atleast_2d, pi, sum, dot
-from numpy import zeros, ones, diag, meshgrid, arange, eye, asarray, atleast_3d, rollaxis
-from scipy.linalg import svd, lstsq
+from numpy import exp, column_stack, roll, pi, sum, dot
+from numpy import zeros, ones, diag, arange, eye, asarray, atleast_3d, rollaxis
+from scipy.linalg import svd, lstsq, toeplitz
 
 
 def makeregressor(obs, p):
@@ -36,8 +36,9 @@ def sqexpcov(n, w, var=1.0):
         covariance
     """
 
-    i, j = meshgrid(arange(n), arange(n))
-    return var * exp(- w * (i - j) ** 2)
+    # i, j = meshgrid(arange(n), arange(n))
+    # return var * exp(- w * (i - j) ** 2)
+    return var * exp(-w * toeplitz(arange(n)))
 
 
 def varimax(x, gamma=1.0, q=20, tol=1e-5):
@@ -59,7 +60,8 @@ def varimax(x, gamma=1.0, q=20, tol=1e-5):
     for i in range(q):
         d_old = d
         rotated = dot(x, rotation)
-        u, s, vh = svd(dot(x.T, asarray(rotated) ** 3 - (gamma / p) * dot(rotated, diag(diag(dot(rotated.T, rotated))))))
+        u, s, vh = svd(
+            dot(x.T, asarray(rotated) ** 3 - (gamma / p) * dot(rotated, diag(diag(dot(rotated.T, rotated))))))
         rotation = dot(u, vh)
         d = sum(s)
         if d_old != 0 and d / d_old < 1 + tol:
@@ -106,7 +108,7 @@ def regmat(y, lag=0):
     h = zeros((nchannel, ntrial, ntime, 1 + lag))
     for n in range(nchannel):
         for m in range(ntrial):
-            h[n, m, :] = add_constant(lagmat(y[m, :, n], maxlag=lag))
+            h[n, m, :] = add_constant(lagmat(y[m, :, n], lag=lag))
     return h
 
 
@@ -148,20 +150,18 @@ def lagmat(x, lag):
 
     """
     x = asarray(x)
-    # x = atleast_2d(x)
     if x.ndim < 2:
         x = x[..., None]
-    nobs, nvar = x.shape
-    dropidx = nvar
-    if lag >= nobs:
-        raise ValueError("lag should be < nobs")
-    lm = zeros((nobs + lag, nvar * (lag + 1)))
-    for k in range(0, int(lag+1)):
-        lm[lag - k:nobs + lag - k, nvar * (lag - k):nvar * (lag - k + 1)] = x
-    startobs = 0
-    stopobs = nobs + lag - k
+    nrow, ncol = x.shape
+    if lag >= nrow:
+        raise ValueError("lag should be < nrow")
+    mat = zeros((nrow + lag, ncol * (lag + 1)))
+    for k in range(0, int(lag + 1)):
+        mat[lag - k:nrow + lag - k, ncol * (lag - k):ncol * (lag - k + 1)] = x
+    startrow = 0
+    stoprow = nrow + lag - k
 
-    return lm[startobs:stopobs, dropidx:]
+    return mat[startrow:stoprow, ncol:]
 
 
 def rad2deg(r):
