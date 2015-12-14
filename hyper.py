@@ -1,9 +1,10 @@
-from numpy import identity, inner, meshgrid, arange, outer, zeros_like, trace, empty_like, empty, sum, dstack, diag
-from numpy.core.umath import exp, log
+from numpy import identity, inner, arange, outer, trace, empty_like, dstack, diag, clip
+from numpy.core.umath import exp, log, sign
 from numpy.linalg import slogdet
 from numpy.random.mtrand import choice
-from scipy.linalg import lstsq, solve, toeplitz, solve_toeplitz
+from scipy.linalg import lstsq, solve, toeplitz
 from scipy.optimize import minimize, minimize_scalar
+
 from mathf import ichol_gauss
 from util import sqexpcov
 
@@ -75,33 +76,37 @@ def Kprime(theta, sigma, n):
     return -sigmasq * exp(-omega * difsq) * omega * difsq
 
 
-def KLprime(theta, sigma, n, M, S, eps=1e-6):
+def KLprime(theta, sigma, n, mu, M, S, eps=1e-6):
     omega = exp(theta)
     sigmasq = sigma ** 2
     nseg = M.shape[-1]
     dsq = arange(n) ** 2
     Dsq = toeplitz(dsq)
     k = sigmasq * exp(-omega * dsq)
-    K = toeplitz(k)
-    KinvKD = solve_toeplitz(k, K * Dsq * omega)
+    K = toeplitz(k) + eps * identity(n)
+    KinvKD = solve(K, K * Dsq * omega, sym_pos=True)
     grad = 0.0
     for iseg in range(nseg):
-        KinvS = solve_toeplitz(k, S[:, :, iseg])
-        KinvM = solve_toeplitz(k, M[:, :, iseg])
-        grad += trace(solve(KinvM + KinvS - identity(n), KinvKD, sym_pos=True))
-    return grad / 2
+        # print(K.shape)
+        # print(S[:, :, iseg].shape)
+        KinvS = solve(K, S[:, :, iseg], sym_pos=True)
+        KinvM = solve(K, M[:, :, iseg], sym_pos=True)
+        # grad += trace(solve(KinvM + KinvS - identity(n), KinvKD, sym_pos=True))
+        grad += trace(lstsq(KinvM + KinvS - identity(n), KinvKD)[0])
+    return clip(grad / 2, -1, 1)
 
 
-def KL(theta, sigma, n, mu, S, eps=1e-6):
+def KL(theta, sigma, n, mu, M, S, eps=1e-6):
     omega = exp(theta)
     sigmasq = sigma ** 2
     nseg = mu.shape[-1]
     dsq = arange(n) ** 2
     k = sigmasq * exp(-omega * dsq)
+    K = toeplitz(k) + eps * identity(n)
     div = 0.0
     for iseg in range(nseg):
-        KinvS = solve_toeplitz(k, S[:, :, iseg])
-        muKinvmu = mu[:, iseg].dot(solve_toeplitz(k, mu[:, iseg]))
+        KinvS = solve(K, S[:, :, iseg], sym_pos=True)
+        muKinvmu = mu[:, iseg].dot(solve(K, mu[:, iseg], sym_pos=True))
         div += muKinvmu + trace(KinvS) - slogdet(KinvS)[1]
     return div / 2
 
@@ -111,14 +116,18 @@ def learngp(obj, window=50, nseg=10, eps=1e-6):
     mu = obj['mu'].reshape((-1, nlatent))
     w = obj['w'].reshape((-1, nlatent))
     sigma = obj['sigma']
-    omega = obj['omega']
+    omega = obj['omega'].copy()
     n = ntrial * ntime - window
     start = choice(arange(n), size=nseg)
     win_mu = dstack([mu[i:i + window, :] for i in start])
     win_w = dstack([w[i:i + window, :] for i in start])
     dsq = arange(window) ** 2
+    Dsq = toeplitz(dsq)
     for ilatent in range(nlatent):
-        K = sigma[ilatent] ** 2 * exp(-omega[ilatent] * dsq)
+        K = sigma[ilatent] ** 2 * exp(-omega[ilatent] * Dsq) + eps * identity(window)
         S = dstack([K - K.dot(solve(diag(1 / (eps + win_w[:, ilatent, iseg])) + K, K, sym_pos=True)) for iseg in range(nseg)])
-        omega[ilatent] = minimize(KL, x0=log(omega[ilatent]), jac=KLprime, args=(sigma[ilatent], window, win_mu[:, ilatent, :], S), method='CG').x
+        M = dstack([outer(win_mu[:, ilatent, iseg], win_mu[:, ilatent, iseg]) for iseg in range(nseg)])
+        # mini = minimize(KL, x0=log(omega[ilatent]), jac=KLprime, args=(sigma[ilatent], window, win_mu[:, ilatent, :], M, S))
+        mini = minimize_scalar(KL, args=(sigma[ilatent], window, win_mu[:, ilatent, :], M, S))
+        omega[ilatent] = exp(mini.x)
     return omega

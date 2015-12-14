@@ -1,12 +1,12 @@
 import timeit
 from numpy import identity, einsum, trace, inner, empty, mean, inf, diag, newaxis, var, asarray, zeros, zeros_like, \
-    empty_like, arange, sum, array, full_like
+    empty_like, arange, sum, array, full_like, array_equal
 from numpy.core.umath import sqrt, PINF, log
 from numpy.linalg import norm, slogdet
 from scipy.linalg import lstsq, eigh, solve
 from scipy import stats
 from sklearn.decomposition.factor_analysis import FactorAnalysis
-from hyper import learn_hyper
+from hyper import learn_hyper, learngp
 from mathf import ichol_gauss, subspace, sexp
 from util import add_constant, rotate, lagmat
 
@@ -240,6 +240,7 @@ def infer(obj, opt):
     good_a = obj['a'].copy()
     good_b = obj['b'].copy()
     good_noise = obj['noise'].copy()
+    good_omega = obj['omega'].copy()
 
     lb = zeros(opt['niter'], dtype=float)
     ll = zeros(opt['niter'], dtype=float)
@@ -286,6 +287,14 @@ def infer(obj, opt):
         if alpha is not None:
             loading_angle[iiter] = subspace(alpha.T, obj['a'].T)
 
+        if opt['hyper'] and iiter % opt['nhyper'] == 0:
+            nlatent, ntime, rank = obj['chol'].shape
+            obj['omega'] = learngp(obj)
+            if opt['verbose']:
+                print('omega: {}'.format(obj['omega']))
+            for ilatent in range(nlatent):
+                obj['chol'][ilatent, :] = ichol_gauss(ntime, obj['omega'][ilatent], rank) * obj['sigma'][ilatent]
+
         lb[iiter], ll[iiter] = elbo(obj)
         if lb[iiter] < lb[iiter - 1]:
             # backtracking
@@ -295,6 +304,11 @@ def infer(obj, opt):
             obj['a'][:] = good_a
             obj['b'][:] = good_b
             obj['noise'][:] = good_noise
+            if not array_equal(obj['omega'], good_omega):
+                obj['omega'][:] = good_omega
+                for ilatent in range(nlatent):
+                    obj['chol'][ilatent, :] = ichol_gauss(ntime, obj['omega'][ilatent], rank) * obj['sigma'][ilatent]
+
             lb[iiter] = lb[iiter - 1]
             if opt['verbose']:
                 print('ELBO decreased. Backtracking.')
@@ -315,12 +329,7 @@ def infer(obj, opt):
         good_a[:] = obj['a']
         good_b[:] = obj['b']
         good_noise[:] = obj['noise']
-
-        if opt['hyper']:
-            nlatent, ntime, rank = obj['chol'].shape
-            obj['omega'] = learn_hyper(obj)
-            for ilatent in range(nlatent):
-                obj['chol'][ilatent, :] = ichol_gauss(ntime, obj['omega'][ilatent], rank) * obj['sigma'][ilatent]
+        good_omega[:] = obj['omega']
 
         iter_end = timeit.default_timer()
         elapsed[iiter, 2] = iter_end - iter_start
@@ -401,7 +410,8 @@ def fit(y, channel, sigma, omega, x=None, alpha=None, beta=None, lag=0, rank=500
            'accu_grad_b': zeros_like(b),
            'tol': tol,
            'verbose': verbose,
-           'hyper': hyper}
+           'hyper': hyper,
+           'nhyper': 5}
 
     inference = infer(obj, opt)
     return inference
