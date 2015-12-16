@@ -1,3 +1,6 @@
+"""
+Functions of sequentially fit
+"""
 import timeit
 from numpy import identity, einsum, trace, inner, empty, mean, inf, diag, newaxis, var, asarray, zeros, zeros_like, \
     empty_like, arange, sum, array, full_like
@@ -6,7 +9,7 @@ from numpy.linalg import norm, slogdet
 from scipy.linalg import lstsq, eigh, solve
 from scipy.stats import stats
 from sklearn.decomposition.factor_analysis import FactorAnalysis
-from hyper import learn_hyper
+from hyper import learngp
 from inference import accumulate
 from mathf import ichol_gauss, subspace, sexp
 from util import add_constant, rotate, lagmat

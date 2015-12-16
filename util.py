@@ -1,3 +1,6 @@
+"""
+Tool functions
+"""
 from numpy import exp, column_stack, roll, pi, sum, dot
 from numpy import zeros, ones, diag, arange, eye, asarray, atleast_3d, rollaxis
 from scipy.linalg import svd, lstsq, toeplitz

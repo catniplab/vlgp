@@ -1,3 +1,6 @@
+"""
+Functions of Inference
+"""
 import timeit
 from numpy import identity, einsum, trace, inner, empty, mean, inf, diag, newaxis, var, asarray, zeros, zeros_like, \
     empty_like, arange, sum, array, full_like, array_equal
@@ -6,9 +9,12 @@ from numpy.linalg import norm, slogdet
 from scipy.linalg import lstsq, eigh, solve
 from scipy import stats
 from sklearn.decomposition.factor_analysis import FactorAnalysis
-from hyper import learn_hyper, learngp
+from hyper import learngp
 from mathf import ichol_gauss, subspace, sexp
 from util import add_constant, rotate, lagmat
+
+
+# TODO: replace opt with **kwargs
 
 
 def elbo(obj):
@@ -124,7 +130,7 @@ def inferpost(obj, opt):
 
             if adjhess:
                 wadj = (w[:, ilatent] + sqrt(eps + accu_grad_mu[itrial, :, ilatent])).reshape(
-                    (ntime, 1))  # adjusted Hessian
+                        (ntime, 1))  # adjusted Hessian
             else:
                 wadj = w[:, ilatent].reshape((ntime, 1))
             GtWG = G.T.dot(wadj * G)
@@ -289,9 +295,11 @@ def infer(obj, opt):
 
         if opt['hyper'] and iiter % opt['nhyper'] == 0:
             nlatent, ntime, rank = obj['chol'].shape
-            obj['omega'] = learngp(obj)
+            gp = learngp(obj)
+            # obj['sigma'][:] = gp[0]
+            obj['omega'][:] = gp[1]
             if opt['verbose']:
-                print('omega: {}'.format(obj['omega']))
+                print('sigma: {} \nomega: {}'.format(obj['sigma'], obj['omega']))
             for ilatent in range(nlatent):
                 obj['chol'][ilatent, :] = ichol_gauss(ntime, obj['omega'][ilatent], rank) * obj['sigma'][ilatent]
 
@@ -473,16 +481,16 @@ def leave_one_out(trial, model, opt):
 
         if channel[ichannel] == 'spike':
             yhat[:, :, ichannel] = sexp(
-                inference['mu'].reshape((-1, nlatent)).dot(a[:, ichannel]) + hn.reshape((ntime, -1)).dot(
-                    b[:, ichannel]))
+                    inference['mu'].reshape((-1, nlatent)).dot(a[:, ichannel]) + hn.reshape((ntime, -1)).dot(
+                            b[:, ichannel]))
         else:
             yhat[:, :, ichannel] = inference['mu'].reshape((-1, nlatent)).dot(a[:, ichannel]) + hn.reshape(
-                (ntime, -1)).dot(b[:, ichannel])
+                    (ntime, -1)).dot(b[:, ichannel])
 
     return trial
 
 
-def cv(y, channel, sigma, omega, lag=0, rank=500, niter=50, nadjhess=5, tol=1e-5):
+def cv(y, channel, sigma, omega, lag=0, rank=500, niter=50, nadjhess=5, tol=1e-5, hyper=False):
     """Use each trial as testset
 
     Args:
@@ -495,6 +503,7 @@ def cv(y, channel, sigma, omega, lag=0, rank=500, niter=50, nadjhess=5, tol=1e-5
         niter:
         nadjhess:
         tol:
+        hyper:
 
     Returns:
 
@@ -514,14 +523,14 @@ def cv(y, channel, sigma, omega, lag=0, rank=500, niter=50, nadjhess=5, tol=1e-5
         for itrial in range(ntrial):
             h[ichannel, itrial, :] = add_constant(lagmat(y[itrial, :, ichannel], lag=lag))
 
-    yhat = empty_like(y)
+    yhat = empty_like(y, dtype=float)
     # do leave-one-out trial by trial
     for itrial in range(ntrial):
         test_trial = {'y': y[itrial, :][None, ...], 'h': h[:, itrial, :, :][:, None, :, :],
                       'yhat': yhat[itrial, :][None, ...]}
         itrain = arange(ntrial) != itrial
         model = fit(y[itrain, :], channel, sigma, omega, x=None, alpha=None, beta=None, lag=lag, rank=rank, niter=niter,
-                    nadjhess=nadjhess, tol=tol, verbose=False, hyper=False)
+                    nadjhess=nadjhess, tol=tol, verbose=False, hyper=hyper)
         opt = {'niter': niter,
                'infer': 'both',
                'nadjhess': nadjhess,
@@ -532,7 +541,8 @@ def cv(y, channel, sigma, omega, lag=0, rank=500, niter=50, nadjhess=5, tol=1e-5
                'accu_grad_a': zeros_like(model['a']),
                'accu_grad_b': zeros_like(model['b']),
                'tol': tol,
-               'verbose': False}
+               'verbose': False,
+               'hyper': False}
         leave_one_out(test_trial, model, opt)
     ll = stats.poisson.logpmf(y.ravel(), yhat.ravel()).reshape(y.shape)
     result = {'y': y, 'yhat': yhat, 'LL': ll}

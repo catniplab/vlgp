@@ -1,3 +1,9 @@
+"""
+Functions doing math
+link functions
+cholesky decomposition
+subspace angle
+"""
 import warnings
 
 from numpy import inf, arange, ones, zeros, sum
@@ -44,7 +50,7 @@ def ichol_gauss(n, omega, r, tol=1e-6):
     pvec = arange(n, dtype=int)
     i = 0
     G = zeros((n, r), dtype=float)
-    while i < r and sum(diagG[i:]) > tol:
+    while i < r and sum(diagG[i:]) > tol * n:
         if i > 0:
             jast = diagG[i:].argmax()
             jast += i

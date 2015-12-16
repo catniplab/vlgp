@@ -1,3 +1,8 @@
+"""
+Functions of simulation
+Gaussian process
+Spike train
+"""
 import numpy as np
 
 from numpy import pi, exp, sqrt, log2, ceil, fft, einsum
