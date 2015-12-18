@@ -331,8 +331,8 @@ def infer(obj, **kwargs):
                     adjhess = True
                     if kwargs['verbose']:
                         print('Hessian adjustment enabled.')
-                # else:
-                #     converged = True
+                else:
+                    converged = True
             elif abs(lb[iiter, which] - lb[iiter - 1, which]) < kwargs['tol'] * abs(lb[iiter - 1, which]):
                 converged = True
             else:
@@ -357,12 +357,12 @@ def infer(obj, **kwargs):
             iiter += 1
         # infer_end = timeit.default_timer()
 
-    # if kwargs['verbose']:
-    #     print('Inference ends.\n')
-    #     print('{} iterations, ELBO: {:.4f}, elapsed: {:.2f}, converged: {}\n'.format(iiter - 1,
-    #                                                                                  lb[iiter - 1],
-    #                                                                                  infer_end - infer_start,
-    #                                                                                  converged))
+    if kwargs['verbose']:
+        print('Inference ends.\n')
+        # print('{} iterations, ELBO: {:.4f}, elapsed: {:.2f}, converged: {}\n'.format(iiter - 1,
+        #                                                                              lb[iiter - 1],
+        #                                                                              infer_end - infer_start,
+        #                                                                              converged))
     obj['ELBO'] = lb[:iiter, :]
     obj['Elapsed'] = elapsed[:iiter, :]
     obj['LL'] = ll[:iiter, :]
