@@ -54,10 +54,10 @@ def rasterplot(spike, ncol=4, figsize=None, margin=0.1):
         i = m // ncol
         j = m % ncol
         ax = plt.subplot2grid((nrow, ncol), (i, j))
-        plt.ylim(0, ntrain);
+        plt.ylim(0, ntrain)
         for n in range(ntrain):
-            plt.vlines(arange(ntime)[spike[m, :, n] > 0], n + margin, n + 1 - margin, color='black', lw=1);
-        plt.yticks([]);
+            plt.vlines(arange(ntime)[spike[m, :, n] > 0], n + margin, n + 1 - margin, color='black', lw=1)
+        plt.yticks([])
         ax.axis('off')
-        ax.invert_yaxis();
+        ax.invert_yaxis()
     plt.tight_layout()

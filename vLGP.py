@@ -2,19 +2,18 @@
 Functions of Inference
 """
 import timeit
+
 from numpy import identity, einsum, trace, inner, empty, mean, inf, diag, newaxis, var, asarray, zeros, zeros_like, \
-    empty_like, arange, sum, array, full_like, array_equal
+    empty_like, arange, sum
 from numpy.core.umath import sqrt, PINF, log
 from numpy.linalg import norm, slogdet
-from scipy.linalg import lstsq, eigh, solve
 from scipy import stats
+from scipy.linalg import lstsq, eigh, solve
 from sklearn.decomposition.factor_analysis import FactorAnalysis
+
 from hyper import learngp
 from mathf import ichol_gauss, subspace, sexp
 from util import add_constant, rotate, lagmat
-
-
-# TODO: replace opt with **kwargs
 
 
 def elbo(obj):
@@ -61,7 +60,7 @@ def elbo(obj):
             tr = ntime - trace(GtWG) + trace(A)
             lndet = slogdet(eyer - GtWG + A)[1]
 
-            lb += -0.5 * inner(G_mldiv_mu, G_mldiv_mu) - 0.5 * tr + 0.5 * lndet
+            lb += -0.5 * inner(G_mldiv_mu, G_mldiv_mu) - 0.5 * tr + 0.5 * lndet + 0.5 * ntime
 
     return lb, ll
 
@@ -269,6 +268,7 @@ def infer(obj, **kwargs):
     elapsed = zeros((kwargs['niter'], 3), dtype=float)
     loading_angle = zeros(kwargs['niter'], dtype=float)
     latent_angle = zeros(kwargs['niter'], dtype=float)
+    nlatent, ntime, rank = obj['chol'].shape
 
     x = obj.get('x')
     alpha = obj.get('alpha')
@@ -311,7 +311,6 @@ def infer(obj, **kwargs):
             loading_angle[iiter] = subspace(alpha.T, obj['a'].T)
 
         if iiter % kwargs['nhyper'] == 0 and (kwargs['learn_sigma'] or kwargs['learn_omega']):
-            nlatent, ntime, rank = obj['chol'].shape
             gp = learngp(obj, **kwargs)
             obj['sigma'][:] = gp[0]
             obj['omega'][:] = gp[1]
@@ -329,7 +328,6 @@ def infer(obj, **kwargs):
             obj['a'][:] = good_a
             obj['b'][:] = good_b
             obj['noise'][:] = good_noise
-            # if not array_equal(obj['omega'], good_omega):
             obj['sigma'][:] = good_sigma
             obj['omega'][:] = good_omega
             for ilatent in range(nlatent):
@@ -434,7 +432,63 @@ def fit(y, channel, sigma, omega, x=None, alpha=None, beta=None, lag=0, rank=500
     return inference
 
 
-def leave_one_out(trial, model, opt):
+def seqfit(y, channel, sigma, omega, lag=0, rank=500, **kwargs):
+    assert sigma.shape == omega.shape
+    kwargs = fillargs(**kwargs)
+
+    y = asarray(y)
+    if y.ndim < 2:
+        y = y[..., None]
+    if y.ndim < 3:
+        y = y[None, ...]
+    channel = asarray(channel)
+    ntrial, ntime, nchannel = y.shape
+    nlatent = sigma.shape[0]
+
+    h = empty((nchannel, ntrial, ntime, 1 + lag), dtype=float)
+    for ichannel in range(nchannel):
+        for itrial in range(ntrial):
+            h[ichannel, itrial, :] = add_constant(lagmat(y[itrial, :, ichannel], lag=lag))
+
+    chol = empty((nlatent, ntime, rank), dtype=float)
+    for ilatent in range(nlatent):
+        chol[ilatent, :] = ichol_gauss(ntime, omega[ilatent], rank) * sigma[ilatent]
+
+    # initialize posterior
+    fa = FactorAnalysis(n_components=nlatent, svd_method='lapack')
+    mu = fa.fit_transform(y.reshape((-1, nchannel)))
+    mu -= mu.mean(axis=0)
+    a = fa.components_ * norm(mu, ord=inf, axis=0, keepdims=True).T
+    mu /= norm(mu, ord=inf, axis=0)
+    mu = mu.reshape((ntrial, ntime, nlatent))
+    L = empty((ntrial, nlatent, ntime, rank))
+    w = zeros((ntrial, ntime, nlatent))
+    v = zeros((ntrial, ntime, nlatent))
+
+    # initialize parameters
+    b = empty((1 + lag, nchannel), dtype=float)
+    for ichannel in range(nchannel):
+        b[:, ichannel] = lstsq(h.reshape((nchannel, -1, 1 + lag))[ichannel, :], y.reshape((-1, nchannel))[:, ichannel])[
+            0]
+
+    noise = var(y.reshape((-1, nchannel)), axis=0, ddof=0)
+    objs = []
+    for i in range(nlatent):
+        obj = {'y': y, 'channel': channel, 'h': h,
+               'sigma': sigma[:i + 1], 'omega': omega[:i + 1], 'chol': chol[:i + 1, :],
+               'mu': mu[:, :, :i + 1], 'w': w[:, :, :i + 1], 'v': v[:, :, :i + 1], 'L': L[:, :i + 1, :, :],
+               'a': a[:i + 1, :], 'b': b, 'noise': noise}
+
+        kwargs['accu_grad_mu'] = zeros_like(mu[:, :, :i + 1])
+        kwargs['accu_grad_a'] = zeros_like(a[:i + 1, :])
+        kwargs['accu_grad_b'] = zeros_like(b)
+
+        objs.append(infer(obj, **kwargs))
+
+    return objs
+
+
+def leave_one_out(trial, model, **kwargs):
     """Leave-one-out
 
     Predict each spike train
@@ -442,11 +496,12 @@ def leave_one_out(trial, model, opt):
     Args:
         trial:
         model:
-        opt:
+        kwargs:
 
     Returns:
 
     """
+    kwargs = fillargs(**kwargs)
     y = trial['y']
     h = trial['h']
     channel = model['channel']
@@ -483,23 +538,23 @@ def leave_one_out(trial, model, opt):
         obj['a'] = model['a'][:, exceptn]
         obj['b'] = model['b'][:, exceptn]
         obj['noise'] = model['noise'][exceptn]
-        opt['hyper'] = False
-        opt['infer'] = 'posterior'
+        kwargs['hyper'] = False
+        kwargs['infer'] = 'posterior'
 
-        inference = infer(obj, opt)
+        obj = infer(obj, **kwargs)
 
         if channel[ichannel] == 'spike':
             yhat[:, :, ichannel] = sexp(
-                    inference['mu'].reshape((-1, nlatent)).dot(a[:, ichannel]) + hn.reshape((ntime, -1)).dot(
+                    obj['mu'].reshape((-1, nlatent)).dot(a[:, ichannel]) + hn.reshape((ntime, -1)).dot(
                             b[:, ichannel]))
         else:
-            yhat[:, :, ichannel] = inference['mu'].reshape((-1, nlatent)).dot(a[:, ichannel]) + hn.reshape(
+            yhat[:, :, ichannel] = obj['mu'].reshape((-1, nlatent)).dot(a[:, ichannel]) + hn.reshape(
                     (ntime, -1)).dot(b[:, ichannel])
 
     return trial
 
 
-def cv(y, channel, sigma, omega, lag=0, rank=500, niter=50, nadjhess=5, tol=1e-5, hyper=False):
+def cv(y, channel, sigma, omega, lag=0, rank=500, **kwargs):
     """Use each trial as testset
 
     Args:
@@ -517,6 +572,7 @@ def cv(y, channel, sigma, omega, lag=0, rank=500, niter=50, nadjhess=5, tol=1e-5
     Returns:
 
     """
+    kwargs = fillargs(**kwargs)
     assert sigma.shape == omega.shape
 
     y = asarray(y)
@@ -538,21 +594,10 @@ def cv(y, channel, sigma, omega, lag=0, rank=500, niter=50, nadjhess=5, tol=1e-5
         test_trial = {'y': y[itrial, :][None, ...], 'h': h[:, itrial, :, :][:, None, :, :],
                       'yhat': yhat[itrial, :][None, ...]}
         itrain = arange(ntrial) != itrial
-        model = fit(y[itrain, :], channel, sigma, omega, x=None, alpha=None, beta=None, lag=lag, rank=rank, niter=niter,
-                    nadjhess=nadjhess, tol=tol, verbose=False, hyper=hyper)
-        opt = {'niter': niter,
-               'infer': 'both',
-               'nadjhess': nadjhess,
-               'adjhess': False,
-               'decay': 0,
-               'eps': 1e-6,
-               'accu_grad_mu': zeros_like(model['mu']),
-               'accu_grad_a': zeros_like(model['a']),
-               'accu_grad_b': zeros_like(model['b']),
-               'tol': tol,
-               'verbose': False,
-               'hyper': False}
-        leave_one_out(test_trial, model, opt)
+        model = fit(y[itrain, :], channel, sigma, omega, x=None, alpha=None, beta=None, lag=lag, rank=rank, **kwargs)
+        kwargs['verbose'] = False
+        kwargs['hyper'] = False
+        leave_one_out(test_trial, model, **kwargs)
     ll = stats.poisson.logpmf(y.ravel(), yhat.ravel()).reshape(y.shape)
-    result = {'y': y, 'yhat': yhat, 'LL': ll}
-    return result
+    prediction = {'y': y, 'yhat': yhat, 'LL': ll}
+    return prediction

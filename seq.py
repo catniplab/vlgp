@@ -4,7 +4,7 @@ Functions of sequentially fit
 import timeit
 
 from numpy import identity, einsum, trace, inner, empty, mean, inf, diag, newaxis, var, asarray, zeros, zeros_like, \
-    sum, array_equal, full, nan
+    sum, full, nan
 from numpy.core.umath import sqrt, PINF, log
 from numpy.linalg import norm, slogdet
 from scipy.linalg import lstsq, eigh, solve
@@ -155,7 +155,8 @@ def inferpost(obj, **kwargs):
         res[:, lfp] = (y[:, lfp] - eta[:, lfp]) / noise[lfp]
 
         u = G.dot(G.T.dot(res.dot(a[which, :]))) - mu[:, which]
-        delta_mu = u - G.dot((wadj * G).T.dot(u)) + G.dot(GtWG.dot(solve(eyer + GtWG, (wadj * G).T.dot(u), sym_pos=True)))
+        delta_mu = u - G.dot((wadj * G).T.dot(u)) + G.dot(GtWG.dot(solve(eyer + GtWG, (wadj * G).T.dot(u),
+                                                                         sym_pos=True)))
 
         mu[:, which] += delta_mu
         mu[:, which] -= mean(mu[:, which])
@@ -256,6 +257,7 @@ def infer(obj, **kwargs):
         print('\nInference starts.')
 
     ntrial, ntime, nlatent = obj['mu'].shape
+    _, _, rank = obj['chol'].shape
 
     # for backtracking
     good_mu = obj['mu'].copy()
@@ -301,7 +303,6 @@ def infer(obj, **kwargs):
             elapsed[iiter, 1, which] = param_end - param_start
 
             if iiter % kwargs['nhyper'] == 0 and (kwargs['learn_sigma'] or kwargs['learn_omega']):
-                nlatent, ntime, rank = obj['chol'].shape
                 gp = learngp(obj, latents=[which], **kwargs)
                 obj['sigma'][which] = gp[0][which]
                 obj['omega'][which] = gp[1][which]
@@ -352,7 +353,8 @@ def infer(obj, **kwargs):
 
             if kwargs['verbose']:
                 print('[{}], posterior elapsed: {:.2f}, parameter elapsed: {:.2f}, '
-                      'ELBO: {:.4f}, LL: {:.4f}'.format(iiter, elapsed[iiter, 0, which], elapsed[iiter, 1, which], lb[iiter, which], ll[iiter, which]))
+                      'ELBO: {:.4f}, LL: {:.4f}'.format(iiter, elapsed[iiter, 0, which], elapsed[iiter, 1, which],
+                                                        lb[iiter, which], ll[iiter, which]))
 
             iiter += 1
         # infer_end = timeit.default_timer()
@@ -414,6 +416,6 @@ def elbo(obj):
             tr = ntime - trace(GtWG) + trace(A)
             lndet = slogdet(eyer - GtWG + A)[1]
 
-            lb += -0.5 * inner(G_mldiv_mu, G_mldiv_mu) - 0.5 * tr + 0.5 * lndet
+            lb += -0.5 * inner(G_mldiv_mu, G_mldiv_mu) - 0.5 * tr + 0.5 * lndet + 0.5 * ntime
 
     return lb, ll

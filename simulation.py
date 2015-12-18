@@ -4,9 +4,8 @@ Gaussian process
 Spike train
 """
 import numpy as np
-
-from numpy import pi, exp, sqrt, log2, ceil, fft, einsum
-from numpy import zeros, arange, empty, ones, roll, empty_like
+from numpy import empty, empty_like
+from numpy import pi, log2, ceil, fft, einsum
 from numpy.random import random, multivariate_normal
 from scipy import stats
 

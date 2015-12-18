@@ -2,13 +2,15 @@
 Functions of Inference
 """
 import timeit
+
 from numpy import identity, einsum, trace, inner, empty, mean, inf, diag, newaxis, var, asarray, zeros, zeros_like, \
-    empty_like, arange, sum, array, full_like, array_equal
+    empty_like, arange, sum, array_equal
 from numpy.core.umath import sqrt, PINF, log
 from numpy.linalg import norm, slogdet
-from scipy.linalg import lstsq, eigh, solve
 from scipy import stats
+from scipy.linalg import lstsq, eigh, solve
 from sklearn.decomposition.factor_analysis import FactorAnalysis
+
 from hyper import learngp
 from mathf import ichol_gauss, subspace, sexp
 from util import add_constant, rotate, lagmat
@@ -254,6 +256,8 @@ def infer(obj, opt):
     loading_angle = zeros(opt['niter'], dtype=float)
     latent_angle = zeros(opt['niter'], dtype=float)
 
+    nlatent, ntime, rank = obj['chol'].shape
+
     x = obj.get('x')
     alpha = obj.get('alpha')
 
@@ -294,7 +298,6 @@ def infer(obj, opt):
             loading_angle[iiter] = subspace(alpha.T, obj['a'].T)
 
         if opt['hyper'] and iiter % opt['nhyper'] == 0:
-            nlatent, ntime, rank = obj['chol'].shape
             gp = learngp(obj)
             # obj['sigma'][:] = gp[0]
             obj['omega'][:] = gp[1]

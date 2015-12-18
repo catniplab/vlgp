@@ -87,7 +87,7 @@ def history(obs, lag):
     h = zeros((nchannel, ntime, 1 + lag), dtype=float)
 
     for n in range(nchannel):
-        h[n, :] = add_constant(lagmat(obs[:, n], maxlag=lag))
+        h[n, :] = add_constant(lagmat(obs[:, n], lag=lag))
 
     return h
 

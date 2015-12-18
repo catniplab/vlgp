@@ -1,12 +1,12 @@
 """
 Functions optimizing hyperparameters
 """
-from numpy import identity, inner, arange, outer, trace, empty_like, dstack, diag, clip
-from numpy.core.umath import exp, log, sign
+from numpy import identity, arange, trace, dstack, diag
+from numpy.core.umath import exp, log
 from numpy.linalg import slogdet
 from numpy.random.mtrand import choice
 from scipy.linalg import lstsq, solve, toeplitz
-from scipy.optimize import minimize, minimize_scalar
+from scipy.optimize import minimize_scalar
 
 
 def KLprime(theta, sigma, n, mu, M, S, eps=1e-6):
@@ -75,7 +75,8 @@ def learngp(obj, latents=None, **kwargs):
                     solve(C, S[:, :, iseg], sym_pos=True))
             sigma[ilatent] = tmp / (window * nseg)
         # M = dstack([outer(win_mu[:, ilatent, iseg], win_mu[:, ilatent, iseg]) for iseg in range(nseg)])
-        # mini = minimize(KL, x0=log(omega[ilatent]), jac=KLprime, args=(sigma[ilatent], window, win_mu[:, ilatent, :], M, S, eps))
+        # mini = minimize(KL, x0=log(omega[ilatent]), jac=KLprime, args=(sigma[ilatent], window, win_mu[:, ilatent, :],
+        # M, S, eps))
         if kwargs['learn_omega']:
             mini = minimize_scalar(KL, bounds=(log(omega[ilatent] / of), log(omega[ilatent] * of)),
                                    args=(obj['sigma'][ilatent], window, win_mu[:, ilatent, :], None, S, eps),
