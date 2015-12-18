@@ -38,7 +38,7 @@ def KL(theta, sigma, n, mu, M, S, eps=1e-6):
     for iseg in range(nseg):
         KinvS = solve(K, S[:, :, iseg], sym_pos=True)
         muKinvmu = mu[:, iseg].dot(solve(K, mu[:, iseg], sym_pos=True))
-        div += muKinvmu + trace(KinvS) - slogdet(KinvS)[1]
+        div += muKinvmu + trace(KinvS) - slogdet(KinvS)[1] - n
     return div / 2
 
 
