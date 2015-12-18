@@ -4,7 +4,7 @@ Functions of sequentially fit
 import timeit
 
 from numpy import identity, einsum, trace, inner, empty, mean, inf, diag, newaxis, var, asarray, zeros, zeros_like, \
-    sum, array_equal
+    sum, array_equal, full, nan
 from numpy.core.umath import sqrt, PINF, log
 from numpy.linalg import norm, slogdet
 from scipy.linalg import lstsq, eigh, solve
@@ -267,9 +267,9 @@ def infer(obj, **kwargs):
     good_sigma = obj['sigma'].copy()
     good_omega = obj['omega'].copy()
 
-    lb = zeros((kwargs['niter'], nlatent), dtype=float)
-    ll = zeros((kwargs['niter'], nlatent), dtype=float)
-    elapsed = zeros((kwargs['niter'], 3, nlatent), dtype=float)
+    lb = full((kwargs['niter'], nlatent), fill_value=nan, dtype=float)
+    ll = full((kwargs['niter'], nlatent), fill_value=nan, dtype=float)
+    elapsed = full((kwargs['niter'], 3, nlatent), fill_value=nan, dtype=float)
 
     for which in range(nlatent):
         if kwargs['verbose']:
@@ -363,9 +363,9 @@ def infer(obj, **kwargs):
         #                                                                              lb[iiter - 1],
         #                                                                              infer_end - infer_start,
         #                                                                              converged))
-    obj['ELBO'] = lb[:iiter, :]
-    obj['Elapsed'] = elapsed[:iiter, :]
-    obj['LL'] = ll[:iiter, :]
+    obj['ELBO'] = lb
+    obj['Elapsed'] = elapsed
+    obj['LL'] = ll
     return obj
 
 
