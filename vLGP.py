@@ -237,6 +237,7 @@ def fillargs(**kwargs):
     kwargs['eps'] = kwargs.get('eps', 1e-6)
     kwargs['nhyper'] = kwargs.get('nhyper', 5)
     kwargs['decay'] = kwargs.get('decay', 0)
+    return kwargs
 
 
 def infer(obj, **kwargs):
@@ -282,6 +283,7 @@ def infer(obj, **kwargs):
         latent_angle[0] = subspace(rotated.reshape((-1, x.shape[-1])), x.reshape((-1, x.shape[-1])))
 
     iiter = 1
+    adjhess = False
     converged = False
     infer_start = timeit.default_timer()
     while not converged and iiter < kwargs['niter']:
@@ -290,7 +292,7 @@ def infer(obj, **kwargs):
         # infer posterior
         post_start = timeit.default_timer()
         if kwargs['infer'] != 'param':
-            inferpost(obj, **kwargs)
+            inferpost(obj, **kwargs, adjhess=adjhess)
         post_end = timeit.default_timer()
         elapsed[iiter, 0] = post_end - post_start
         if x is not None:
@@ -301,7 +303,7 @@ def infer(obj, **kwargs):
         # infer parameter
         param_start = timeit.default_timer()
         if kwargs['infer'] != 'posterior':
-            inferparam(obj, **kwargs)
+            inferparam(obj, **kwargs, adjhess=adjhess)
         param_end = timeit.default_timer()
         elapsed[iiter, 1] = param_end - param_start
         if alpha is not None:
@@ -334,8 +336,8 @@ def infer(obj, **kwargs):
             lb[iiter] = lb[iiter - 1]
             if kwargs['verbose']:
                 print('ELBO decreased. Backtracking.')
-            if iiter > kwargs['nadjhess'] and not kwargs['adjhess']:
-                kwargs['adjhess'] = True
+            if iiter > kwargs['nadjhess'] and not adjhess:
+                adjhess = True
                 if kwargs['verbose']:
                     print('Hessian adjustment enabled.')
             else:
@@ -343,7 +345,7 @@ def infer(obj, **kwargs):
         elif abs(lb[iiter] - lb[iiter - 1]) < kwargs['tol'] * abs(lb[iiter - 1]):
             converged = True
         else:
-            kwargs['adjhess'] = False
+            adjhess = False
 
         good_mu[:] = obj['mu']
         good_w[:] = obj['w']
@@ -379,7 +381,7 @@ def infer(obj, **kwargs):
 
 def fit(y, channel, sigma, omega, x=None, alpha=None, beta=None, lag=0, rank=500, **kwargs):
     assert sigma.shape == omega.shape
-    fillargs(**kwargs)
+    kwargs = fillargs(**kwargs)
 
     y = asarray(y)
     if y.ndim < 2:
@@ -423,7 +425,7 @@ def fit(y, channel, sigma, omega, x=None, alpha=None, beta=None, lag=0, rank=500
 
     kwargs['accu_grad_mu'] = zeros_like(mu)
     kwargs['accu_grad_a'] = zeros_like(a)
-    kwargs['accu_grad_b'] = zeros_like(b),
+    kwargs['accu_grad_b'] = zeros_like(b)
 
     inference = infer(obj, **kwargs)
     return inference
