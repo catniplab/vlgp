@@ -42,7 +42,7 @@ def KL(theta, sigma, n, mu, M, S, eps=1e-6):
     return div / 2
 
 
-def learngp(obj, **kwargs):
+def learngp(obj, latents=None, **kwargs):
     window = kwargs.get('window', 100)
     nseg = kwargs.get('nseg', 10)
     eps = kwargs.get('eps', 1e-6)
@@ -55,14 +55,15 @@ def learngp(obj, **kwargs):
     omega = obj['omega'].copy()
     if not (kwargs['learn_sigma'] or kwargs['learn_omega']):
         return sigma, omega
-
+    if latents is None:
+        latents = range(nlatent)
     n = ntrial * ntime - window
     start = choice(arange(n), size=nseg)
     win_mu = dstack([mu[i:i + window, :] for i in start])
     win_w = dstack([w[i:i + window, :] for i in start])
     dsq = arange(window) ** 2
     Dsq = toeplitz(dsq)
-    for ilatent in range(nlatent):
+    for ilatent in latents:
         C = exp(-omega[ilatent] * Dsq) + eps * identity(window)
         K = sigma[ilatent] ** 2 * exp(-omega[ilatent] * Dsq) + eps * identity(window)
         S = dstack([K - K.dot(solve(diag(1 / (eps + win_w[:, ilatent, iseg])) + K, K, sym_pos=True)) for iseg in

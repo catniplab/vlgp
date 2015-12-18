@@ -261,6 +261,7 @@ def infer(obj, **kwargs):
     good_a = obj['a'].copy()
     good_b = obj['b'].copy()
     good_noise = obj['noise'].copy()
+    good_sigma = obj['sigma'].copy()
     good_omega = obj['omega'].copy()
 
     lb = zeros(kwargs['niter'], dtype=float)
@@ -328,10 +329,11 @@ def infer(obj, **kwargs):
             obj['a'][:] = good_a
             obj['b'][:] = good_b
             obj['noise'][:] = good_noise
-            if not array_equal(obj['omega'], good_omega):
-                obj['omega'][:] = good_omega
-                for ilatent in range(nlatent):
-                    obj['chol'][ilatent, :] = ichol_gauss(ntime, obj['omega'][ilatent], rank) * obj['sigma'][ilatent]
+            # if not array_equal(obj['omega'], good_omega):
+            obj['sigma'][:] = good_sigma
+            obj['omega'][:] = good_omega
+            for ilatent in range(nlatent):
+                obj['chol'][ilatent, :] = ichol_gauss(ntime, obj['omega'][ilatent], rank) * obj['sigma'][ilatent]
 
             lb[iiter] = lb[iiter - 1]
             if kwargs['verbose']:
@@ -353,6 +355,7 @@ def infer(obj, **kwargs):
         good_a[:] = obj['a']
         good_b[:] = obj['b']
         good_noise[:] = obj['noise']
+        good_sigma[:] = obj['sigma']
         good_omega[:] = obj['omega']
 
         iter_end = timeit.default_timer()

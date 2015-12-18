@@ -2,21 +2,35 @@
 Functions of sequentially fit
 """
 import timeit
+
 from numpy import identity, einsum, trace, inner, empty, mean, inf, diag, newaxis, var, asarray, zeros, zeros_like, \
-    empty_like, arange, sum, array, full_like
+    sum, array_equal
 from numpy.core.umath import sqrt, PINF, log
 from numpy.linalg import norm, slogdet
 from scipy.linalg import lstsq, eigh, solve
-from scipy.stats import stats
 from sklearn.decomposition.factor_analysis import FactorAnalysis
+
 from hyper import learngp
 from inference import accumulate
-from mathf import ichol_gauss, subspace, sexp
-from util import add_constant, rotate, lagmat
+from mathf import ichol_gauss, sexp
+from util import add_constant, lagmat
 
 
-def seqfit(y, channel, sigma, omega, x=None, alpha=None, beta=None, lag=0, rank=500, niter=50, nadjhess=5, tol=1e-5,
-           verbose=False, hyper=False):
+def fillargs(**kwargs):
+    kwargs['verbose'] = kwargs.get('verbose', False)
+    kwargs['niter'] = kwargs.get('niter', 50)
+    kwargs['infer'] = kwargs.get('infer', 'both')
+    kwargs['learn_sigma'] = kwargs.get('learn_sigma', False)
+    kwargs['learn_omega'] = kwargs.get('learn_omega', False)
+    kwargs['nadjhess'] = kwargs.get('nadjhess', 5)
+    kwargs['tol'] = kwargs.get('tol', 1e-5)
+    kwargs['eps'] = kwargs.get('eps', 1e-6)
+    kwargs['nhyper'] = kwargs.get('nhyper', 5)
+    kwargs['decay'] = kwargs.get('decay', 0)
+    return kwargs
+
+
+def fit(y, channel, sigma, omega, x=None, alpha=None, beta=None, lag=0, rank=500, **kwargs):
     """Sequentially fit
     Args:
         y:
@@ -37,6 +51,7 @@ def seqfit(y, channel, sigma, omega, x=None, alpha=None, beta=None, lag=0, rank=
     Returns:
 
     """
+    kwargs = fillargs(**kwargs)
     assert sigma.shape == omega.shape
 
     y = asarray(y)
@@ -79,24 +94,15 @@ def seqfit(y, channel, sigma, omega, x=None, alpha=None, beta=None, lag=0, rank=
            'mu': mu, 'w': zeros((ntrial, ntime, nlatent)), 'v': zeros((ntrial, ntime, nlatent)), 'L': L, 'x': x,
            'a': a, 'b': b, 'noise': noise, 'alpha': alpha, 'beta': beta}
 
-    opt = {'niter': niter,
-           'infer': 'both',
-           'nadjhess': nadjhess,
-           'adjhess': False,
-           'decay': 0,
-           'eps': 1e-6,
-           'accu_grad_mu': zeros_like(mu),
-           'accu_grad_a': zeros_like(a),
-           'accu_grad_b': zeros_like(b),
-           'tol': tol,
-           'verbose': verbose,
-           'hyper': hyper}
+    kwargs['accu_grad_mu'] = zeros_like(mu)
+    kwargs['accu_grad_a'] = zeros_like(a)
+    kwargs['accu_grad_b'] = zeros_like(b)
 
-    inference = seqinfer(obj, opt)
+    inference = infer(obj, **kwargs)
     return inference
 
 
-def seqinferpost(obj, opt):
+def inferpost(obj, **kwargs):
     nchannel, ntrial, ntime, lag = obj['h'].shape  # neuron, trial, time, lag
     nlatent, _, rank = obj['chol'].shape  # latent, time, rank
 
@@ -109,10 +115,10 @@ def seqinferpost(obj, opt):
     b = obj['b']
     noise = obj['noise']
 
-    accu_grad_mu = opt['accu_grad_mu']
-    decay = opt['decay']
-    adjhess = opt['adjhess']
-    eps = opt['eps']
+    accu_grad_mu = kwargs['accu_grad_mu']
+    decay = kwargs['decay']
+    adjhess = kwargs['adjhess']
+    eps = kwargs['eps']
 
     spike = channel == 'spike'
     lfp = channel == 'lfp'
@@ -172,7 +178,7 @@ def seqinferpost(obj, opt):
         L[which, :] = G.dot(eigvec.dot(diag(sqrt(eigval))))  # lower posterior covariance
 
 
-def seqinferparam(obj, opt):
+def inferparam(obj, **kwargs):
     nchannel, ntrial, ntime, lag1 = obj['h'].shape  # neuron, trial, time, lag + 1
     nlatent, _, rank = obj['chol'].shape  # latent, time, rank
 
@@ -189,11 +195,11 @@ def seqinferparam(obj, opt):
     b = obj['b']
     noise = obj['noise']
 
-    decay = opt['decay']
-    adjhess = opt['adjhess']
-    eps = opt['eps']
-    accu_grad_a = opt['accu_grad_a'][:head, :]
-    accu_grad_b = opt['accu_grad_b']
+    decay = kwargs['decay']
+    adjhess = kwargs['adjhess']
+    eps = kwargs['eps']
+    accu_grad_a = kwargs['accu_grad_a'][:head, :]
+    accu_grad_b = kwargs['accu_grad_b']
 
     for ichannel in range(nchannel):
         eta = mu.dot(a) + einsum('ijk, ki -> ji', h, b)
@@ -236,17 +242,17 @@ def seqinferparam(obj, opt):
     noise[:] = var(y - eta, axis=0, ddof=0)
 
 
-def seqinfer(obj, opt):
+def infer(obj, **kwargs):
     """Main inference procedure
 
     Args:
         obj:
-        opt:
+        kwargs:
 
     Returns:
 
     """
-    if opt['verbose']:
+    if kwargs['verbose']:
         print('\nInference starts.')
 
     ntrial, ntime, nlatent = obj['mu'].shape
@@ -258,41 +264,52 @@ def seqinfer(obj, opt):
     good_a = obj['a'].copy()
     good_b = obj['b'].copy()
     good_noise = obj['noise'].copy()
+    good_sigma = obj['sigma'].copy()
+    good_omega = obj['omega'].copy()
 
-    lb = zeros((opt['niter'], nlatent), dtype=float)
-    ll = zeros((opt['niter'], nlatent), dtype=float)
-    elapsed = zeros((opt['niter'], 3, nlatent), dtype=float)
+    lb = zeros((kwargs['niter'], nlatent), dtype=float)
+    ll = zeros((kwargs['niter'], nlatent), dtype=float)
+    elapsed = zeros((kwargs['niter'], 3, nlatent), dtype=float)
 
     for which in range(nlatent):
-        if opt['verbose']:
+        if kwargs['verbose']:
             print('Latent {}'.format(which + 1))
         obj['which'] = which
-        opt['accu_grad_mu'].fill(0.0)
-        opt['accu_grad_a'].fill(0.0)
-        opt['accu_grad_b'].fill(0.0)
-        opt['adjhess'] = False
-        lb[0, which], ll[0, which] = seqelbo(obj)
+        kwargs['accu_grad_mu'].fill(0.0)
+        kwargs['accu_grad_a'].fill(0.0)
+        kwargs['accu_grad_b'].fill(0.0)
+        lb[0, which], ll[0, which] = elbo(obj)
         iiter = 1
         converged = False
+        adjhess = False
         # infer_start = timeit.default_timer()
-        while not converged and iiter < opt['niter']:
+        while not converged and iiter < kwargs['niter']:
             iter_start = timeit.default_timer()
 
             # infer posterior
             post_start = timeit.default_timer()
-            if opt['infer'] != 'param':
-                seqinferpost(obj, opt)
+            if kwargs['infer'] != 'param':
+                inferpost(obj, **kwargs, adjhess=adjhess)
             post_end = timeit.default_timer()
             elapsed[iiter, 0, which] = post_end - post_start
 
             # infer parameter
             param_start = timeit.default_timer()
-            if opt['infer'] != 'posterior':
-                seqinferparam(obj, opt)
+            if kwargs['infer'] != 'posterior':
+                inferparam(obj, **kwargs, adjhess=adjhess)
             param_end = timeit.default_timer()
             elapsed[iiter, 1, which] = param_end - param_start
 
-            lb[iiter, which], ll[iiter, which] = seqelbo(obj)
+            if iiter % kwargs['nhyper'] == 0 and (kwargs['learn_sigma'] or kwargs['learn_omega']):
+                nlatent, ntime, rank = obj['chol'].shape
+                gp = learngp(obj, latents=[which], **kwargs)
+                obj['sigma'][which] = gp[0][which]
+                obj['omega'][which] = gp[1][which]
+                if kwargs['verbose']:
+                    print('sigma: {} \nomega: {}'.format(obj['sigma'], obj['omega']))
+                obj['chol'][which, :] = ichol_gauss(ntime, obj['omega'][which], rank) * obj['sigma'][which]
+
+            lb[iiter, which], ll[iiter, which] = elbo(obj)
             if lb[iiter, which] < lb[iiter - 1, which]:
                 # backtracking
                 obj['mu'][:] = good_mu
@@ -301,19 +318,25 @@ def seqinfer(obj, opt):
                 obj['a'][:] = good_a
                 obj['b'][:] = good_b
                 obj['noise'][:] = good_noise
+                # if not array_equal(obj['omega'], good_omega):
+                obj['sigma'][:] = good_sigma
+                obj['omega'][:] = good_omega
+                for ilatent in range(nlatent):
+                    obj['chol'][ilatent, :] = ichol_gauss(ntime, obj['omega'][ilatent], rank) * obj['sigma'][ilatent]
+
                 lb[iiter] = lb[iiter - 1]
-                if opt['verbose']:
+                if kwargs['verbose']:
                     print('ELBO decreased. Backtracking.')
-                if iiter > opt['nadjhess'] and not opt['adjhess']:
-                    opt['adjhess'] = True
-                    if opt['verbose']:
+                if iiter > kwargs['nadjhess'] and not adjhess:
+                    adjhess = True
+                    if kwargs['verbose']:
                         print('Hessian adjustment enabled.')
                 # else:
                 #     converged = True
-            elif abs(lb[iiter, which] - lb[iiter - 1, which]) < opt['tol'] * abs(lb[iiter - 1, which]):
+            elif abs(lb[iiter, which] - lb[iiter - 1, which]) < kwargs['tol'] * abs(lb[iiter - 1, which]):
                 converged = True
             else:
-                opt['adjhess'] = False
+                adjhess = False
 
             good_mu[:] = obj['mu']
             good_w[:] = obj['w']
@@ -321,18 +344,20 @@ def seqinfer(obj, opt):
             good_a[:] = obj['a']
             good_b[:] = obj['b']
             good_noise[:] = obj['noise']
+            good_sigma[:] = obj['sigma']
+            good_omega[:] = obj['omega']
 
             iter_end = timeit.default_timer()
             elapsed[iiter, 2, which] = iter_end - iter_start
 
-            if opt['verbose']:
+            if kwargs['verbose']:
                 print('[{}], posterior elapsed: {:.2f}, parameter elapsed: {:.2f}, '
                       'ELBO: {:.4f}, LL: {:.4f}'.format(iiter, elapsed[iiter, 0, which], elapsed[iiter, 1, which], lb[iiter, which], ll[iiter, which]))
 
             iiter += 1
         # infer_end = timeit.default_timer()
 
-    # if opt['verbose']:
+    # if kwargs['verbose']:
     #     print('Inference ends.\n')
     #     print('{} iterations, ELBO: {:.4f}, elapsed: {:.2f}, converged: {}\n'.format(iiter - 1,
     #                                                                                  lb[iiter - 1],
@@ -344,7 +369,7 @@ def seqinfer(obj, opt):
     return obj
 
 
-def seqelbo(obj):
+def elbo(obj):
     nchannel, ntrial, ntime, lag = obj['h'].shape  # neuron, trial, time, lag
     _, _, rank = obj['chol'].shape  # latent, time, rank
 
