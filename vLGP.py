@@ -597,6 +597,9 @@ def cv(y, channel, sigma, omega, lag=0, rank=500, **kwargs):
         model = fit(y[itrain, :], channel, sigma, omega, x=None, alpha=None, beta=None, lag=lag, rank=rank, **kwargs)
         kwargs['verbose'] = False
         kwargs['hyper'] = False
+        kwargs['accu_grad_mu'] = zeros_like(model['mu'])
+        kwargs['accu_grad_a'] = zeros_like(model['a'])
+        kwargs['accu_grad_b'] = zeros_like(model['b'])
         leave_one_out(test_trial, model, **kwargs)
     ll = stats.poisson.logpmf(y.ravel(), yhat.ravel()).reshape(y.shape)
     prediction = {'y': y, 'yhat': yhat, 'LL': ll}
