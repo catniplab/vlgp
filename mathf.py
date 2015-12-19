@@ -8,7 +8,7 @@ import warnings
 
 from numpy import inf, arange, ones, zeros, sum
 from numpy.core.umath import arcsin, exp, log1p, sqrt
-from scipy.linalg import orth, norm
+from scipy.linalg import orth, norm, svd
 
 MIN_EXP = -20
 MAX_EXP = 20
@@ -130,3 +130,28 @@ def subspace(a, b):
         oa, ob = ob.copy(), oa.copy()
     ob -= oa.dot(oa.T.dot(ob))
     return arcsin(min(1, norm(ob, ord=2)))
+
+
+def orthogonalize(x, a):
+    """
+    Orthonormalize the columns of the loading matrix and apply the corresponding linear transform to the latent variables.
+    Args:
+        x: latent variables
+        a: loading matrix
+
+    Returns:
+
+    """
+    ntime, nlatent = x.shape
+    _, nchannel = a.shape
+
+    if nlatent == 1:
+        T = sqrt(a.dot(a.T))
+        aorth = a / T
+        xorth = T * x
+    else:
+        U, D, V = svd(a.T)
+        T = D.dot(V)
+        aorth = U.T
+        xorth = x.dot(T.T)
+    return xorth, aorth, T
