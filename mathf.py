@@ -6,7 +6,7 @@ subspace angle
 """
 import warnings
 
-from numpy import inf, arange, ones, zeros, sum
+from numpy import inf, arange, ones, zeros, sum, diag
 from numpy.core.umath import arcsin, exp, log1p, sqrt
 from scipy.linalg import orth, norm, svd
 
@@ -134,7 +134,7 @@ def subspace(a, b):
 
 def orthogonalize(x, a):
     """
-    Orthonormalize the columns of the loading matrix and apply the corresponding linear transform to the latent variables.
+    Orthogonalize the rows of the loading matrix and apply the corresponding linear transform to the latent variables.
     Args:
         x: latent variables
         a: loading matrix
@@ -146,12 +146,10 @@ def orthogonalize(x, a):
     _, nchannel = a.shape
 
     if nlatent == 1:
-        T = sqrt(a.dot(a.T))
-        aorth = a / T
-        xorth = T * x
+        return x.copy()
     else:
-        U, D, V = svd(a.T)
-        T = D.dot(V)
-        aorth = U.T
-        xorth = x.dot(T.T)
-    return xorth, aorth, T
+        U, s, V = svd(a, full_matrices=False)
+        # T = diag(s).dot(V)
+        aorth = diag(s).dot(V)
+        xorth = x.dot(U)
+    return xorth, aorth, U
