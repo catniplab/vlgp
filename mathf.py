@@ -132,7 +132,7 @@ def subspace(a, b):
     return arcsin(min(1, norm(ob, ord=2)))
 
 
-def orthogonalize(x, a):
+def orthogonalize(x, a, normalize_a=False):
     """
     Orthogonalize the rows of the loading matrix and apply the corresponding linear transform to the latent variables.
     Args:
@@ -149,7 +149,12 @@ def orthogonalize(x, a):
         return x.copy()
     else:
         U, s, V = svd(a, full_matrices=False)
-        # T = diag(s).dot(V)
-        aorth = diag(s).dot(V)
-        xorth = x.dot(U)
-    return xorth, aorth, U
+        if normalize_a:
+            aorth = V
+            T = U.dot(diag(s))
+            xorth = x.dot(T)
+        else:
+            aorth = diag(s).dot(V)
+            T = U
+            xorth = x.dot(T)
+    return xorth, aorth, T

@@ -151,16 +151,6 @@ def inferpost(obj, **kwargs):
         U[:, spike] = lam[:, spike]
         U[:, lfp] = 1 / noise[lfp]
         w[:, :] = U.dot(a.T ** 2)
-        for ilatent in range(nlatent):
-            G = chol[ilatent, :, :]
-            GtWG = G.T.dot(w[:, ilatent].reshape((ntime, 1)) * G)
-            v[:, ilatent] = sum(G * (G - G.dot(GtWG) + G.dot(GtWG.dot(solve(eyer + GtWG, GtWG, sym_pos=True)))),
-                                axis=1)
-
-            A = eyer - GtWG + GtWG.dot(solve(eyer + GtWG, GtWG, sym_pos=True))  # A should be PD but numerically not
-            eigval, eigvec = eigh(A)
-            eigval.clip(0, PINF, out=eigval)  # remove negative eigenvalues
-            L[ilatent, :] = G.dot(eigvec.dot(diag(sqrt(eigval))))  # lower posterior covariance
 
 
 def inferparam(obj, **kwargs):
@@ -428,7 +418,7 @@ def fit(y, channel, sigma, omega, x=None, alpha=None, beta=None, lag=0, rank=500
     kwargs['accu_grad_a'] = zeros_like(a)
     kwargs['accu_grad_b'] = zeros_like(b)
 
-    inference = infer(obj, **kwargs)
+    inference = postprocess(infer(obj, **kwargs))
     return inference
 
 
@@ -483,7 +473,7 @@ def seqfit(y, channel, sigma, omega, lag=0, rank=500, **kwargs):
         kwargs['accu_grad_a'] = zeros_like(a[:i + 1, :])
         kwargs['accu_grad_b'] = zeros_like(b)
 
-        objs.append(infer(obj, **kwargs))
+        objs.append(postprocess(infer(obj, **kwargs)))
 
     return objs
 
@@ -604,3 +594,34 @@ def cv(y, channel, sigma, omega, lag=0, rank=500, **kwargs):
     ll = stats.poisson.logpmf(y.ravel(), yhat.ravel()).reshape(y.shape)
     prediction = {'y': y, 'yhat': yhat, 'LL': ll}
     return prediction
+
+
+def postprocess(obj):
+    """
+    Remove intermediate and empty variables, and compute decomposition of posterior covariance
+    Args:
+        obj: raw inference
+
+    Returns:
+
+    """
+    ntrial = obj['mu'].shape[0]
+    chol = obj['chol']
+    nlatent, ntime, rank = chol.shape
+    w = obj['w']
+    eyer = identity(rank)
+    L = empty((ntrial, nlatent, ntime, rank))
+    for itrial in range(ntrial):
+        for ilatent in range(nlatent):
+            G = chol[ilatent, :, :]
+            GtWG = G.T.dot(w[itrial, :, ilatent].reshape((ntime, 1)) * G)
+            A = eyer - GtWG + GtWG.dot(solve(eyer + GtWG, GtWG, sym_pos=True))  # A should be PD but numerically not
+            eigval, eigvec = eigh(A)
+            eigval.clip(0, PINF, out=eigval)  # remove negative eigenvalues
+            L[itrial, ilatent, :] = G.dot(eigvec.dot(diag(sqrt(eigval))))  # lower posterior covariance
+    obj['L'] = L
+    for key, _ in obj:
+        if obj.get(key, None) is None:
+            obj.pop(key, None)
+    obj.pop('h', None)
+    return obj
