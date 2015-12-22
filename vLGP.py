@@ -94,7 +94,7 @@ def inferpost(obj, **kwargs):
     b = obj['b']
     noise = obj['noise']
 
-    accu_grad_mu = kwargs['accu_grad_mu']
+    dmu_acc = kwargs['dmu_acc']
     decay = kwargs['decay']
     adjhess = kwargs['adjhess']
     eps = kwargs['eps']
@@ -125,10 +125,10 @@ def inferpost(obj, **kwargs):
                       ((y[:, lfp] - eta[:, lfp]) /
                        noise[lfp]).dot(a[ilatent, lfp]) - lstsq(G.T, lstsq(G, mu[:, ilatent])[0])[0]
 
-            accu_grad_mu[itrial, :, ilatent] = accumulate(accu_grad_mu[itrial, :, ilatent], grad_mu, decay)
+            dmu_acc[itrial, :, ilatent] = accumulate(dmu_acc[itrial, :, ilatent], grad_mu, decay)
 
             if adjhess:
-                wadj = (w[:, ilatent] + sqrt(eps + accu_grad_mu[itrial, :, ilatent])).reshape(
+                wadj = (w[:, ilatent] + sqrt(eps + dmu_acc[itrial, :, ilatent])).reshape(
                         (ntime, 1))  # adjusted Hessian
             else:
                 wadj = w[:, ilatent].reshape((ntime, 1))
@@ -171,8 +171,8 @@ def inferparam(obj, **kwargs):
     decay = kwargs['decay']
     adjhess = kwargs['adjhess']
     eps = kwargs['eps']
-    accu_grad_a = kwargs['accu_grad_a']
-    accu_grad_b = kwargs['accu_grad_b']
+    da_acc = kwargs['da_acc']
+    db_acc = kwargs['db_acc']
 
     for ichannel in range(nchannel):
         eta = mu.dot(a) + einsum('ijk, ki -> ji', h, b)
@@ -182,21 +182,21 @@ def inferparam(obj, **kwargs):
             va = v * a[:, ichannel]  # (ntime, nlatent)
             wv = diag(lam[:, ichannel].dot(v))
             grad_a = mu.T.dot(y[:, ichannel]) - (mu + va).T.dot(lam[:, ichannel])
-            accu_grad_a[:, ichannel] = accumulate(accu_grad_a[:, ichannel], grad_a, decay)
+            da_acc[:, ichannel] = accumulate(da_acc[:, ichannel], grad_a, decay)
 
             neghess_a = (mu + va).T.dot(lam[:, ichannel, newaxis] * (mu + va)) + wv
             if adjhess:
-                delta_a = solve(neghess_a + diag(sqrt(eps + accu_grad_a[:, ichannel])), grad_a, sym_pos=True)
+                delta_a = solve(neghess_a + diag(sqrt(eps + da_acc[:, ichannel])), grad_a, sym_pos=True)
             else:
                 delta_a = solve(neghess_a, grad_a, sym_pos=True)
             a[:, ichannel] += delta_a
 
             # b
             grad_b = h[ichannel, :].T.dot(y[:, ichannel] - lam[:, ichannel])
-            accu_grad_b[:, ichannel] = accumulate(accu_grad_b[:, ichannel], grad_b, decay)
+            db_acc[:, ichannel] = accumulate(db_acc[:, ichannel], grad_b, decay)
             neghess_b = h[ichannel, :].T.dot(lam[:, ichannel, newaxis] * h[ichannel, :])
             if adjhess:
-                b[:, ichannel] += solve(neghess_b + diag(sqrt(eps + accu_grad_b[:, ichannel])), grad_b, sym_pos=True)
+                b[:, ichannel] += solve(neghess_b + diag(sqrt(eps + db_acc[:, ichannel])), grad_b, sym_pos=True)
             else:
                 b[:, ichannel] += solve(neghess_b, grad_b, sym_pos=True)
         elif channel[ichannel] == 'lfp':
@@ -414,9 +414,9 @@ def fit(y, channel, sigma, omega, x=None, alpha=None, beta=None, lag=0, rank=500
            'mu': mu, 'w': zeros((ntrial, ntime, nlatent)), 'v': zeros((ntrial, ntime, nlatent)), 'L': L, 'x': x,
            'a': a, 'b': b, 'noise': noise, 'alpha': alpha, 'beta': beta}
 
-    kwargs['accu_grad_mu'] = zeros_like(mu)
-    kwargs['accu_grad_a'] = zeros_like(a)
-    kwargs['accu_grad_b'] = zeros_like(b)
+    kwargs['dmu_acc'] = zeros_like(mu)
+    kwargs['da_acc'] = zeros_like(a)
+    kwargs['db_acc'] = zeros_like(b)
 
     inference = postprocess(infer(obj, **kwargs))
     return inference
@@ -469,9 +469,9 @@ def seqfit(y, channel, sigma, omega, lag=0, rank=500, **kwargs):
                'mu': mu[:, :, :i + 1], 'w': w[:, :, :i + 1], 'v': v[:, :, :i + 1], 'L': L[:, :i + 1, :, :],
                'a': a[:i + 1, :], 'b': b, 'noise': noise}
 
-        kwargs['accu_grad_mu'] = zeros_like(mu[:, :, :i + 1])
-        kwargs['accu_grad_a'] = zeros_like(a[:i + 1, :])
-        kwargs['accu_grad_b'] = zeros_like(b)
+        kwargs['dmu_acc'] = zeros_like(mu[:, :, :i + 1])
+        kwargs['da_acc'] = zeros_like(a[:i + 1, :])
+        kwargs['db_acc'] = zeros_like(b)
 
         objs.append(postprocess(infer(obj, **kwargs)))
 
@@ -587,9 +587,9 @@ def cv(y, channel, sigma, omega, lag=0, rank=500, **kwargs):
         model = fit(y[itrain, :], channel, sigma, omega, x=None, alpha=None, beta=None, lag=lag, rank=rank, **kwargs)
         kwargs['verbose'] = False
         kwargs['hyper'] = False
-        kwargs['accu_grad_mu'] = zeros_like(model['mu'])
-        kwargs['accu_grad_a'] = zeros_like(model['a'])
-        kwargs['accu_grad_b'] = zeros_like(model['b'])
+        kwargs['dmu_acc'] = zeros_like(model['mu'])
+        kwargs['da_acc'] = zeros_like(model['a'])
+        kwargs['db_acc'] = zeros_like(model['b'])
         leave_one_out(test_trial, model, **kwargs)
     ll = stats.poisson.logpmf(y.ravel(), yhat.ravel()).reshape(y.shape)
     prediction = {'y': y, 'yhat': yhat, 'LL': ll}
@@ -620,7 +620,8 @@ def postprocess(obj):
             eigval.clip(0, PINF, out=eigval)  # remove negative eigenvalues
             L[itrial, ilatent, :] = G.dot(eigvec.dot(diag(sqrt(eigval))))  # lower posterior covariance
     obj['L'] = L
-    for key, _ in obj:
+    # keys = [key for key in obj.keys()]
+    for key in list(obj.keys()):
         if obj.get(key, None) is None:
             obj.pop(key, None)
     obj.pop('h', None)
