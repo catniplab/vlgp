@@ -47,7 +47,7 @@ def learngp(obj, latents=None, **kwargs):
     nseg = kwargs.get('nseg', 10)
     eps = kwargs.get('eps', 1e-6)
 
-    of = kwargs.get('omega_factor', 2)
+    of = kwargs.get('omega_factor', 5)
     ntrial, ntime, nlatent = obj['mu'].shape
     mu = obj['mu'].reshape((-1, nlatent))
     w = obj['w'].reshape((-1, nlatent))

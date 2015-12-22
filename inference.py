@@ -16,9 +16,6 @@ from mathf import ichol_gauss, subspace, sexp
 from util import add_constant, rotate, lagmat
 
 
-# TODO: replace opt with **kwargs
-
-
 def elbo(obj):
     nchannel, ntrial, ntime, lag = obj['h'].shape  # neuron, trial, time, lag
     nlatent, _, rank = obj['chol'].shape  # latent, time, rank

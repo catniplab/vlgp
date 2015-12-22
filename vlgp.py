@@ -226,10 +226,12 @@ def fillargs(**kwargs):
     kwargs['eps'] = kwargs.get('eps', 1e-6)
     kwargs['nhyper'] = kwargs.get('nhyper', 5)
     kwargs['decay'] = kwargs.get('decay', 0)
+    kwargs['sigma_factor'] = kwargs.get('sigma_factor', 5)
+    kwargs['omega_factor'] = kwargs.get('omega_factor', 5)
     return kwargs
 
 
-def infer(obj, **kwargs):
+def infer(obj, fstat=None, **kwargs):
     """Main inference procedure
 
     Args:
@@ -239,9 +241,6 @@ def infer(obj, **kwargs):
     Returns:
 
     """
-
-    if kwargs['verbose']:
-        print('\nInference starts.')
 
     # for backtracking
     good_mu = obj['mu'].copy()
@@ -253,6 +252,7 @@ def infer(obj, **kwargs):
     good_sigma = obj['sigma'].copy()
     good_omega = obj['omega'].copy()
 
+    stat = empty(kwargs['niter'], dtype=object)
     lb = zeros(kwargs['niter'], dtype=float)
     ll = zeros(kwargs['niter'], dtype=float)
     elapsed = zeros((kwargs['niter'], 3), dtype=float)
@@ -263,6 +263,7 @@ def infer(obj, **kwargs):
     x = obj.get('x')
     alpha = obj.get('alpha')
 
+    # iteration 0
     lb[0], ll[0] = elbo(obj)
     if alpha is not None:
         loading_angle[0] = subspace(alpha.T, obj['a'].T)
@@ -273,30 +274,35 @@ def infer(obj, **kwargs):
             rotated[itrial, :] = rotate(add_constant(obj['mu'][itrial, :]), x[itrial, :])
         latent_angle[0] = subspace(rotated.reshape((-1, x.shape[-1])), x.reshape((-1, x.shape[-1])))
 
+    #
     iiter = 1
     adjhess = False
     converged = False
-    infer_start = timeit.default_timer()
+    infer_tick = timeit.default_timer()
+
+    if kwargs['verbose']:
+        print('\nInference starts')
+
     while not converged and iiter < kwargs['niter']:
-        iter_start = timeit.default_timer()
+        iter_tick = timeit.default_timer()
 
         # infer posterior
-        post_start = timeit.default_timer()
+        post_tick = timeit.default_timer()
         if kwargs['infer'] != 'param':
             inferpost(obj, **kwargs, adjhess=adjhess)
-        post_end = timeit.default_timer()
-        elapsed[iiter, 0] = post_end - post_start
+        post_tock = timeit.default_timer()
+        elapsed[iiter, 0] = post_tock - post_tick
         if x is not None:
             for itrial in range(x.shape[0]):
                 rotated[itrial, :] = rotate(add_constant(obj['mu'][itrial, :]), x[itrial, :])
             latent_angle[iiter] = subspace(rotated.reshape((-1, x.shape[-1])), x.reshape((-1, x.shape[-1])))
 
         # infer parameter
-        param_start = timeit.default_timer()
+        param_tick = timeit.default_timer()
         if kwargs['infer'] != 'posterior':
             inferparam(obj, **kwargs, adjhess=adjhess)
-        param_end = timeit.default_timer()
-        elapsed[iiter, 1] = param_end - param_start
+        param_tock = timeit.default_timer()
+        elapsed[iiter, 1] = param_tock - param_tick
         if alpha is not None:
             loading_angle[iiter] = subspace(alpha.T, obj['a'].T)
 
@@ -304,8 +310,8 @@ def infer(obj, **kwargs):
             gp = learngp(obj, **kwargs)
             obj['sigma'][:] = gp[0]
             obj['omega'][:] = gp[1]
-            if kwargs['verbose']:
-                print('sigma: {} \nomega: {}'.format(obj['sigma'], obj['omega']))
+            # if kwargs['verbose']:
+            #     print('sigma: {} \nomega: {}'.format(obj['sigma'], obj['omega']))
             for ilatent in range(nlatent):
                 obj['chol'][ilatent, :] = ichol_gauss(ntime, obj['omega'][ilatent], rank) * obj['sigma'][ilatent]
 
@@ -325,11 +331,11 @@ def infer(obj, **kwargs):
 
             lb[iiter] = lb[iiter - 1]
             if kwargs['verbose']:
-                print('ELBO decreased. Backtracking.')
+                print('\nELBO decreased. Backtracking.')
             if iiter > kwargs['nadjhess'] and not adjhess:
                 adjhess = True
                 if kwargs['verbose']:
-                    print('Hessian adjustment enabled.')
+                    print('\nHessian adjustment enabled.')
             else:
                 converged = True
         elif abs(lb[iiter] - lb[iiter - 1]) < kwargs['tol'] * abs(lb[iiter - 1]):
@@ -346,27 +352,37 @@ def infer(obj, **kwargs):
         good_sigma[:] = obj['sigma']
         good_omega[:] = obj['omega']
 
-        iter_end = timeit.default_timer()
-        elapsed[iiter, 2] = iter_end - iter_start
+        iter_tock = timeit.default_timer()
+        elapsed[iiter, 2] = iter_tock - iter_tick
+
+        stat[iiter] = fstat(obj) if fstat is not None else {}
+        stat[iiter]['Posterior Elapsed'] = elapsed[iiter, 0]
+        stat[iiter]['Parameter Elapsed'] = elapsed[iiter, 1]
+        stat[iiter]['ELBO'] = lb[iiter]
+        stat[iiter]['LL'] = ll[iiter]
+        stat[iiter]['sigma'] = good_sigma
+        stat[iiter]['omega'] = good_omega
 
         if kwargs['verbose']:
-            print('[{}], posterior elapsed: {:.2f}, parameter elapsed: {:.2f}, '
-                  'ELBO: {:.4f}, LL: {:.4f}'.format(iiter, elapsed[iiter, 0], elapsed[iiter, 1], lb[iiter], ll[iiter]))
+            print('\n[{}]'.format(iiter))
+            for k, v in stat[iiter].items():
+                print('{}: {}'.format(k, v))
 
         iiter += 1
-    infer_end = timeit.default_timer()
+    infer_tock = timeit.default_timer()
 
     if kwargs['verbose']:
-        print('Inference ends.\n')
+        print('\nInference ends')
         print('{} iterations, ELBO: {:.4f}, elapsed: {:.2f}, converged: {}\n'.format(iiter - 1,
                                                                                      lb[iiter - 1],
-                                                                                     infer_end - infer_start,
+                                                                                     infer_tock - infer_tick,
                                                                                      converged))
     obj['ELBO'] = lb[:iiter]
     obj['Elapsed'] = elapsed[:iiter, :]
     obj['LoadingAngle'] = loading_angle[:iiter]
     obj['LatentAngle'] = latent_angle[:iiter]
     obj['LL'] = ll[:iiter]
+    obj['stat'] = stat
     return obj
 
 
