@@ -1,6 +1,6 @@
 # README #
 
-This README would normally document whatever steps are necessary to get your application up and running.
+Variational Gaussian Latent Process 
 
 ### What is this repository for? ###
 
