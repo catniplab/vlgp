@@ -352,7 +352,6 @@ def infer(obj, fstat=None, **kwargs):
             for ilatent in range(nlatent):
                 obj['chol'][ilatent, :] = ichol_gauss(ntime, obj['omega'][ilatent], rank) * obj['sigma'][ilatent]
 
-
         good_mu[:] = obj['mu']
         good_w[:] = obj['w']
         good_v[:] = obj['v']
@@ -489,8 +488,10 @@ def seqfit(y, channel, sigma, omega, lag=0, rank=500, **kwargs):
 
     noise = var(y.reshape((-1, nchannel)), axis=0, ddof=0)
     objs = []
+    if kwargs['verbose']:
+        print('\nSequential fit')
     for i in range(nlatent):
-        print('{} latent(s)'.format(i + 1))
+        print('\n{} latent(s)'.format(i + 1))
         obj = {'y': y, 'channel': channel, 'h': h,
                'sigma': sigma[:i + 1], 'omega': omega[:i + 1], 'chol': chol[:i + 1, :],
                'mu': mu[:, :, :i + 1], 'w': w[:, :, :i + 1], 'v': v[:, :, :i + 1], 'L': L[:, :i + 1, :, :],
