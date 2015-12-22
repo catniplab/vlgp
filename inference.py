@@ -1,5 +1,6 @@
 """
 Functions of Inference
+Subject to removal in future
 """
 import timeit
 
