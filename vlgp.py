@@ -306,14 +306,14 @@ def infer(obj, fstat=None, **kwargs):
         if alpha is not None:
             loading_angle[iiter] = subspace(alpha.T, obj['a'].T)
 
-        if iiter % kwargs['nhyper'] == 0 and (kwargs['learn_sigma'] or kwargs['learn_omega']):
-            gp = learngp(obj, **kwargs)
-            obj['sigma'][:] = gp[0]
-            obj['omega'][:] = gp[1]
-            # if kwargs['verbose']:
-            #     print('sigma: {} \nomega: {}'.format(obj['sigma'], obj['omega']))
-            for ilatent in range(nlatent):
-                obj['chol'][ilatent, :] = ichol_gauss(ntime, obj['omega'][ilatent], rank) * obj['sigma'][ilatent]
+        # if iiter % kwargs['nhyper'] == 0 and (kwargs['learn_sigma'] or kwargs['learn_omega']):
+        #     gp = learngp(obj, **kwargs)
+        #     obj['sigma'][:] = gp[0]
+        #     obj['omega'][:] = gp[1]
+        #     # if kwargs['verbose']:
+        #     #     print('sigma: {} \nomega: {}'.format(obj['sigma'], obj['omega']))
+        #     for ilatent in range(nlatent):
+        #         obj['chol'][ilatent, :] = ichol_gauss(ntime, obj['omega'][ilatent], rank) * obj['sigma'][ilatent]
 
         lb[iiter], ll[iiter] = elbo(obj)
         if lb[iiter] < lb[iiter - 1]:
@@ -323,9 +323,9 @@ def infer(obj, fstat=None, **kwargs):
             obj['v'][:] = good_v
             obj['a'][:] = good_a
             obj['b'][:] = good_b
-            obj['noise'][:] = good_noise
-            obj['sigma'][:] = good_sigma
-            obj['omega'][:] = good_omega
+            # obj['noise'][:] = good_noise
+            # obj['sigma'][:] = good_sigma
+            # obj['omega'][:] = good_omega
             for ilatent in range(nlatent):
                 obj['chol'][ilatent, :] = ichol_gauss(ntime, obj['omega'][ilatent], rank) * obj['sigma'][ilatent]
 
@@ -342,6 +342,16 @@ def infer(obj, fstat=None, **kwargs):
             converged = True
         else:
             adjhess = False
+
+        if iiter % kwargs['nhyper'] == 0 and (kwargs['learn_sigma'] or kwargs['learn_omega']):
+            gp = learngp(obj, **kwargs)
+            obj['sigma'][:] = gp[0]
+            obj['omega'][:] = gp[1]
+            # if kwargs['verbose']:
+            #     print('sigma: {} \nomega: {}'.format(obj['sigma'], obj['omega']))
+            for ilatent in range(nlatent):
+                obj['chol'][ilatent, :] = ichol_gauss(ntime, obj['omega'][ilatent], rank) * obj['sigma'][ilatent]
+
 
         good_mu[:] = obj['mu']
         good_w[:] = obj['w']
