@@ -464,6 +464,7 @@ def seqfit(y, channel, sigma, omega, lag=0, rank=500, **kwargs):
     noise = var(y.reshape((-1, nchannel)), axis=0, ddof=0)
     objs = []
     for i in range(nlatent):
+        print('{} latent(s)'.format(i + 1))
         obj = {'y': y, 'channel': channel, 'h': h,
                'sigma': sigma[:i + 1], 'omega': omega[:i + 1], 'chol': chol[:i + 1, :],
                'mu': mu[:, :, :i + 1], 'w': w[:, :, :i + 1], 'v': v[:, :, :i + 1], 'L': L[:, :i + 1, :, :],
@@ -620,8 +621,8 @@ def postprocess(obj):
             eigval.clip(0, PINF, out=eigval)  # remove negative eigenvalues
             L[itrial, ilatent, :] = G.dot(eigvec.dot(diag(sqrt(eigval))))  # lower posterior covariance
     obj['L'] = L
-    # keys = [key for key in obj.keys()]
-    for key in list(obj.keys()):
+    keys = list(obj.keys())
+    for key in keys:
         if obj.get(key, None) is None:
             obj.pop(key, None)
     obj.pop('h', None)
