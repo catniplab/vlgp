@@ -4,7 +4,7 @@ Functions of Inference
 import timeit
 
 from numpy import identity, einsum, trace, inner, empty, mean, inf, diag, newaxis, var, asarray, zeros, zeros_like, \
-    empty_like, arange, sum
+    empty_like, arange, sum, copyto
 from numpy.core.umath import sqrt, PINF, log
 from numpy.linalg import norm, slogdet
 from scipy import stats
@@ -277,6 +277,7 @@ def infer(obj, fstat=None, **kwargs):
     #
     iiter = 1
     adjhess = False
+    backtracking = False
     converged = False
     infer_tick = timeit.default_timer()
 
@@ -316,8 +317,9 @@ def infer(obj, fstat=None, **kwargs):
         #         obj['chol'][ilatent, :] = ichol_gauss(ntime, obj['omega'][ilatent], rank) * obj['sigma'][ilatent]
 
         lb[iiter], ll[iiter] = elbo(obj)
-        if lb[iiter] < lb[iiter - 1]:
+        if lb[iiter] < lb[iiter - 1] and iiter > kwargs['nadjhess'] and not backtracking:
             # backtracking
+            backtracking = True
             obj['mu'][:] = good_mu
             obj['w'][:] = good_w
             obj['v'][:] = good_v
@@ -329,26 +331,25 @@ def infer(obj, fstat=None, **kwargs):
             for ilatent in range(nlatent):
                 obj['chol'][ilatent, :] = ichol_gauss(ntime, obj['omega'][ilatent], rank) * obj['sigma'][ilatent]
 
-            lb[iiter] = lb[iiter - 1]
+            # lb[iiter] = lb[iiter - 1]
             if kwargs['verbose']:
                 print('\nELBO decreased. Backtracking.')
-            if iiter > kwargs['nadjhess'] and not adjhess:
+            if not adjhess:
                 adjhess = True
                 if kwargs['verbose']:
                     print('\nHessian adjustment enabled.')
-            else:
-                converged = True
+            # else:
+            #     converged = True
         elif abs(lb[iiter] - lb[iiter - 1]) < kwargs['tol'] * abs(lb[iiter - 1]):
             converged = True
         else:
-            adjhess = False
+            backtracking = False
+        #     adjhess = False
 
         if iiter % kwargs['nhyper'] == 0 and (kwargs['learn_sigma'] or kwargs['learn_omega']):
             gp = learngp(obj, **kwargs)
             obj['sigma'][:] = gp[0]
             obj['omega'][:] = gp[1]
-            # if kwargs['verbose']:
-            #     print('sigma: {} \nomega: {}'.format(obj['sigma'], obj['omega']))
             for ilatent in range(nlatent):
                 obj['chol'][ilatent, :] = ichol_gauss(ntime, obj['omega'][ilatent], rank) * obj['sigma'][ilatent]
 
@@ -490,15 +491,21 @@ def seqfit(y, channel, sigma, omega, lag=0, rank=500, **kwargs):
     objs = []
     if kwargs['verbose']:
         print('\nSequential fit')
-    for i in range(nlatent):
-        print('\n{} latent(s)'.format(i + 1))
+    for ilatent in range(nlatent):
+        print('\n{} latent(s)'.format(ilatent + 1))
+        # copyto(mu[:, :, ilatent], mu[:, :, 0])
+        # copyto(w[:, :, ilatent], w[:, :, 0])
+        # copyto(v[:, :, ilatent], v[:, :, 0])
+        # copyto(chol[ilatent, :], chol[0, :])
+        # copyto(sigma[ilatent], sigma[0])
+        # copyto(omega[ilatent], omega[0])
         obj = {'y': y, 'channel': channel, 'h': h,
-               'sigma': sigma[:i + 1], 'omega': omega[:i + 1], 'chol': chol[:i + 1, :],
-               'mu': mu[:, :, :i + 1], 'w': w[:, :, :i + 1], 'v': v[:, :, :i + 1], 'L': L[:, :i + 1, :, :],
-               'a': a[:i + 1, :], 'b': b, 'noise': noise}
+               'sigma': sigma[:ilatent + 1], 'omega': omega[:ilatent + 1], 'chol': chol[:ilatent + 1, :],
+               'mu': mu[:, :, :ilatent + 1], 'w': w[:, :, :ilatent + 1], 'v': v[:, :, :ilatent + 1], 'L': L[:, :ilatent + 1, :, :],
+               'a': a[:ilatent + 1, :], 'b': b, 'noise': noise}
 
-        kwargs['dmu_acc'] = zeros_like(mu[:, :, :i + 1])
-        kwargs['da_acc'] = zeros_like(a[:i + 1, :])
+        kwargs['dmu_acc'] = zeros_like(mu[:, :, :ilatent + 1])
+        kwargs['da_acc'] = zeros_like(a[:ilatent + 1, :])
         kwargs['db_acc'] = zeros_like(b)
 
         objs.append(postprocess(infer(obj, **kwargs)))
