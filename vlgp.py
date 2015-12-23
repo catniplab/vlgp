@@ -266,7 +266,7 @@ def infer(obj, fstat=None, **kwargs):
     if alpha is not None:
         loading_angle[0] = subspace(alpha.T, obj['a'].T)
     if x is not None:
-        rotated = empty_like(x)
+        rotated = empty_like(x, dtype=float)
         # rotate trial by trial
         for itrial in range(x.shape[0]):
             rotated[itrial, :] = rotate(add_constant(obj['mu'][itrial, :]), x[itrial, :])
@@ -357,9 +357,9 @@ def infer(obj, fstat=None, **kwargs):
         elapsed[iiter, 2] = iter_tock - iter_tick
 
         stat[iiter] = fstat(obj) if fstat is not None else {}
-        stat[iiter]['Posterior Elapsed'] = elapsed[iiter, 0]
-        stat[iiter]['Parameter Elapsed'] = elapsed[iiter, 1]
-        stat[iiter]['Elapsed'] = elapsed[iiter, 2]
+        stat[iiter]['Elapsed Post'] = elapsed[iiter, 0]
+        stat[iiter]['Elapsed Param'] = elapsed[iiter, 1]
+        stat[iiter]['Elapsed Total'] = elapsed[iiter, 2]
         stat[iiter]['ELBO'] = lb[iiter]
         stat[iiter]['LL'] = ll[iiter]
         stat[iiter]['sigma'] = good_sigma
@@ -653,4 +653,5 @@ def postprocess(obj):
         if obj.get(key, None) is None:
             obj.pop(key, None)
     obj.pop('h', None)
+    obj.pop('stat', None)
     return obj
