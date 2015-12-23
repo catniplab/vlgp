@@ -275,14 +275,15 @@ def infer(obj, fstat=None, **kwargs):
     #
     iiter = 1
     adjhess = False
-    backtracking = False
     converged = False
+    backtrack = False
+    stop = False
     infer_tick = timeit.default_timer()
 
     if kwargs['verbose']:
         print('\nInference starts')
 
-    while not converged and iiter < kwargs['niter']:
+    while not stop and iiter < kwargs['niter']:
         iter_tick = timeit.default_timer()
 
         # infer posterior
@@ -310,10 +311,12 @@ def infer(obj, fstat=None, **kwargs):
         lb[iiter], ll[iiter] = elbo(obj)
         converged = abs(lb[iiter] - lb[iiter - 1]) < kwargs['tol'] * abs(lb[iiter - 1])
         decreased = lb[iiter] < lb[iiter - 1]
+        stop = converged or (decreased and backtrack)
 
         if decreased:
             if kwargs['verbose']:
                 print('\nELBO decreased. Backtracking.')
+            backtrack = True
             copyto(obj['mu'], good_mu)
             copyto(obj['w'], good_w)
             copyto(obj['v'], good_v)
@@ -326,6 +329,7 @@ def infer(obj, fstat=None, **kwargs):
                     print('\nHessian adjustment enabled.')
                 adjhess = True
         else:
+            backtrack = False
             copyto(good_mu, obj['mu'])
             copyto(good_w, obj['w'])
             copyto(good_v, obj['v'])
