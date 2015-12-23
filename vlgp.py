@@ -113,7 +113,6 @@ def inferpost(obj, **kwargs):
         mu = obj['mu'][itrial, :]
         w = obj['w'][itrial, :]
         v = obj['v'][itrial, :]
-        L = obj['L'][itrial, :]
 
         # eta = mu.dot(a) + einsum('ijk, ki -> ji', h, b)  # (neuron, time, lag) . (lag, neuron)
         # lam = exp((eta + 0.5 * v.dot(a ** 2)).clip(MIN_EXP, MAX_EXP))
@@ -166,7 +165,6 @@ def inferparam(obj, **kwargs):
 
     a = obj['a']
     b = obj['b']
-    noise = obj['noise']
 
     decay = kwargs['decay']
     adjhess = kwargs['adjhess']
@@ -212,7 +210,7 @@ def inferparam(obj, **kwargs):
                                    h[ichannel, :].T.dot(y[:, ichannel] - mu.dot(a[:, ichannel])), sym_pos=True)
         else:
             print('Undefined channel')
-    noise[:] = var(y - eta, axis=0, ddof=0)
+    obj['noise'] = var(y - eta, axis=0, ddof=0)
 
 
 def fillargs(**kwargs):
@@ -293,6 +291,7 @@ def infer(obj, fstat=None, **kwargs):
             inferpost(obj, **kwargs, adjhess=adjhess)
         post_tock = timeit.default_timer()
         elapsed[iiter, 0] = post_tock - post_tick
+
         if x is not None:
             for itrial in range(x.shape[0]):
                 rotated[itrial, :] = rotate(add_constant(obj['mu'][itrial, :]), x[itrial, :])
@@ -304,63 +303,51 @@ def infer(obj, fstat=None, **kwargs):
             inferparam(obj, **kwargs, adjhess=adjhess)
         param_tock = timeit.default_timer()
         elapsed[iiter, 1] = param_tock - param_tick
+
         if alpha is not None:
             loading_angle[iiter] = subspace(alpha.T, obj['a'].T)
 
-        # if iiter % kwargs['nhyper'] == 0 and (kwargs['learn_sigma'] or kwargs['learn_omega']):
-        #     gp = learngp(obj, **kwargs)
-        #     obj['sigma'][:] = gp[0]
-        #     obj['omega'][:] = gp[1]
-        #     # if kwargs['verbose']:
-        #     #     print('sigma: {} \nomega: {}'.format(obj['sigma'], obj['omega']))
-        #     for ilatent in range(nlatent):
-        #         obj['chol'][ilatent, :] = ichol_gauss(ntime, obj['omega'][ilatent], rank) * obj['sigma'][ilatent]
-
         lb[iiter], ll[iiter] = elbo(obj)
-        if lb[iiter] < lb[iiter - 1] and iiter > kwargs['nadjhess'] and not backtracking:
-            # backtracking
-            backtracking = True
-            obj['mu'][:] = good_mu
-            obj['w'][:] = good_w
-            obj['v'][:] = good_v
-            obj['a'][:] = good_a
-            obj['b'][:] = good_b
-            # obj['noise'][:] = good_noise
-            # obj['sigma'][:] = good_sigma
-            # obj['omega'][:] = good_omega
-            for ilatent in range(nlatent):
-                obj['chol'][ilatent, :] = ichol_gauss(ntime, obj['omega'][ilatent], rank) * obj['sigma'][ilatent]
+        converged = abs(lb[iiter] - lb[iiter - 1]) < kwargs['tol'] * abs(lb[iiter - 1])
+        decreased = lb[iiter] < lb[iiter - 1]
 
-            # lb[iiter] = lb[iiter - 1]
+        if decreased:
             if kwargs['verbose']:
                 print('\nELBO decreased. Backtracking.')
-            if not adjhess:
-                adjhess = True
+            copyto(obj['mu'], good_mu)
+            copyto(obj['w'], good_w)
+            copyto(obj['v'], good_v)
+            copyto(obj['a'], good_a)
+            copyto(obj['b'], good_b)
+            copyto(obj['noise'], good_noise)
+            lb[iiter] = lb[iiter - 1]
+            if iiter > kwargs['nadjhess']:
                 if kwargs['verbose']:
                     print('\nHessian adjustment enabled.')
-            # else:
-            #     converged = True
-        elif abs(lb[iiter] - lb[iiter - 1]) < kwargs['tol'] * abs(lb[iiter - 1]):
-            converged = True
+                adjhess = True
         else:
-            backtracking = False
-        #     adjhess = False
+            copyto(good_mu, obj['mu'])
+            copyto(good_w, obj['w'])
+            copyto(good_v, obj['v'])
+            copyto(good_a, obj['a'])
+            copyto(good_b, obj['b'])
+            copyto(good_noise, obj['noise'])
 
         if iiter % kwargs['nhyper'] == 0 and (kwargs['learn_sigma'] or kwargs['learn_omega']):
             gp = learngp(obj, **kwargs)
-            obj['sigma'][:] = gp[0]
-            obj['omega'][:] = gp[1]
+            copyto(obj['sigma'], gp[0])
+            copyto(obj['omega'], gp[1])
             for ilatent in range(nlatent):
                 obj['chol'][ilatent, :] = ichol_gauss(ntime, obj['omega'][ilatent], rank) * obj['sigma'][ilatent]
-
-        good_mu[:] = obj['mu']
-        good_w[:] = obj['w']
-        good_v[:] = obj['v']
-        good_a[:] = obj['a']
-        good_b[:] = obj['b']
-        good_noise[:] = obj['noise']
-        good_sigma[:] = obj['sigma']
-        good_omega[:] = obj['omega']
+            lbhyper, _ = elbo(obj)
+            if lbhyper < lb[iiter]:
+                copyto(obj['sigma'], good_sigma)
+                copyto(obj['omega'], good_omega)
+                for ilatent in range(nlatent):
+                    obj['chol'][ilatent, :] = ichol_gauss(ntime, obj['omega'][ilatent], rank) * obj['sigma'][ilatent]
+            else:
+                copyto(good_sigma, obj['sigma'])
+                copyto(good_omega, obj['omega'])
 
         iter_tock = timeit.default_timer()
         elapsed[iiter, 2] = iter_tock - iter_tick
@@ -368,6 +355,7 @@ def infer(obj, fstat=None, **kwargs):
         stat[iiter] = fstat(obj) if fstat is not None else {}
         stat[iiter]['Posterior Elapsed'] = elapsed[iiter, 0]
         stat[iiter]['Parameter Elapsed'] = elapsed[iiter, 1]
+        stat[iiter]['Elapsed'] = elapsed[iiter, 2]
         stat[iiter]['ELBO'] = lb[iiter]
         stat[iiter]['LL'] = ll[iiter]
         stat[iiter]['sigma'] = good_sigma
@@ -500,8 +488,9 @@ def seqfit(y, channel, sigma, omega, lag=0, rank=500, **kwargs):
         # copyto(sigma[ilatent], sigma[0])
         # copyto(omega[ilatent], omega[0])
         obj = {'y': y, 'channel': channel, 'h': h,
-               'sigma': sigma[:ilatent + 1], 'omega': omega[:ilatent + 1], 'chol': chol[:ilatent + 1, :],
-               'mu': mu[:, :, :ilatent + 1], 'w': w[:, :, :ilatent + 1], 'v': v[:, :, :ilatent + 1], 'L': L[:, :ilatent + 1, :, :],
+               'sigma': sigma[:ilatent + 1].copy(), 'omega': omega[:ilatent + 1].copy(),
+               'chol': chol[:ilatent + 1, :].copy(),
+               'mu': mu[:, :, :ilatent + 1], 'w': w[:, :, :ilatent + 1], 'v': v[:, :, :ilatent + 1],
                'a': a[:ilatent + 1, :], 'b': b, 'noise': noise}
 
         kwargs['dmu_acc'] = zeros_like(mu[:, :, :ilatent + 1])

@@ -2,7 +2,7 @@
 Functions optimizing hyperparameters
 """
 from numpy import identity, arange, trace, dstack, diag
-from numpy.core.umath import exp, log
+from numpy.core.umath import exp, log, sqrt
 from numpy.linalg import slogdet
 from numpy.random.mtrand import choice
 from scipy.linalg import lstsq, solve, toeplitz
@@ -73,7 +73,7 @@ def learngp(obj, latents=None, **kwargs):
             for iseg in range(nseg):
                 tmp += win_mu[:, ilatent, iseg].dot(solve(C, win_mu[:, ilatent, iseg], sym_pos=True)) + trace(
                     solve(C, S[:, :, iseg], sym_pos=True))
-            sigma[ilatent] = tmp / (window * nseg)
+            sigma[ilatent] = sqrt(tmp / (window * nseg))
         # M = dstack([outer(win_mu[:, ilatent, iseg], win_mu[:, ilatent, iseg]) for iseg in range(nseg)])
         # mini = minimize(KL, x0=log(omega[ilatent]), jac=KLprime, args=(sigma[ilatent], window, win_mu[:, ilatent, :],
         # M, S, eps))
