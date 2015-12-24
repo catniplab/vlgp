@@ -6,7 +6,7 @@ import timeit
 from numpy import identity, einsum, trace, inner, empty, mean, inf, diag, newaxis, var, asarray, zeros, zeros_like, \
     empty_like, arange, sum, copyto
 from numpy.core.umath import sqrt, PINF, log
-from numpy.linalg import norm, slogdet
+from numpy.linalg import norm, slogdet, LinAlgError
 from scipy import stats
 from scipy.linalg import lstsq, eigh, solve
 from sklearn.decomposition.factor_analysis import FactorAnalysis
@@ -194,9 +194,17 @@ def inferparam(obj, **kwargs):
             db_acc[:, ichannel] = accumulate(db_acc[:, ichannel], grad_b, decay)
             neghess_b = h[ichannel, :].T.dot(lam[:, ichannel, newaxis] * h[ichannel, :])
             if adjhess:
-                b[:, ichannel] += solve(neghess_b + diag(sqrt(eps + db_acc[:, ichannel])), grad_b, sym_pos=True)
+                try:
+                    b[:, ichannel] += solve(neghess_b + diag(sqrt(eps + db_acc[:, ichannel])), grad_b, sym_pos=True)
+                except LinAlgError:
+                    pass
             else:
-                b[:, ichannel] += solve(neghess_b, grad_b, sym_pos=True)
+                try:
+                    b[:, ichannel] += solve(neghess_b, grad_b, sym_pos=True)
+                except LinAlgError:
+                    b[:, ichannel] += solve(neghess_b + eps * identity(b.shape[0]), grad_b, sym_pos=True)
+                else:
+                    pass
         elif channel[ichannel] == 'lfp':
             # a's least squares solution for Gaussian channel
             # (m'm + diag(j'v))^-1 m'(y - Hb)
