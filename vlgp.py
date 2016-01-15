@@ -1,5 +1,5 @@
 """
-Functions of Inference
+This file contains the functions used for inference.
 """
 import timeit
 
@@ -17,6 +17,14 @@ from util import add_constant, rotate, lagmat
 
 
 def elbo(obj):
+    """Evidence Lower BOund
+    Args:
+        obj: inference object
+
+    Returns:
+        lb: lower bound
+        ll: log-likelihood
+    """
     nchannel, ntrial, ntime, lag = obj['h'].shape  # neuron, trial, time, lag
     nlatent, _, rank = obj['chol'].shape  # latent, time, rank
 
@@ -83,6 +91,14 @@ def accumulate(accu, grad, decay=0):
 
 
 def inferpost(obj, **kwargs):
+    """Posterior step
+    Args:
+        obj: inference object
+        **kwargs: optional arguments controlling inference
+
+    Returns:
+
+    """
     nchannel, ntrial, ntime, lag = obj['h'].shape  # neuron, trial, time, lag
     nlatent, _, rank = obj['chol'].shape  # latent, time, rank
 
@@ -153,6 +169,14 @@ def inferpost(obj, **kwargs):
 
 
 def inferparam(obj, **kwargs):
+    """Parameter step
+    Args:
+        obj: inference object
+        **kwargs: optional arguments controlling inference
+
+    Returns:
+
+    """
     nchannel, ntrial, ntime, lag1 = obj['h'].shape  # neuron, trial, time, lag + 1
     nlatent, _, rank = obj['chol'].shape  # latent, time, rank
 
@@ -193,11 +217,9 @@ def inferparam(obj, **kwargs):
             grad_b = h[ichannel, :].T.dot(y[:, ichannel] - lam[:, ichannel])
             db_acc[:, ichannel] = accumulate(db_acc[:, ichannel], grad_b, decay)
             neghess_b = h[ichannel, :].T.dot(lam[:, ichannel, newaxis] * h[ichannel, :])
+            # TODO: inactive neurons never fire across all trials which may cause zero Hessian
             if adjhess:
-                try:
                     b[:, ichannel] += solve(neghess_b + diag(sqrt(eps + db_acc[:, ichannel])), grad_b, sym_pos=True)
-                except LinAlgError:
-                    pass
             else:
                 try:
                     b[:, ichannel] += solve(neghess_b, grad_b, sym_pos=True)
@@ -222,6 +244,13 @@ def inferparam(obj, **kwargs):
 
 
 def fillargs(**kwargs):
+    """Fill default values of controlling arguments if missing
+    Args:
+        **kwargs: optional arguments controlling inference
+
+    Returns:
+        valid arguments
+    """
     kwargs['verbose'] = kwargs.get('verbose', False)
     kwargs['niter'] = kwargs.get('niter', 50)
     kwargs['infer'] = kwargs.get('infer', 'both')
@@ -239,13 +268,12 @@ def fillargs(**kwargs):
 
 def infer(obj, fstat=None, **kwargs):
     """Main inference procedure
-
     Args:
-        obj:
-        kwargs:
+        obj: inference object
+        kwargs: optional arguments controlling inference
 
     Returns:
-
+        inference object
     """
 
     # for backtracking
@@ -397,6 +425,22 @@ def infer(obj, fstat=None, **kwargs):
 
 
 def fit(y, channel, sigma, omega, x=None, alpha=None, beta=None, lag=0, rank=500, **kwargs):
+    """Inference API
+    Args:
+        y:       observation matrix
+        channel: channel type indicator (spike/lfp)
+        sigma:   initial prior variance
+        omega:   initial prior timescale
+        x:       optional true latent
+        alpha:   optional true loading
+        beta:    optional true autoregression coefficients and bias
+        lag:     autoregressive lag
+        rank:    prior covariance rank
+        **kwargs: optional arguments controlling inference
+
+    Returns:
+        inference object
+    """
     assert sigma.shape == omega.shape
     kwargs = fillargs(**kwargs)
 
@@ -449,6 +493,19 @@ def fit(y, channel, sigma, omega, x=None, alpha=None, beta=None, lag=0, rank=500
 
 
 def seqfit(y, channel, sigma, omega, lag=0, rank=500, **kwargs):
+    """Sequential inference API
+    Args:
+        y:       observation matrix
+        channel: channel type indicator (spike/lfp)
+        sigma:   initial prior variance
+        omega:   initial prior timescale
+        lag:     autoregressive lag
+        rank:    prior covariance rank
+        **kwargs: optional arguments controlling inference
+
+    Returns:
+        list of inference objects
+    """
     assert sigma.shape == omega.shape
     kwargs = fillargs(**kwargs)
 
@@ -515,17 +572,14 @@ def seqfit(y, channel, sigma, omega, lag=0, rank=500, **kwargs):
 
 
 def leave_one_out(trial, model, **kwargs):
-    """Leave-one-out
-
-    Predict each spike train
-
+    """Leave-one-out prediction
     Args:
-        trial:
-        model:
-        kwargs:
+        trial: trial to predict
+        model: fitted model
+        kwargs: optional arguments controlling inference
 
     Returns:
-
+        trial with prediction
     """
     kwargs = fillargs(**kwargs)
     y = trial['y']
@@ -581,22 +635,20 @@ def leave_one_out(trial, model, **kwargs):
 
 
 def cv(y, channel, sigma, omega, lag=0, rank=500, **kwargs):
-    """Use each trial as testset
+    """Cross-validation
+    Do leave-one-out prediction to all trials. Use one trial as test and the rest as training each time.
 
     Args:
-        y:
-        channel:
-        sigma:
-        omega:
-        lag:
-        rank:
-        niter:
-        nadjhess:
-        tol:
-        hyper:
+        y:       observation matrix
+        channel: channel type indicator (spike/lfp)
+        sigma:   initial prior variance
+        omega:   initial prior time scale
+        lag:     autoregressive lag
+        rank:    prior covariance rank
+        **kwargs: optional arguments controlling inference
 
     Returns:
-
+        prediction of all neurons
     """
     kwargs = fillargs(**kwargs)
     assert sigma.shape == omega.shape
@@ -633,8 +685,7 @@ def cv(y, channel, sigma, omega, lag=0, rank=500, **kwargs):
 
 
 def postprocess(obj):
-    """
-    Remove intermediate and empty variables, and compute decomposition of posterior covariance
+    """Remove intermediate and empty variables, and compute decomposition of posterior covariance
     Args:
         obj: raw inference
 

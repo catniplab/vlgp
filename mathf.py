@@ -1,8 +1,5 @@
 """
-Functions doing math
-link functions
-cholesky decomposition
-subspace angle
+This file contains math functions.
 """
 import warnings
 
@@ -15,18 +12,46 @@ MAX_EXP = 20
 
 
 def rectlin(x):
+    """Rectangular linear link
+    Args:
+        x: real
+
+    Returns:
+
+    """
     return x.clip(0, inf)
 
 
 def sexp(x):
+    """Safe exponential function
+    Args:
+        x: real
+
+    Returns:
+
+    """
     return exp(x.clip(MIN_EXP, MAX_EXP))
 
 
 def identity(x):
+    """Identity function
+    Args:
+        x: input
+
+    Returns:
+        input
+    """
     return x
 
 
 def log1exp(x):
+    """log(1+exp(x))
+    Args:
+        x: real
+
+    Returns:
+
+    """
     return log1p(exp(x))
 
 

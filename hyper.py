@@ -1,5 +1,5 @@
 """
-Functions optimizing hyperparameters
+This file contains the functions of hyperparameter optimization
 """
 from numpy import identity, arange, trace, dstack, diag
 from numpy.core.umath import exp, log, sqrt
@@ -10,6 +10,19 @@ from scipy.optimize import minimize_scalar
 
 
 def KLprime(theta, sigma, n, mu, M, S, eps=1e-6):
+    """Derivative of KL part of ELBO w.r.t. hyperparameter
+    Args:
+        theta: log of timescale
+        sigma: variance
+        n: length of time
+        mu: posterior mean
+        M: precalculated matrix involving mu
+        S: correlation matrix
+        eps: minimum positive value
+
+    Returns:
+        gradient
+    """
     omega = exp(theta)
     sigmasq = sigma ** 2
     nseg = M.shape[-1]
@@ -28,6 +41,19 @@ def KLprime(theta, sigma, n, mu, M, S, eps=1e-6):
 
 
 def KL(theta, sigma, n, mu, M, S, eps=1e-6):
+    """KL part of ELBO
+    Args:
+        theta: log of timescale
+        sigma: variance
+        n: length of time
+        mu: posterior mean
+        M: precalculated matrix involving mu
+        S: correlation matrix
+        eps: minimum positive value
+
+    Returns:
+        function value
+    """
     omega = exp(theta)
     sigmasq = sigma ** 2
     nseg = mu.shape[-1]
@@ -43,6 +69,15 @@ def KL(theta, sigma, n, mu, M, S, eps=1e-6):
 
 
 def learngp(obj, latents=None, **kwargs):
+    """Main function learning hyperparameters
+    Args:
+        obj: inference object
+        latents: optional true latent
+        **kwargs: optional arguments controlling inference
+
+    Returns:
+        optimized hyperparameters
+    """
     window = kwargs.get('window', 100)
     nseg = kwargs.get('nseg', 10)
     eps = kwargs.get('eps', 1e-6)

@@ -1,5 +1,5 @@
 """
-Plots
+This file contains helper functions to plot latent dynamics and spike trains
 """
 import matplotlib as mpl
 import matplotlib.pyplot as plt
@@ -8,6 +8,15 @@ from math import ceil
 
 
 def dynplot(x, ncol=4, figsize=None):
+    """Plot latent dynamics of trials into subplots
+    Args:
+        x: latent dynamics
+        ncol: number of columns of subplot layout
+        figsize: figure size
+
+    Returns:
+
+    """
     x = asarray(x)
     if x.ndim < 3:
         x = atleast_3d(x)
@@ -35,6 +44,16 @@ def dynplot(x, ncol=4, figsize=None):
 
 
 def rasterplot(spike, ncol=4, figsize=None, margin=0.1):
+    """Raster plot of spike trains
+    Args:
+        spike: spike trains
+        ncol: number of columns of subplot layout
+        figsize: figure size
+        margin: margin size of each neuron
+
+    Returns:
+
+    """
     spike = asarray(spike)
     if spike.ndim < 3:
         spike = atleast_3d(spike)
