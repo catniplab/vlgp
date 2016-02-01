@@ -349,6 +349,10 @@ def infer(obj, fstat=None, **kwargs):
         decreased = lb[iiter] < lb[iiter - 1]
         stop = converged or (decreased and backtrack)
 
+        if stop and kwargs['infer'] == 'both':
+            kwargs['infer'] = 'param'
+            stop = False
+
         if decreased:
             if kwargs['verbose']:
                 print('\nELBO decreased. Backtracking.')
