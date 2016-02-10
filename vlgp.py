@@ -308,6 +308,21 @@ def infer(obj, fstat=None, **kwargs):
     x = obj.get('x')
     alpha = obj.get('alpha')
 
+    # fully optimize latent at initialization
+    # old_elbo = NINF
+    # for _ in range(50):
+    #     inferpost(obj, **kwargs, adjhess=False, normalize=False)
+    #     new_elbo, _ = elbo(obj)
+    #     if new_elbo <= old_elbo:
+    #         copyto(obj['mu'], good_mu)
+    #         copyto(obj['w'], good_w)
+    #         copyto(obj['v'], good_v)
+    #         break
+    #     old_elbo = new_elbo
+    #     copyto(good_mu, obj['mu'])
+    #     copyto(good_w, obj['w'])
+    #     copyto(good_v, obj['v'])
+
     # iteration 0
     lb[0], ll[0] = elbo(obj)
     # lb[0], ll[0] = NINF, NINF
@@ -338,6 +353,7 @@ def infer(obj, fstat=None, **kwargs):
         post_tick = timeit.default_timer()
         if kwargs['infer'] != 'param':
             inferpost(obj, **kwargs, adjhess=adjhess)
+        elbo(obj)
         post_tock = timeit.default_timer()
         elapsed[iiter, 0] = post_tock - post_tick
 
