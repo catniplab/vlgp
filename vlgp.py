@@ -777,14 +777,14 @@ def fit2(y, channel, sigma, omega, x=None, a0=None, mu0=None, alpha=None, beta=N
     return inference
 
 
-def fitparam(y, channel, sigma, omega, x, alpha=None, beta=None, lag=0, rank=500, **kwargs):
+def fitpost(y, channel, sigma, omega, a, b, x=None, alpha=None, beta=None, lag=0, rank=500, **kwargs):
     """Inference API
     Args:
         y:       observation matrix
         channel: channel type indicator (spike/lfp)
         sigma:   initial prior variance
         omega:   initial prior timescale
-        x:       optional true latent
+        mu:       optional true latent
         alpha:   optional true loading
         beta:    optional true autoregression coefficients and bias
         lag:     autoregressive lag
@@ -816,7 +816,65 @@ def fitparam(y, channel, sigma, omega, x, alpha=None, beta=None, lag=0, rank=500
         chol[ilatent, :] = ichol_gauss(ntime, omega[ilatent], rank) * sigma[ilatent]
 
     # initialize posterior
-    a = lstsq(x.reshape((-1, nlatent)), y.reshape((-1, nchannel)))[0]
+    mu = lstsq(a.T, y.T)[0].T
+    L = empty((ntrial, nlatent, ntime, rank))
+
+    noise = var(y.reshape((-1, nchannel)), axis=0, ddof=0)
+
+    obj = {'y': y, 'channel': channel, 'h': h,
+           'sigma': sigma, 'omega': omega, 'chol': chol, 'sigma0': sigma, 'omega0': omega,
+           'mu': mu, 'w': zeros((ntrial, ntime, nlatent)), 'v': zeros((ntrial, ntime, nlatent)), 'L': L,
+           'a': a, 'b': b, 'noise': noise, 'x': x, 'alpha': alpha, 'beta': beta}
+
+    kwargs['dmu_acc'] = zeros_like(mu)
+    kwargs['da_acc'] = zeros_like(a)
+    kwargs['db_acc'] = zeros_like(b)
+    kwargs['infer'] = 'param'
+
+    inference = postprocess(infer(obj, **kwargs))
+    return inference
+
+
+def fitparam(y, channel, sigma, omega, mu, x=None, alpha=None, beta=None, lag=0, rank=500, **kwargs):
+    """Inference API
+    Args:
+        y:       observation matrix
+        channel: channel type indicator (spike/lfp)
+        sigma:   initial prior variance
+        omega:   initial prior timescale
+        mu:       optional true latent
+        alpha:   optional true loading
+        beta:    optional true autoregression coefficients and bias
+        lag:     autoregressive lag
+        rank:    prior covariance rank
+        **kwargs: optional arguments controlling inference
+
+    Returns:
+        inference object
+    """
+    assert sigma.shape == omega.shape
+    kwargs = fillargs(**kwargs)
+
+    y = asarray(y)
+    if y.ndim < 2:
+        y = y[..., None]
+    if y.ndim < 3:
+        y = y[None, ...]
+    channel = asarray(channel)
+    ntrial, ntime, nchannel = y.shape
+    nlatent = sigma.shape[0]
+
+    h = empty((nchannel, ntrial, ntime, 1 + lag), dtype=float)
+    for ichannel in range(nchannel):
+        for itrial in range(ntrial):
+            h[ichannel, itrial, :] = add_constant(lagmat(y[itrial, :, ichannel], lag=lag))
+
+    chol = empty((nlatent, ntime, rank), dtype=float)
+    for ilatent in range(nlatent):
+        chol[ilatent, :] = ichol_gauss(ntime, omega[ilatent], rank) * sigma[ilatent]
+
+    # initialize posterior
+    a = lstsq(mu.reshape((-1, nlatent)), y.reshape((-1, nchannel)))[0]
     L = empty((ntrial, nlatent, ntime, rank))
 
     # initialize parameters
@@ -829,10 +887,10 @@ def fitparam(y, channel, sigma, omega, x, alpha=None, beta=None, lag=0, rank=500
 
     obj = {'y': y, 'channel': channel, 'h': h,
            'sigma': sigma, 'omega': omega, 'chol': chol, 'sigma0': sigma, 'omega0': omega,
-           'mu': x, 'w': zeros((ntrial, ntime, nlatent)), 'v': zeros((ntrial, ntime, nlatent)), 'L': L, 'x': x,
-           'a': a, 'b': b, 'noise': noise, 'alpha': alpha, 'beta': beta}
+           'mu': mu, 'w': zeros((ntrial, ntime, nlatent)), 'v': zeros((ntrial, ntime, nlatent)), 'L': L,
+           'a': a, 'b': b, 'noise': noise, 'x': x, 'alpha': alpha, 'beta': beta}
 
-    kwargs['dmu_acc'] = zeros_like(x)
+    kwargs['dmu_acc'] = zeros_like(mu)
     kwargs['da_acc'] = zeros_like(a)
     kwargs['db_acc'] = zeros_like(b)
     kwargs['infer'] = 'param'
