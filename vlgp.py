@@ -816,7 +816,7 @@ def fitpost(y, channel, sigma, omega, a, b, x=None, alpha=None, beta=None, lag=0
         chol[ilatent, :] = ichol_gauss(ntime, omega[ilatent], rank) * sigma[ilatent]
 
     # initialize posterior
-    mu = lstsq(a.T, y.T)[0].T
+    mu = lstsq(a.T, y.reshape((-1, nchannel)).T)[0].T.reshape((ntrial, ntime, -1))
     L = empty((ntrial, nlatent, ntime, rank))
 
     noise = var(y.reshape((-1, nchannel)), axis=0, ddof=0)
