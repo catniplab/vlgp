@@ -464,6 +464,171 @@ def infer(obj, fstat=None, **kwargs):
     return obj
 
 
+def infer2(obj, fstat=None, **kwargs):
+    """Main inference procedure
+    Args:
+        obj: inference object
+        kwargs: optional arguments controlling inference
+
+    Returns:
+        inference object
+    """
+
+    # for backtracking
+    good_mu = obj['mu'].copy()
+    good_w = obj['w'].copy()
+    good_v = obj['v'].copy()
+    good_a = obj['a'].copy()
+    good_b = obj['b'].copy()
+    good_noise = obj['noise'].copy()
+    good_sigma = obj['sigma'].copy()
+    good_omega = obj['omega'].copy()
+
+    stat = empty(kwargs['niter'], dtype=object)
+    lb = zeros(kwargs['niter'], dtype=float)
+    ll = zeros(kwargs['niter'], dtype=float)
+    elapsed = zeros((kwargs['niter'], 3), dtype=float)
+    loading_angle = zeros(kwargs['niter'], dtype=float)
+    latent_angle = zeros(kwargs['niter'], dtype=float)
+    nlatent, ntime, rank = obj['chol'].shape
+
+    x = obj.get('x')
+    alpha = obj.get('alpha')
+
+    # iteration 0
+    lb[0], ll[0] = elbo(obj)
+    # lb[0], ll[0] = NINF, NINF
+    if alpha is not None:
+        loading_angle[0] = subspace(alpha.T, obj['a'].T)
+    if x is not None:
+        rotated = empty_like(x, dtype=float)
+        # rotate trial by trial
+        for itrial in range(x.shape[0]):
+            rotated[itrial, :] = rotate(add_constant(obj['mu'][itrial, :]), x[itrial, :])
+        latent_angle[0] = subspace(rotated.reshape((-1, x.shape[-1])), x.reshape((-1, x.shape[-1])))
+
+    #
+    iiter = 1
+    adjhess = False
+    converged = False
+    stop = False
+    infer_tick = timeit.default_timer()
+
+    if kwargs['verbose']:
+        print('\nInference starts')
+
+    while not stop and iiter < kwargs['niter']:
+        iter_tick = timeit.default_timer()
+
+        # infer posterior
+        post_tick = timeit.default_timer()
+        if kwargs['infer'] != 'param':
+            inferpost(obj, **kwargs, adjhess=False)
+        elbo(obj)
+        post_tock = timeit.default_timer()
+        elapsed[iiter, 0] = post_tock - post_tick
+
+        lb_post, ll_post = elbo(obj)
+        if lb_post < lb[iiter - 1]:
+            if kwargs['verbose']:
+                print('\nELBO decreased by posterior. Backtracking.')
+            copyto(obj['mu'], good_mu)
+            copyto(obj['w'], good_w)
+            copyto(obj['v'], good_v)
+            lb_post = lb[iiter - 1]
+            ll_post = ll[iiter - 1]
+
+        # Calculate angle between latent subspace if true latent is given.
+        if x is not None:
+            for itrial in range(x.shape[0]):
+                rotated[itrial, :] = rotate(add_constant(obj['mu'][itrial, :]), x[itrial, :])
+            latent_angle[iiter] = subspace(rotated.reshape((-1, x.shape[-1])), x.reshape((-1, x.shape[-1])))
+
+        # infer parameter
+        param_tick = timeit.default_timer()
+        if kwargs['infer'] != 'posterior':
+            inferparam(obj, **kwargs, adjhess=adjhess)
+        param_tock = timeit.default_timer()
+        elapsed[iiter, 1] = param_tock - param_tick
+
+        lb_param, ll_param = elbo(obj)
+        if lb_param < lb_post:
+            if kwargs['verbose']:
+                print('\nELBO decreased by parameter. Backtracking.')
+            copyto(obj['a'], good_a)
+            copyto(obj['b'], good_b)
+            copyto(obj['noise'], good_noise)
+            lb_param = lb_post
+            ll_param = ll_post
+
+        # Calculate angle between loading subspace if true loading is given.
+        if alpha is not None:
+            loading_angle[iiter] = subspace(alpha.T, obj['a'].T)
+
+        lb[iiter], ll[iiter] = lb_param, ll_param
+
+        converged = abs(lb[iiter] - lb[iiter - 1]) < kwargs['tol'] * abs(lb[iiter - 1])
+        stop = converged
+        # stop = converged or (decreased and backtrack)
+
+        copyto(good_mu, obj['mu'])
+        copyto(good_w, obj['w'])
+        copyto(good_v, obj['v'])
+        copyto(good_a, obj['a'])
+        copyto(good_b, obj['b'])
+        copyto(good_noise, obj['noise'])
+
+        if iiter % kwargs['nhyper'] == 0 and (kwargs['learn_sigma'] or kwargs['learn_omega']):
+            gp = learngp(obj, **kwargs)
+            copyto(obj['sigma'], gp[0])
+            copyto(obj['omega'], gp[1])
+            for ilatent in range(nlatent):
+                obj['chol'][ilatent, :] = ichol_gauss(ntime, obj['omega'][ilatent], rank) * obj['sigma'][ilatent]
+            lbhyper, _ = elbo(obj)
+            if lbhyper < lb[iiter]:
+                copyto(obj['sigma'], good_sigma)
+                copyto(obj['omega'], good_omega)
+                for ilatent in range(nlatent):
+                    obj['chol'][ilatent, :] = ichol_gauss(ntime, obj['omega'][ilatent], rank) * obj['sigma'][ilatent]
+            else:
+                copyto(good_sigma, obj['sigma'])
+                copyto(good_omega, obj['omega'])
+
+        iter_tock = timeit.default_timer()
+        elapsed[iiter, 2] = iter_tock - iter_tick
+
+        stat[iiter] = fstat(obj) if fstat is not None else {}
+        stat[iiter]['Elapsed Post'] = elapsed[iiter, 0]
+        stat[iiter]['Elapsed Param'] = elapsed[iiter, 1]
+        stat[iiter]['Elapsed Total'] = elapsed[iiter, 2]
+        stat[iiter]['ELBO'] = lb[iiter]
+        stat[iiter]['LL'] = ll[iiter]
+        stat[iiter]['sigma'] = good_sigma
+        stat[iiter]['omega'] = good_omega
+
+        if kwargs['verbose']:
+            print('\n[{}]'.format(iiter))
+            for k, v in stat[iiter].items():
+                print('{}: {}'.format(k, v))
+
+        iiter += 1
+    infer_tock = timeit.default_timer()
+
+    if kwargs['verbose']:
+        print('\nInference ends')
+        print('{} iterations, ELBO: {:.4f}, elapsed: {:.2f}, converged: {}\n'.format(iiter - 1,
+                                                                                     lb[iiter - 1],
+                                                                                     infer_tock - infer_tick,
+                                                                                     converged))
+    obj['ELBO'] = lb[:iiter]
+    obj['Elapsed'] = elapsed[:iiter, :]
+    obj['LoadingAngle'] = loading_angle[:iiter]
+    obj['LatentAngle'] = latent_angle[:iiter]
+    obj['LL'] = ll[:iiter]
+    obj['stat'] = stat
+    return obj
+
+
 def fit(y, channel, sigma, omega, x=None, a0=None, mu0=None, alpha=None, beta=None, lag=0, rank=500, **kwargs):
     """Inference API
     Args:
@@ -535,6 +700,80 @@ def fit(y, channel, sigma, omega, x=None, a0=None, mu0=None, alpha=None, beta=No
     kwargs['db_acc'] = zeros_like(b)
 
     inference = postprocess(infer(obj, **kwargs))
+    return inference
+
+
+def fit2(y, channel, sigma, omega, x=None, a0=None, mu0=None, alpha=None, beta=None, lag=0, rank=500, **kwargs):
+    """Inference API
+    Args:
+        y:       observation matrix
+        channel: channel type indicator (spike/lfp)
+        sigma:   initial prior variance
+        omega:   initial prior timescale
+        x:       optional true latent
+        alpha:   optional true loading
+        beta:    optional true autoregression coefficients and bias
+        lag:     autoregressive lag
+        rank:    prior covariance rank
+        **kwargs: optional arguments controlling inference
+
+    Returns:
+        inference object
+    """
+    assert sigma.shape == omega.shape
+    kwargs = fillargs(**kwargs)
+
+    y = asarray(y)
+    if y.ndim < 2:
+        y = y[..., None]
+    if y.ndim < 3:
+        y = y[None, ...]
+    channel = asarray(channel)
+    ntrial, ntime, nchannel = y.shape
+    nlatent = sigma.shape[0]
+
+    h = empty((nchannel, ntrial, ntime, 1 + lag), dtype=float)
+    for ichannel in range(nchannel):
+        for itrial in range(ntrial):
+            h[ichannel, itrial, :] = add_constant(lagmat(y[itrial, :, ichannel], lag=lag))
+
+    chol = empty((nlatent, ntime, rank), dtype=float)
+    for ilatent in range(nlatent):
+        chol[ilatent, :] = ichol_gauss(ntime, omega[ilatent], rank) * sigma[ilatent]
+
+    # initialize posterior
+    fa = FactorAnalysis(n_components=nlatent, svd_method='lapack')
+    mu = fa.fit_transform(y.reshape((-1, nchannel)))
+    mu -= mu.mean(axis=0)
+    a = fa.components_ * norm(mu, ord=inf, axis=0, keepdims=True).T
+    mu /= norm(mu, ord=inf, axis=0)
+    mu = mu.reshape((ntrial, ntime, nlatent))
+
+    if a0 is not None:
+        a = a0
+    if mu0 is not None:
+        mu = mu0
+
+    L = empty((ntrial, nlatent, ntime, rank))
+
+    # initialize parameters
+    b = empty((1 + lag, nchannel), dtype=float)
+    for ichannel in range(nchannel):
+        b[:, ichannel] = lstsq(h.reshape((nchannel, -1, 1 + lag))[ichannel, :], y.reshape((-1, nchannel))[:, ichannel])[
+            0]
+
+    noise = var(y.reshape((-1, nchannel)), axis=0, ddof=0)
+
+    obj = {'y': y, 'channel': channel, 'h': h,
+           'sigma': sigma, 'omega': omega, 'chol': chol, 'sigma0': sigma, 'omega0': omega,
+           'mu': mu, 'w': zeros((ntrial, ntime, nlatent)), 'v': zeros((ntrial, ntime, nlatent)), 'L': L, 'x': x,
+           'a': a, 'b': b, 'noise': noise, 'alpha': alpha, 'beta': beta}
+
+    kwargs['dmu_acc'] = zeros_like(mu)
+    kwargs['da_acc'] = zeros_like(a)
+    kwargs['db_acc'] = zeros_like(b)
+
+    inference = postprocess(infer2(obj, **kwargs))
     return inference
 
 
