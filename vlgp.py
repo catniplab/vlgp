@@ -777,7 +777,7 @@ def fit2(y, channel, sigma, omega, x=None, a0=None, mu0=None, alpha=None, beta=N
     return inference
 
 
-def fitpost(y, channel, sigma, omega, a, b, x=None, alpha=None, beta=None, lag=0, rank=500, **kwargs):
+def fitpost(y, channel, sigma, omega, a, b, mu0=None, x=None, alpha=None, beta=None, lag=0, rank=500, **kwargs):
     """Inference API
     Args:
         y:       observation matrix
@@ -816,7 +816,7 @@ def fitpost(y, channel, sigma, omega, a, b, x=None, alpha=None, beta=None, lag=0
         chol[ilatent, :] = ichol_gauss(ntime, omega[ilatent], rank) * sigma[ilatent]
 
     # initialize posterior
-    mu = lstsq(a.T, y.reshape((-1, nchannel)).T)[0].T.reshape((ntrial, ntime, -1))
+    mu = lstsq(a.T, y.reshape((-1, nchannel)).T)[0].T.reshape((ntrial, ntime, -1)) if mu0 is None else mu0.copy()
     L = empty((ntrial, nlatent, ntime, rank))
 
     noise = var(y.reshape((-1, nchannel)), axis=0, ddof=0)
@@ -829,7 +829,7 @@ def fitpost(y, channel, sigma, omega, a, b, x=None, alpha=None, beta=None, lag=0
     kwargs['dmu_acc'] = zeros_like(mu)
     kwargs['da_acc'] = zeros_like(a)
     kwargs['db_acc'] = zeros_like(b)
-    kwargs['infer'] = 'param'
+    kwargs['infer'] = 'posterior'
 
     inference = postprocess(infer(obj, **kwargs))
     return inference
