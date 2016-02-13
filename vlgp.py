@@ -157,15 +157,21 @@ def inferpost(obj, **kwargs):
                        G.dot(GtWG.dot(solve(eyer + GtWG, (wadj * G).T.dot(u), sym_pos=True)))
 
             mu[:, ilatent] += delta_mu
-            mu[:, ilatent] -= mean(mu[:, ilatent])
-            scale = norm(mu[:, ilatent], ord=inf)
-            mu[:, ilatent] /= scale
+            # mu[:, ilatent] -= mean(mu[:, ilatent])
+            # scale = norm(mu[:, ilatent], ord=inf)
+            # mu[:, ilatent] /= scale
 
         eta = mu.dot(a) + einsum('ijk, ki -> ji', h, b)
         lam = sexp(eta + 0.5 * v.dot(a ** 2))
         U[:, spike] = lam[:, spike]
         U[:, lfp] = 1 / noise[lfp]
         w[:, :] = U.dot(a.T ** 2)
+
+    # center over all trials
+    shape = obj['mu'].shape()
+    mu_over_trials = obj['mu'].reshape((-1, nlatent))
+    mu_over_trials -= mu_over_trials.mean(axis=1)
+    obj['mu'] = mu_over_trials.reshape(shape)
 
 
 def inferparam(obj, **kwargs):
@@ -251,6 +257,9 @@ def inferparam(obj, **kwargs):
             print('Undefined channel')
     obj['noise'] = var(y - eta, axis=0, ddof=0)
 
+    # constrain loading
+    a /= norm(a, ord=inf, axis=1)
+
 
 def fillargs(**kwargs):
     """Fill default values of controlling arguments if missing
@@ -274,6 +283,7 @@ def fillargs(**kwargs):
     kwargs['omega_factor'] = kwargs.get('omega_factor', 5)
     kwargs['param_opt'] = kwargs.get('param_opt', 'NR')
     kwargs['moreparam'] = kwargs.get('moreparam', False)
+    kwargs['adjhess'] = kwargs.get('adjhess', False)
     return kwargs
 
 
@@ -339,7 +349,6 @@ def infer(obj, fstat=None, **kwargs):
     iiter = 1
     adjhess = False
     converged = False
-    backtrack = False
     stop = False
     infer_tick = timeit.default_timer()
 
@@ -381,13 +390,13 @@ def infer(obj, fstat=None, **kwargs):
         # stop = converged or (decreased and backtrack)
 
         # keep optimizing loading after latent convergence
-        if stop and kwargs['infer'] == 'both' and kwargs['moreparam']:
-            if kwargs['verbose']:
-                print('\nLoading only')
-            kwargs['infer'] = 'param'
-            kwargs['param_opt'] = 'GA'
-            kwargs['tol'] *= 0.1
-            stop = False
+        # if stop and kwargs['infer'] == 'both' and kwargs['moreparam']:
+        #     if kwargs['verbose']:
+        #         print('\nLoading only')
+        #     kwargs['infer'] = 'param'
+        #     kwargs['param_opt'] = 'GA'
+        #     kwargs['tol'] *= 0.1
+        #     stop = False
 
         if decreased:
             if kwargs['verbose']:
@@ -400,12 +409,7 @@ def infer(obj, fstat=None, **kwargs):
             copyto(obj['b'], good_b)
             copyto(obj['noise'], good_noise)
             lb[iiter] = lb[iiter - 1]
-            if iiter > kwargs['nadjhess']:
-                if kwargs['verbose']:
-                    print('\nHessian adjustment enabled.')
-                adjhess = True
         else:
-            backtrack = False
             copyto(good_mu, obj['mu'])
             copyto(good_w, obj['w'])
             copyto(good_v, obj['v'])
@@ -670,9 +674,12 @@ def fit(y, channel, sigma, omega, x=None, a0=None, mu0=None, alpha=None, beta=No
     # initialize posterior
     fa = FactorAnalysis(n_components=nlatent, svd_method='lapack')
     mu = fa.fit_transform(y.reshape((-1, nchannel)))
-    mu -= mu.mean(axis=0)
     a = fa.components_ * norm(mu, ord=inf, axis=0, keepdims=True).T
-    mu /= norm(mu, ord=inf, axis=0)
+    # constrain loading and center latent
+    mu /= norm(a, ord=inf, axis=1)
+    mu -= mu.mean(axis=0)
+    a /= norm(a, ord=inf, axis=1)
+    # mu /= norm(mu, ord=inf, axis=0)
     mu = mu.reshape((ntrial, ntime, nlatent))
 
     if a0 is not None:
