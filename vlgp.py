@@ -3,6 +3,7 @@ This file contains the functions used for inference.
 """
 import timeit
 
+import numpy as np
 from numpy import identity, einsum, trace, inner, empty, mean, inf, diag, newaxis, var, asarray, zeros, zeros_like, \
     empty_like, arange, sum, copyto
 from numpy.core.umath import sqrt, PINF, log, exp, NINF
@@ -160,6 +161,10 @@ def inferpost(obj, **kwargs):
             # mu[:, ilatent] -= mean(mu[:, ilatent])
             # scale = norm(mu[:, ilatent], ord=inf)
             # mu[:, ilatent] /= scale
+            shape = obj['mu'].shape
+            mu_over_trials = obj['mu'].reshape((-1, nlatent))
+            mu_over_trials -= mu_over_trials.mean(axis=0)
+            obj['mu'] = mu_over_trials.reshape(shape)
 
         eta = mu.dot(a) + einsum('ijk, ki -> ji', h, b)
         lam = sexp(eta + 0.5 * v.dot(a ** 2))
@@ -168,10 +173,6 @@ def inferpost(obj, **kwargs):
         w[:, :] = U.dot(a.T ** 2)
 
     # center over all trials
-    shape = obj['mu'].shape()
-    mu_over_trials = obj['mu'].reshape((-1, nlatent))
-    mu_over_trials -= mu_over_trials.mean(axis=1)
-    obj['mu'] = mu_over_trials.reshape(shape)
 
 
 def inferparam(obj, **kwargs):
@@ -258,7 +259,7 @@ def inferparam(obj, **kwargs):
     obj['noise'] = var(y - eta, axis=0, ddof=0)
 
     # constrain loading
-    a /= norm(a, ord=inf, axis=1)
+    a /= norm(a, ord=inf, axis=1)[..., newaxis]
 
 
 def fillargs(**kwargs):
@@ -334,8 +335,8 @@ def infer(obj, fstat=None, **kwargs):
     #     copyto(good_v, obj['v'])
 
     # iteration 0
-    lb[0], ll[0] = elbo(obj)
-    # lb[0], ll[0] = NINF, NINF
+    # lb[0], ll[0] = elbo(obj)
+    lb[0], ll[0] = np.finfo(float).min, np.finfo(float).min
     if alpha is not None:
         loading_angle[0] = subspace(alpha.T, obj['a'].T)
     if x is not None:
@@ -361,7 +362,7 @@ def infer(obj, fstat=None, **kwargs):
         # infer posterior
         post_tick = timeit.default_timer()
         if kwargs['infer'] != 'param':
-            inferpost(obj, **kwargs, adjhess=adjhess)
+            inferpost(obj, **kwargs)
         elbo(obj)
         post_tock = timeit.default_timer()
         elapsed[iiter, 0] = post_tock - post_tick
@@ -375,7 +376,7 @@ def infer(obj, fstat=None, **kwargs):
         # infer parameter
         param_tick = timeit.default_timer()
         if kwargs['infer'] != 'posterior':
-            inferparam(obj, **kwargs, adjhess=adjhess)
+            inferparam(obj, **kwargs)
         param_tock = timeit.default_timer()
         elapsed[iiter, 1] = param_tock - param_tick
 
@@ -676,9 +677,9 @@ def fit(y, channel, sigma, omega, x=None, a0=None, mu0=None, alpha=None, beta=No
     mu = fa.fit_transform(y.reshape((-1, nchannel)))
     a = fa.components_ * norm(mu, ord=inf, axis=0, keepdims=True).T
     # constrain loading and center latent
-    mu /= norm(a, ord=inf, axis=1)
+    # mu /= norm(a, ord=inf, axis=1)
     mu -= mu.mean(axis=0)
-    a /= norm(a, ord=inf, axis=1)
+    a /= norm(a, ord=inf, axis=1)[..., newaxis]
     # mu /= norm(mu, ord=inf, axis=0)
     mu = mu.reshape((ntrial, ntime, nlatent))
 
