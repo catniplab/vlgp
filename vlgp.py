@@ -639,16 +639,19 @@ def infer2(obj, fstat=None, **kwargs):
     return obj
 
 
-def fit(y, channel, sigma, omega, x=None, a0=None, mu0=None, alpha=None, beta=None, lag=0, rank=500, **kwargs):
+def fit(y, channel, sigma, omega, a=None, b=None, mu=None, x=None, alpha=None, beta=None, lag=0, rank=500, **kwargs):
     """Inference API
     Args:
         y:       observation matrix
         channel: channel type indicator (spike/lfp)
         sigma:   initial prior variance
         omega:   initial prior timescale
+        a:       initial value of loading
+        b:       initial value of regression
+        mu:      initial value of latent
         x:       optional true latent
         alpha:   optional true loading
-        beta:    optional true autoregression coefficients and bias
+        beta:    optional true regression
         lag:     autoregressive lag
         rank:    prior covariance rank
         **kwargs: optional arguments controlling inference
@@ -684,7 +687,7 @@ def fit(y, channel, sigma, omega, x=None, a0=None, mu0=None, alpha=None, beta=No
     # Initialize posterior and loading
     # Use factor analysis if both missing initial values
     # Use least squares if missing one of loading and latent
-    if a0 is None and mu0 is None:
+    if a is None and mu is None:
         fa = FactorAnalysis(n_components=nlatent, svd_method='lapack')
         mu = fa.fit_transform(y.reshape((-1, nchannel)))
         a = fa.components_
@@ -695,21 +698,20 @@ def fit(y, channel, sigma, omega, x=None, a0=None, mu0=None, alpha=None, beta=No
         # mu /= norm(mu, ord=inf, axis=0)
         mu = mu.reshape((ntrial, ntime, nlatent))
     else:
-        if a0 is not None:
-            a = a0
+        if a is not None:
             mu = lstsq(a.T, y.reshape((-1, nchannel)).T)[0]
-        if mu0 is not None:
-            mu = mu0
+            mu = mu.reshape((ntrial, ntime, nlatent))
+        if mu is not None:
             a = lstsq(mu.reshape((-1, nlatent)), y.reshape((-1, nchannel)))[0]
 
     # initialize square root of posterior covariance
     L = empty((ntrial, nlatent, ntime, rank))
 
     # initialize bias and autoregression
-    b = empty((1 + lag, nchannel), dtype=FLOAT)
-    for ichannel in range(nchannel):
-        b[:, ichannel] = lstsq(h.reshape((nchannel, -1, 1 + lag))[ichannel, :], y.reshape((-1, nchannel))[:, ichannel])[
-            0]
+    if b is None:
+        b = empty((1 + lag, nchannel), dtype=FLOAT)
+        for ichannel in range(nchannel):
+            b[:, ichannel] = lstsq(h.reshape((nchannel, -1, 1 + lag))[ichannel, :], y.reshape((-1, nchannel))[:, ichannel])[0]
 
     # initialize noises of guassian channels
     noise = var(y.reshape((-1, nchannel)), axis=0, ddof=0)
