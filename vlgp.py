@@ -76,7 +76,7 @@ def elbo(obj):
     return lb, ll
 
 
-def accumulate(accu, grad, decay=0):
+def accumulate(accu, grad, decay=1):
     """Accumulate gradient for Hessian adjustment
 
     Args:
@@ -87,7 +87,7 @@ def accumulate(accu, grad, decay=0):
     Returns:
 
     """
-    if decay > 0:
+    if decay < 1:
         return decay * accu + (1 - decay) * grad ** 2
     else:
         return accu + grad ** 2
@@ -285,7 +285,7 @@ def fillargs(**kwargs):
     kwargs['tol'] = kwargs.get('tol', 1e-5)
     kwargs['eps'] = kwargs.get('eps', 1e-6)
     kwargs['nhyper'] = kwargs.get('nhyper', 5)
-    kwargs['decay'] = kwargs.get('decay', 0)
+    kwargs['decay'] = kwargs.get('decay', 1)
     kwargs['sigma_factor'] = kwargs.get('sigma_factor', 5)
     kwargs['omega_factor'] = kwargs.get('omega_factor', 5)
     kwargs['param_opt'] = kwargs.get('param_opt', 'NR')
@@ -699,8 +699,7 @@ def fit(y, channel, sigma, omega, a=None, b=None, mu=None, x=None, alpha=None, b
         mu = mu.reshape((ntrial, ntime, nlatent))
     else:
         if a is not None:
-            mu = lstsq(a.T, y.reshape((-1, nchannel)).T)[0]
-            mu = mu.reshape((ntrial, ntime, nlatent))
+            mu = lstsq(a.T, y.reshape((-1, nchannel)).T)[0].T.reshape((ntrial, ntime, nlatent))
         if mu is not None:
             a = lstsq(mu.reshape((-1, nlatent)), y.reshape((-1, nchannel)))[0]
 
