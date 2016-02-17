@@ -16,6 +16,8 @@ from hyper import learngp
 from mathf import ichol_gauss, subspace, sexp
 from util import add_constant, rotate, lagmat
 
+FLOAT = np.float32
+
 
 def elbo(obj):
     """Evidence Lower BOund
@@ -74,7 +76,7 @@ def elbo(obj):
     return lb, ll
 
 
-def accumulate(accu, grad, decay=0):
+def accumulate(accu, grad, decay=1):
     """Accumulate gradient for Hessian adjustment
 
     Args:
@@ -85,7 +87,7 @@ def accumulate(accu, grad, decay=0):
     Returns:
 
     """
-    if decay > 0:
+    if decay < 1:
         return decay * accu + (1 - decay) * grad ** 2
     else:
         return accu + grad ** 2
@@ -115,6 +117,7 @@ def inferpost(obj, **kwargs):
     decay = kwargs['decay']
     adjhess = kwargs['adjhess']
     eps = kwargs['eps']
+    learning_rate = kwargs['learning_rate']
 
     spike = channel == 'spike'
     lfp = channel == 'lfp'
@@ -157,22 +160,23 @@ def inferpost(obj, **kwargs):
             delta_mu = u - G.dot((wadj * G).T.dot(u)) + \
                        G.dot(GtWG.dot(solve(eyer + GtWG, (wadj * G).T.dot(u), sym_pos=True)))
 
-            mu[:, ilatent] += delta_mu
+            mu[:, ilatent] += learning_rate * delta_mu
             # mu[:, ilatent] -= mean(mu[:, ilatent])
             # scale = norm(mu[:, ilatent], ord=inf)
             # mu[:, ilatent] /= scale
-            shape = obj['mu'].shape
-            mu_over_trials = obj['mu'].reshape((-1, nlatent))
-            mu_over_trials -= mu_over_trials.mean(axis=0)
-            obj['mu'] = mu_over_trials.reshape(shape)
+
+            # center over all trials
+            if kwargs['infer'] != 'posterior':
+                shape = obj['mu'].shape
+                mu_over_trials = obj['mu'].reshape((-1, nlatent))
+                mu_over_trials -= mu_over_trials.mean(axis=0)
+                obj['mu'] = mu_over_trials.reshape(shape)
 
         eta = mu.dot(a) + einsum('ijk, ki -> ji', h, b)
         lam = sexp(eta + 0.5 * v.dot(a ** 2))
         U[:, spike] = lam[:, spike]
         U[:, lfp] = 1 / noise[lfp]
         w[:, :] = U.dot(a.T ** 2)
-
-    # center over all trials
 
 
 def inferparam(obj, **kwargs):
@@ -202,6 +206,7 @@ def inferparam(obj, **kwargs):
     eps = kwargs['eps']
     da_acc = kwargs['da_acc']
     db_acc = kwargs['db_acc']
+    learning_rate = kwargs['learning_rate']
 
     for ichannel in range(nchannel):
         eta = mu.dot(a) + einsum('ijk, ki -> ji', h, b)
@@ -215,7 +220,7 @@ def inferparam(obj, **kwargs):
             da_acc[:, ichannel] = accumulate(da_acc[:, ichannel], grad_a, decay)
 
             if kwargs['param_opt'] == 'GA':
-                a[:, ichannel] += grad_a / sqrt(eps + da_acc[:, ichannel])
+                delta_a += grad_a / sqrt(eps + da_acc[:, ichannel])
             else:
                 neghess_a = (mu + va).T.dot(lam[:, ichannel, newaxis] * (mu + va)) + wv
                 # neghess_a = mu.T.dot(lam[:, ichannel, newaxis] * mu)
@@ -224,25 +229,26 @@ def inferparam(obj, **kwargs):
                     delta_a = solve(neghess_a + diag(sqrt(eps + da_acc[:, ichannel])), grad_a, sym_pos=True)
                 else:
                     delta_a = solve(neghess_a, grad_a, sym_pos=True)
-                a[:, ichannel] += delta_a
+            a[:, ichannel] += learning_rate * delta_a
 
             # bias
             grad_b = h[ichannel, :].T.dot(y[:, ichannel] - lam[:, ichannel])
             db_acc[:, ichannel] = accumulate(db_acc[:, ichannel], grad_b, decay)
             if kwargs['param_opt'] == 'GA':
-                b[:, ichannel] += grad_b / sqrt(eps + db_acc[:, ichannel])
+                delta_b = grad_b / sqrt(eps + db_acc[:, ichannel])
             else:
                 neghess_b = h[ichannel, :].T.dot(lam[:, ichannel, newaxis] * h[ichannel, :])
                 # TODO: inactive neurons never fire across all trials which may cause zero Hessian
                 if adjhess:
-                        b[:, ichannel] += solve(neghess_b + diag(sqrt(eps + db_acc[:, ichannel])), grad_b, sym_pos=True)
+                        delta_b = solve(neghess_b + diag(sqrt(eps + db_acc[:, ichannel])), grad_b, sym_pos=True)
                 else:
                     try:
-                        b[:, ichannel] += solve(neghess_b, grad_b, sym_pos=True)
+                        delta_b = solve(neghess_b, grad_b, sym_pos=True)
                     except LinAlgError:
-                        b[:, ichannel] += solve(neghess_b + eps * identity(b.shape[0]), grad_b, sym_pos=True)
+                        delta_b = solve(neghess_b + eps * identity(b.shape[0]), grad_b, sym_pos=True)
                     else:
-                        pass
+                        delta_b = 0.0
+            b[:, ichannel] += learning_rate * delta_b
         elif channel[ichannel] == 'lfp':
             # a's least squares solution for Gaussian channel
             # (m'm + diag(j'v))^-1 m'(y - Hb)
@@ -279,12 +285,13 @@ def fillargs(**kwargs):
     kwargs['tol'] = kwargs.get('tol', 1e-5)
     kwargs['eps'] = kwargs.get('eps', 1e-6)
     kwargs['nhyper'] = kwargs.get('nhyper', 5)
-    kwargs['decay'] = kwargs.get('decay', 0)
+    kwargs['decay'] = kwargs.get('decay', 1)
     kwargs['sigma_factor'] = kwargs.get('sigma_factor', 5)
     kwargs['omega_factor'] = kwargs.get('omega_factor', 5)
     kwargs['param_opt'] = kwargs.get('param_opt', 'NR')
     kwargs['moreparam'] = kwargs.get('moreparam', False)
     kwargs['adjhess'] = kwargs.get('adjhess', False)
+    kwargs['learning_rate'] = kwargs.get('learning_rate', 1.0)
     return kwargs
 
 
@@ -336,7 +343,7 @@ def infer(obj, fstat=None, **kwargs):
 
     # iteration 0
     # lb[0], ll[0] = elbo(obj)
-    lb[0], ll[0] = np.finfo(float).min, np.finfo(float).min
+    lb[0], ll[0] = np.finfo(FLOAT).min, np.finfo(FLOAT).min
     if alpha is not None:
         loading_angle[0] = subspace(alpha.T, obj['a'].T)
     if x is not None:
@@ -348,7 +355,6 @@ def infer(obj, fstat=None, **kwargs):
 
     #
     iiter = 1
-    adjhess = False
     converged = False
     stop = False
     infer_tick = timeit.default_timer()
@@ -402,7 +408,6 @@ def infer(obj, fstat=None, **kwargs):
         if decreased:
             if kwargs['verbose']:
                 print('\nELBO decreased. Backtracking.')
-            backtrack = True
             copyto(obj['mu'], good_mu)
             copyto(obj['w'], good_w)
             copyto(obj['v'], good_v)
@@ -469,7 +474,7 @@ def infer(obj, fstat=None, **kwargs):
     return obj
 
 
-def infer2(obj, fstat=None, **kwargs):
+def infer_chk2(obj, fstat=None, **kwargs):
     """Main inference procedure
     Args:
         obj: inference object
@@ -490,11 +495,11 @@ def infer2(obj, fstat=None, **kwargs):
     good_omega = obj['omega'].copy()
 
     stat = empty(kwargs['niter'], dtype=object)
-    lb = zeros(kwargs['niter'], dtype=float)
-    ll = zeros(kwargs['niter'], dtype=float)
-    elapsed = zeros((kwargs['niter'], 3), dtype=float)
-    loading_angle = zeros(kwargs['niter'], dtype=float)
-    latent_angle = zeros(kwargs['niter'], dtype=float)
+    lb = zeros(kwargs['niter'], dtype=FLOAT)
+    ll = zeros(kwargs['niter'], dtype=FLOAT)
+    elapsed = zeros((kwargs['niter'], 3), dtype=FLOAT)
+    loading_angle = zeros(kwargs['niter'], dtype=FLOAT)
+    latent_angle = zeros(kwargs['niter'], dtype=FLOAT)
     nlatent, ntime, rank = obj['chol'].shape
 
     x = obj.get('x')
@@ -506,7 +511,7 @@ def infer2(obj, fstat=None, **kwargs):
     if alpha is not None:
         loading_angle[0] = subspace(alpha.T, obj['a'].T)
     if x is not None:
-        rotated = empty_like(x, dtype=float)
+        rotated = empty_like(x, dtype=FLOAT)
         # rotate trial by trial
         for itrial in range(x.shape[0]):
             rotated[itrial, :] = rotate(add_constant(obj['mu'][itrial, :]), x[itrial, :])
@@ -634,16 +639,19 @@ def infer2(obj, fstat=None, **kwargs):
     return obj
 
 
-def fit(y, channel, sigma, omega, x=None, a0=None, mu0=None, alpha=None, beta=None, lag=0, rank=500, **kwargs):
+def fit(y, channel, sigma, omega, a=None, b=None, mu=None, x=None, alpha=None, beta=None, lag=0, rank=500, **kwargs):
     """Inference API
     Args:
         y:       observation matrix
         channel: channel type indicator (spike/lfp)
         sigma:   initial prior variance
         omega:   initial prior timescale
+        a:       initial value of loading
+        b:       initial value of regression
+        mu:      initial value of latent
         x:       optional true latent
         alpha:   optional true loading
-        beta:    optional true autoregression coefficients and bias
+        beta:    optional true regression
         lag:     autoregressive lag
         rank:    prior covariance rank
         **kwargs: optional arguments controlling inference
@@ -655,47 +663,56 @@ def fit(y, channel, sigma, omega, x=None, a0=None, mu0=None, alpha=None, beta=No
     kwargs = fillargs(**kwargs)
 
     y = asarray(y)
+    y = y.astype(FLOAT)
     if y.ndim < 2:
         y = y[..., None]
     if y.ndim < 3:
         y = y[None, ...]
+
     channel = asarray(channel)
     ntrial, ntime, nchannel = y.shape
     nlatent = sigma.shape[0]
 
-    h = empty((nchannel, ntrial, ntime, 1 + lag), dtype=float)
+    # make design matrix of regression
+    h = empty((nchannel, ntrial, ntime, 1 + lag), dtype=FLOAT)
     for ichannel in range(nchannel):
         for itrial in range(ntrial):
             h[ichannel, itrial, :] = add_constant(lagmat(y[itrial, :, ichannel], lag=lag))
 
-    chol = empty((nlatent, ntime, rank), dtype=float)
+    # make Cholesky of prior
+    chol = empty((nlatent, ntime, rank), dtype=FLOAT)
     for ilatent in range(nlatent):
         chol[ilatent, :] = ichol_gauss(ntime, omega[ilatent], rank) * sigma[ilatent]
 
-    # initialize posterior
-    fa = FactorAnalysis(n_components=nlatent, svd_method='lapack')
-    mu = fa.fit_transform(y.reshape((-1, nchannel)))
-    a = fa.components_ * norm(mu, ord=inf, axis=0, keepdims=True).T
-    # constrain loading and center latent
-    # mu /= norm(a, ord=inf, axis=1)
-    mu -= mu.mean(axis=0)
-    a /= norm(a, ord=inf, axis=1)[..., newaxis]
-    # mu /= norm(mu, ord=inf, axis=0)
-    mu = mu.reshape((ntrial, ntime, nlatent))
+    # Initialize posterior and loading
+    # Use factor analysis if both missing initial values
+    # Use least squares if missing one of loading and latent
+    if a is None and mu is None:
+        fa = FactorAnalysis(n_components=nlatent, svd_method='lapack')
+        mu = fa.fit_transform(y.reshape((-1, nchannel)))
+        a = fa.components_
+        # constrain loading and center latent
+        mu *= norm(a, ord=inf, axis=1)
+        mu -= mu.mean(axis=0)
+        a /= norm(a, ord=inf, axis=1)[..., newaxis]
+        # mu /= norm(mu, ord=inf, axis=0)
+        mu = mu.reshape((ntrial, ntime, nlatent))
+    else:
+        if a is not None:
+            mu = lstsq(a.T, y.reshape((-1, nchannel)).T)[0].T.reshape((ntrial, ntime, nlatent))
+        if mu is not None:
+            a = lstsq(mu.reshape((-1, nlatent)), y.reshape((-1, nchannel)))[0]
 
-    if a0 is not None:
-        a = a0
-    if mu0 is not None:
-        mu = mu0
-
+    # initialize square root of posterior covariance
     L = empty((ntrial, nlatent, ntime, rank))
 
-    # initialize parameters
-    b = empty((1 + lag, nchannel), dtype=float)
-    for ichannel in range(nchannel):
-        b[:, ichannel] = lstsq(h.reshape((nchannel, -1, 1 + lag))[ichannel, :], y.reshape((-1, nchannel))[:, ichannel])[
-            0]
+    # initialize bias and autoregression
+    if b is None:
+        b = empty((1 + lag, nchannel), dtype=FLOAT)
+        for ichannel in range(nchannel):
+            b[:, ichannel] = lstsq(h.reshape((nchannel, -1, 1 + lag))[ichannel, :], y.reshape((-1, nchannel))[:, ichannel])[0]
 
+    # initialize noises of guassian channels
     noise = var(y.reshape((-1, nchannel)), axis=0, ddof=0)
 
     obj = {'y': y, 'channel': channel, 'h': h,
@@ -711,7 +728,7 @@ def fit(y, channel, sigma, omega, x=None, a0=None, mu0=None, alpha=None, beta=No
     return inference
 
 
-def fit2(y, channel, sigma, omega, x=None, a0=None, mu0=None, alpha=None, beta=None, lag=0, rank=500, **kwargs):
+def fit_chk2(y, channel, sigma, omega, x=None, a0=None, mu0=None, alpha=None, beta=None, lag=0, rank=500, **kwargs):
     """Inference API
     Args:
         y:       observation matrix
@@ -740,12 +757,12 @@ def fit2(y, channel, sigma, omega, x=None, a0=None, mu0=None, alpha=None, beta=N
     ntrial, ntime, nchannel = y.shape
     nlatent = sigma.shape[0]
 
-    h = empty((nchannel, ntrial, ntime, 1 + lag), dtype=float)
+    h = empty((nchannel, ntrial, ntime, 1 + lag), dtype=FLOAT)
     for ichannel in range(nchannel):
         for itrial in range(ntrial):
             h[ichannel, itrial, :] = add_constant(lagmat(y[itrial, :, ichannel], lag=lag))
 
-    chol = empty((nlatent, ntime, rank), dtype=float)
+    chol = empty((nlatent, ntime, rank), dtype=FLOAT)
     for ilatent in range(nlatent):
         chol[ilatent, :] = ichol_gauss(ntime, omega[ilatent], rank) * sigma[ilatent]
 
@@ -765,7 +782,7 @@ def fit2(y, channel, sigma, omega, x=None, a0=None, mu0=None, alpha=None, beta=N
     L = empty((ntrial, nlatent, ntime, rank))
 
     # initialize parameters
-    b = empty((1 + lag, nchannel), dtype=float)
+    b = empty((1 + lag, nchannel), dtype=FLOAT)
     for ichannel in range(nchannel):
         b[:, ichannel] = lstsq(h.reshape((nchannel, -1, 1 + lag))[ichannel, :], y.reshape((-1, nchannel))[:, ichannel])[
             0]
@@ -781,129 +798,7 @@ def fit2(y, channel, sigma, omega, x=None, a0=None, mu0=None, alpha=None, beta=N
     kwargs['da_acc'] = zeros_like(a)
     kwargs['db_acc'] = zeros_like(b)
 
-    inference = postprocess(infer2(obj, **kwargs))
-    return inference
-
-
-def fitpost(y, channel, sigma, omega, a, b, mu0=None, x=None, alpha=None, beta=None, lag=0, rank=500, **kwargs):
-    """Inference API
-    Args:
-        y:       observation matrix
-        channel: channel type indicator (spike/lfp)
-        sigma:   initial prior variance
-        omega:   initial prior timescale
-        mu:       optional true latent
-        alpha:   optional true loading
-        beta:    optional true autoregression coefficients and bias
-        lag:     autoregressive lag
-        rank:    prior covariance rank
-        **kwargs: optional arguments controlling inference
-
-    Returns:
-        inference object
-    """
-    assert sigma.shape == omega.shape
-    kwargs = fillargs(**kwargs)
-
-    y = asarray(y)
-    if y.ndim < 2:
-        y = y[..., None]
-    if y.ndim < 3:
-        y = y[None, ...]
-    channel = asarray(channel)
-    ntrial, ntime, nchannel = y.shape
-    nlatent = sigma.shape[0]
-
-    h = empty((nchannel, ntrial, ntime, 1 + lag), dtype=float)
-    for ichannel in range(nchannel):
-        for itrial in range(ntrial):
-            h[ichannel, itrial, :] = add_constant(lagmat(y[itrial, :, ichannel], lag=lag))
-
-    chol = empty((nlatent, ntime, rank), dtype=float)
-    for ilatent in range(nlatent):
-        chol[ilatent, :] = ichol_gauss(ntime, omega[ilatent], rank) * sigma[ilatent]
-
-    # initialize posterior
-    mu = lstsq(a.T, y.reshape((-1, nchannel)).T)[0].T.reshape((ntrial, ntime, -1)) if mu0 is None else mu0.copy()
-    L = empty((ntrial, nlatent, ntime, rank))
-
-    noise = var(y.reshape((-1, nchannel)), axis=0, ddof=0)
-
-    obj = {'y': y, 'channel': channel, 'h': h,
-           'sigma': sigma, 'omega': omega, 'chol': chol, 'sigma0': sigma, 'omega0': omega,
-           'mu': mu, 'w': zeros((ntrial, ntime, nlatent)), 'v': zeros((ntrial, ntime, nlatent)), 'L': L,
-           'a': a, 'b': b, 'noise': noise, 'x': x, 'alpha': alpha, 'beta': beta}
-
-    kwargs['dmu_acc'] = zeros_like(mu)
-    kwargs['da_acc'] = zeros_like(a)
-    kwargs['db_acc'] = zeros_like(b)
-    kwargs['infer'] = 'posterior'
-
-    inference = postprocess(infer(obj, **kwargs))
-    return inference
-
-
-def fitparam(y, channel, sigma, omega, mu, x=None, alpha=None, beta=None, lag=0, rank=500, **kwargs):
-    """Inference API
-    Args:
-        y:       observation matrix
-        channel: channel type indicator (spike/lfp)
-        sigma:   initial prior variance
-        omega:   initial prior timescale
-        mu:       optional true latent
-        alpha:   optional true loading
-        beta:    optional true autoregression coefficients and bias
-        lag:     autoregressive lag
-        rank:    prior covariance rank
-        **kwargs: optional arguments controlling inference
-
-    Returns:
-        inference object
-    """
-    assert sigma.shape == omega.shape
-    kwargs = fillargs(**kwargs)
-
-    y = asarray(y)
-    if y.ndim < 2:
-        y = y[..., None]
-    if y.ndim < 3:
-        y = y[None, ...]
-    channel = asarray(channel)
-    ntrial, ntime, nchannel = y.shape
-    nlatent = sigma.shape[0]
-
-    h = empty((nchannel, ntrial, ntime, 1 + lag), dtype=float)
-    for ichannel in range(nchannel):
-        for itrial in range(ntrial):
-            h[ichannel, itrial, :] = add_constant(lagmat(y[itrial, :, ichannel], lag=lag))
-
-    chol = empty((nlatent, ntime, rank), dtype=float)
-    for ilatent in range(nlatent):
-        chol[ilatent, :] = ichol_gauss(ntime, omega[ilatent], rank) * sigma[ilatent]
-
-    # initialize posterior
-    a = lstsq(mu.reshape((-1, nlatent)), y.reshape((-1, nchannel)))[0]
-    L = empty((ntrial, nlatent, ntime, rank))
-
-    # initialize parameters
-    b = empty((1 + lag, nchannel), dtype=float)
-    for ichannel in range(nchannel):
-        b[:, ichannel] = lstsq(h.reshape((nchannel, -1, 1 + lag))[ichannel, :], y.reshape((-1, nchannel))[:, ichannel])[
-            0]
-
-    noise = var(y.reshape((-1, nchannel)), axis=0, ddof=0)
-
-    obj = {'y': y, 'channel': channel, 'h': h,
-           'sigma': sigma, 'omega': omega, 'chol': chol, 'sigma0': sigma, 'omega0': omega,
-           'mu': mu, 'w': zeros((ntrial, ntime, nlatent)), 'v': zeros((ntrial, ntime, nlatent)), 'L': L,
-           'a': a, 'b': b, 'noise': noise, 'x': x, 'alpha': alpha, 'beta': beta}
-
-    kwargs['dmu_acc'] = zeros_like(mu)
-    kwargs['da_acc'] = zeros_like(a)
-    kwargs['db_acc'] = zeros_like(b)
-    kwargs['infer'] = 'param'
-
-    inference = postprocess(infer(obj, **kwargs))
+    inference = postprocess(infer_chk2(obj, **kwargs))
     return inference
 
 
@@ -933,12 +828,12 @@ def seqfit(y, channel, sigma, omega, lag=0, rank=500, **kwargs):
     ntrial, ntime, nchannel = y.shape
     nlatent = sigma.shape[0]
 
-    h = empty((nchannel, ntrial, ntime, 1 + lag), dtype=float)
+    h = empty((nchannel, ntrial, ntime, 1 + lag), dtype=FLOAT)
     for ichannel in range(nchannel):
         for itrial in range(ntrial):
             h[ichannel, itrial, :] = add_constant(lagmat(y[itrial, :, ichannel], lag=lag))
 
-    chol = empty((nlatent, ntime, rank), dtype=float)
+    chol = empty((nlatent, ntime, rank), dtype=FLOAT)
     for ilatent in range(nlatent):
         chol[ilatent, :] = ichol_gauss(ntime, omega[ilatent], rank) * sigma[ilatent]
 
@@ -954,7 +849,7 @@ def seqfit(y, channel, sigma, omega, lag=0, rank=500, **kwargs):
     v = zeros((ntrial, ntime, nlatent))
 
     # initialize parameters
-    b = empty((1 + lag, nchannel), dtype=float)
+    b = empty((1 + lag, nchannel), dtype=FLOAT)
     for ichannel in range(nchannel):
         b[:, ichannel] = lstsq(h.reshape((nchannel, -1, 1 + lag))[ichannel, :], y.reshape((-1, nchannel))[:, ichannel])[
             0]
@@ -1079,12 +974,12 @@ def cv(y, channel, sigma, omega, a0=None, mu0=None, lag=0, rank=500, **kwargs):
     channel = asarray(channel)
     ntrial, ntime, nchannel = y.shape
 
-    h = empty((nchannel, ntrial, ntime, 1 + lag), dtype=float)
+    h = empty((nchannel, ntrial, ntime, 1 + lag), dtype=FLOAT)
     for ichannel in range(nchannel):
         for itrial in range(ntrial):
             h[ichannel, itrial, :] = add_constant(lagmat(y[itrial, :, ichannel], lag=lag))
 
-    yhat = empty_like(y, dtype=float)
+    yhat = empty_like(y, dtype=FLOAT)
     # do leave-one-out trial by trial
     for itrial in range(ntrial):
         test_trial = {'y': y[itrial, :][None, ...], 'h': h[:, itrial, :, :][:, None, :, :],
