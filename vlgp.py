@@ -5,7 +5,7 @@ import timeit
 
 import numpy as np
 from numpy import identity, einsum, trace, inner, empty, mean, inf, diag, newaxis, var, asarray, zeros, zeros_like, \
-    empty_like, arange, sum, copyto
+    empty_like, arange, sum, copyto, ones
 from numpy.core.umath import sqrt, PINF, log, exp, NINF
 from numpy.linalg import norm, slogdet, LinAlgError
 from scipy import stats
@@ -147,10 +147,9 @@ def inferpost(obj, **kwargs):
             dmu_acc[itrial, :, ilatent] = accumulate(dmu_acc[itrial, :, ilatent], grad_mu, decay)
 
             if adjhess:
-                wadj = (w[:, ilatent] + sqrt(eps + dmu_acc[itrial, :, ilatent])).reshape(
-                        (ntime, 1))  # adjusted Hessian
+                wadj = (w[:, [ilatent]] + sqrt(eps + dmu_acc[itrial, :, ilatent])[..., newaxis])  # adjusted Hessian
             else:
-                wadj = w[:, ilatent].reshape((ntime, 1))
+                wadj = w[:, [ilatent]]  # keep dimension
             GtWG = G.T.dot(wadj * G)
 
             res[:, spike] = y[:, spike] - lam[:, spike]
@@ -172,11 +171,18 @@ def inferpost(obj, **kwargs):
                 mu_over_trials -= mu_over_trials.mean(axis=0)
                 obj['mu'] = mu_over_trials.reshape(shape)
 
-        eta = mu.dot(a) + einsum('ijk, ki -> ji', h, b)
-        lam = sexp(eta + 0.5 * v.dot(a ** 2))
-        U[:, spike] = lam[:, spike]
-        U[:, lfp] = 1 / noise[lfp]
-        w[:, :] = U.dot(a.T ** 2)
+        if not kwargs['MAP']:
+            eta = mu.dot(a) + einsum('ijk, ki -> ji', h, b)
+            lam = sexp(eta + 0.5 * v.dot(a ** 2))
+            U[:, spike] = lam[:, spike]
+            U[:, lfp] = 1 / noise[lfp]
+            w[:] = U.dot(a.T ** 2)
+            # TODO: think the order of updating w and v
+            for ilatent in range(nlatent):
+                G = chol[ilatent, :, :]
+                W = w[:, [ilatent]]
+                GtWG = G.T.dot(W * G)
+                v[:, ilatent] = (G * (G - G.dot(GtWG) + G.dot(GtWG.dot(solve(eyer + GtWG, GtWG, sym_pos=True))))).sum(axis=1)
 
 
 def inferparam(obj, **kwargs):
@@ -262,7 +268,7 @@ def inferparam(obj, **kwargs):
                                    h[ichannel, :].T.dot(y[:, ichannel] - mu.dot(a[:, ichannel])), sym_pos=True)
         else:
             print('Undefined channel')
-    obj['noise'] = var(y - eta, axis=0, ddof=0)
+    obj['noise'] = var(y - eta, axis=0, ddof=0)  # MLE
 
     # constrain loading
     a /= norm(a, ord=inf, axis=1)[..., newaxis]
@@ -292,6 +298,7 @@ def fillargs(**kwargs):
     kwargs['moreparam'] = kwargs.get('moreparam', False)
     kwargs['adjhess'] = kwargs.get('adjhess', False)
     kwargs['learning_rate'] = kwargs.get('learning_rate', 1.0)
+    kwargs['MAP'] = kwargs.get('MAP', False)
     return kwargs
 
 
@@ -639,7 +646,8 @@ def infer_chk2(obj, fstat=None, **kwargs):
     return obj
 
 
-def fit(y, channel, sigma, omega, a=None, b=None, mu=None, x=None, alpha=None, beta=None, lag=0, rank=500, **kwargs):
+def fit(y, channel, sigma, omega, a=None, b=None, mu=None, x=None, alpha=None, beta=None, lag=0, rank=500,
+        w=1.0, v=1.0, **kwargs):
     """Inference API
     Args:
         y:       observation matrix
@@ -717,8 +725,8 @@ def fit(y, channel, sigma, omega, a=None, b=None, mu=None, x=None, alpha=None, b
 
     obj = {'y': y, 'channel': channel, 'h': h,
            'sigma': sigma, 'omega': omega, 'chol': chol, 'sigma0': sigma, 'omega0': omega,
-           'mu': mu, 'w': zeros((ntrial, ntime, nlatent)), 'v': zeros((ntrial, ntime, nlatent)), 'L': L, 'x': x,
-           'a': a, 'b': b, 'noise': noise, 'alpha': alpha, 'beta': beta}
+           'mu': mu, 'w': w * ones((ntrial, ntime, nlatent)), 'v': v * ones((ntrial, ntime, nlatent)), 'L': L,
+           'x': x, 'a': a, 'b': b, 'noise': noise, 'alpha': alpha, 'beta': beta}
 
     kwargs['dmu_acc'] = zeros_like(mu)
     kwargs['da_acc'] = zeros_like(a)
@@ -1027,3 +1035,4 @@ def postprocess(obj):
     obj.pop('h', None)
     obj.pop('stat', None)
     return obj
+

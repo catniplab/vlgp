@@ -167,14 +167,6 @@ def lagmat(x, lag):
     return mat[startrow:stoprow, ncol:]
 
 
-def rad2deg(r):
-    return r * 180 / pi
-
-
-def deg2rad(d):
-    return d * pi / 180
-
-
 def align(x):
     x = asarray(x)
     ax = x.copy()

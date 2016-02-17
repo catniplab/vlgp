@@ -4,7 +4,7 @@ This file contains math functions.
 import warnings
 
 from numpy import inf, arange, ones, zeros, sum, diag
-from numpy.core.umath import arcsin, exp, log1p, sqrt
+from numpy.core.umath import arcsin, exp, log1p, sqrt, pi
 from scipy.linalg import orth, norm, svd
 
 MIN_EXP = -20
@@ -136,7 +136,15 @@ def ichol(a, tol=1e-6):
     return G[pvec.argsort(), :]
 
 
-def subspace(a, b):
+def rad2deg(r):
+    return r * 180 / pi
+
+
+def deg2rad(d):
+    return d * pi / 180
+
+
+def subspace(a, b, deg=True):
     """Angle between two subspaces
 
     Find the angle between two subspaces specified by the columns of a and b
@@ -154,7 +162,8 @@ def subspace(a, b):
     if oa.shape[1] < ob.shape[1]:
         oa, ob = ob.copy(), oa.copy()
     ob -= oa.dot(oa.T.dot(ob))
-    return arcsin(min(1, norm(ob, ord=2)))
+    rad = arcsin(min(1, norm(ob, ord=2)))
+    return rad2deg(rad) if deg else rad
 
 
 def orthogonalize(x, a, normalize_a=False):
