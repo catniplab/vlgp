@@ -646,8 +646,8 @@ def infer_chk2(obj, fstat=None, **kwargs):
     return obj
 
 
-def fit(y, channel, sigma, omega, a=None, b=None, mu=None, x=None, alpha=None, beta=None, lag=0, rank=500,
-        w=1.0, v=1.0, **kwargs):
+def fit(y, channel, sigma, omega, a=None, b=None, mu=None, w=0.0, v=1.0, x=None, alpha=None, beta=None, lag=0,
+        rank=500, **kwargs):
     """Inference API
     Args:
         y:       observation matrix
@@ -657,6 +657,8 @@ def fit(y, channel, sigma, omega, a=None, b=None, mu=None, x=None, alpha=None, b
         a:       initial value of loading
         b:       initial value of regression
         mu:      initial value of latent
+        w:       initial value of W matrix
+        v:       initial value of temporal slice of posterior variance
         x:       optional true latent
         alpha:   optional true loading
         beta:    optional true regression
