@@ -140,6 +140,7 @@ def inferpost(obj, **kwargs):
             eta = mu.dot(a) + einsum('ijk, ki -> ji', h, b)  # (neuron, time, lag) . (lag, neuron)
             lam = sexp(eta + 0.5 * v.dot(a ** 2))
             G = chol[ilatent, :, :]
+            # TODO: Possibly update v here
             grad_mu = (y[:, spike] - lam[:, spike]).dot(a[ilatent, spike]) + \
                       ((y[:, lfp] - eta[:, lfp]) /
                        noise[lfp]).dot(a[ilatent, lfp]) - lstsq(G.T, lstsq(G, mu[:, ilatent])[0])[0]
@@ -171,12 +172,12 @@ def inferpost(obj, **kwargs):
                 mu_over_trials -= mu_over_trials.mean(axis=0)
                 obj['mu'] = mu_over_trials.reshape(shape)
 
+        eta = mu.dot(a) + einsum('ijk, ki -> ji', h, b)
+        lam = sexp(eta + 0.5 * v.dot(a ** 2))
+        U[:, spike] = lam[:, spike]
+        U[:, lfp] = 1 / noise[lfp]
+        w[:] = U.dot(a.T ** 2)
         if not kwargs['MAP']:
-            eta = mu.dot(a) + einsum('ijk, ki -> ji', h, b)
-            lam = sexp(eta + 0.5 * v.dot(a ** 2))
-            U[:, spike] = lam[:, spike]
-            U[:, lfp] = 1 / noise[lfp]
-            w[:] = U.dot(a.T ** 2)
             # TODO: think the order of updating w and v
             for ilatent in range(nlatent):
                 G = chol[ilatent, :, :]
@@ -646,7 +647,7 @@ def infer_chk2(obj, fstat=None, **kwargs):
     return obj
 
 
-def fit(y, channel, sigma, omega, a=None, b=None, mu=None, w=0.0, v=1.0, x=None, alpha=None, beta=None, lag=0,
+def fit(y, channel, sigma, omega, a=None, b=None, mu=None, x=None, alpha=None, beta=None, lag=0,
         rank=500, **kwargs):
     """Inference API
     Args:
@@ -675,9 +676,9 @@ def fit(y, channel, sigma, omega, a=None, b=None, mu=None, w=0.0, v=1.0, x=None,
     y = asarray(y)
     y = y.astype(FLOAT)
     if y.ndim < 2:
-        y = y[..., None]
+        y = y[..., newaxis]
     if y.ndim < 3:
-        y = y[None, ...]
+        y = y[newaxis, ...]
 
     channel = asarray(channel)
     ntrial, ntime, nchannel = y.shape
@@ -725,9 +726,16 @@ def fit(y, channel, sigma, omega, a=None, b=None, mu=None, w=0.0, v=1.0, x=None,
     # initialize noises of guassian channels
     noise = var(y.reshape((-1, nchannel)), axis=0, ddof=0)
 
+    # w and v
+    w = 0 * ones((ntrial, ntime, nlatent), dtype=FLOAT)
+    if kwargs['MAP']:
+        v = 0 * ones((ntrial, ntime, nlatent), dtype=FLOAT)
+    else:
+        v = np.repeat(sigma[newaxis, ...], ntrial * ntime, axis=1).reshape((ntrial, ntime, nlatent))
+
     obj = {'y': y, 'channel': channel, 'h': h,
            'sigma': sigma, 'omega': omega, 'chol': chol, 'sigma0': sigma, 'omega0': omega,
-           'mu': mu, 'w': w * ones((ntrial, ntime, nlatent)), 'v': v * ones((ntrial, ntime, nlatent)), 'L': L,
+           'mu': mu, 'w': w, 'v': v, 'L': L,
            'x': x, 'a': a, 'b': b, 'noise': noise, 'alpha': alpha, 'beta': beta}
 
     kwargs['dmu_acc'] = zeros_like(mu)
@@ -735,80 +743,6 @@ def fit(y, channel, sigma, omega, a=None, b=None, mu=None, w=0.0, v=1.0, x=None,
     kwargs['db_acc'] = zeros_like(b)
 
     inference = postprocess(infer(obj, **kwargs))
-    return inference
-
-
-def fit_chk2(y, channel, sigma, omega, x=None, a0=None, mu0=None, alpha=None, beta=None, lag=0, rank=500, **kwargs):
-    """Inference API
-    Args:
-        y:       observation matrix
-        channel: channel type indicator (spike/lfp)
-        sigma:   initial prior variance
-        omega:   initial prior timescale
-        x:       optional true latent
-        alpha:   optional true loading
-        beta:    optional true autoregression coefficients and bias
-        lag:     autoregressive lag
-        rank:    prior covariance rank
-        **kwargs: optional arguments controlling inference
-
-    Returns:
-        inference object
-    """
-    assert sigma.shape == omega.shape
-    kwargs = fillargs(**kwargs)
-
-    y = asarray(y)
-    if y.ndim < 2:
-        y = y[..., None]
-    if y.ndim < 3:
-        y = y[None, ...]
-    channel = asarray(channel)
-    ntrial, ntime, nchannel = y.shape
-    nlatent = sigma.shape[0]
-
-    h = empty((nchannel, ntrial, ntime, 1 + lag), dtype=FLOAT)
-    for ichannel in range(nchannel):
-        for itrial in range(ntrial):
-            h[ichannel, itrial, :] = add_constant(lagmat(y[itrial, :, ichannel], lag=lag))
-
-    chol = empty((nlatent, ntime, rank), dtype=FLOAT)
-    for ilatent in range(nlatent):
-        chol[ilatent, :] = ichol_gauss(ntime, omega[ilatent], rank) * sigma[ilatent]
-
-    # initialize posterior
-    fa = FactorAnalysis(n_components=nlatent, svd_method='lapack')
-    mu = fa.fit_transform(y.reshape((-1, nchannel)))
-    mu -= mu.mean(axis=0)
-    a = fa.components_ * norm(mu, ord=inf, axis=0, keepdims=True).T
-    mu /= norm(mu, ord=inf, axis=0)
-    mu = mu.reshape((ntrial, ntime, nlatent))
-
-    if a0 is not None:
-        a = a0
-    if mu0 is not None:
-        mu = mu0
-
-    L = empty((ntrial, nlatent, ntime, rank))
-
-    # initialize parameters
-    b = empty((1 + lag, nchannel), dtype=FLOAT)
-    for ichannel in range(nchannel):
-        b[:, ichannel] = lstsq(h.reshape((nchannel, -1, 1 + lag))[ichannel, :], y.reshape((-1, nchannel))[:, ichannel])[
-            0]
-
-    noise = var(y.reshape((-1, nchannel)), axis=0, ddof=0)
-
-    obj = {'y': y, 'channel': channel, 'h': h,
-           'sigma': sigma, 'omega': omega, 'chol': chol, 'sigma0': sigma, 'omega0': omega,
-           'mu': mu, 'w': zeros((ntrial, ntime, nlatent)), 'v': zeros((ntrial, ntime, nlatent)), 'L': L, 'x': x,
-           'a': a, 'b': b, 'noise': noise, 'alpha': alpha, 'beta': beta}
-
-    kwargs['dmu_acc'] = zeros_like(mu)
-    kwargs['da_acc'] = zeros_like(a)
-    kwargs['db_acc'] = zeros_like(b)
-
-    inference = postprocess(infer_chk2(obj, **kwargs))
     return inference
 
 
@@ -831,9 +765,9 @@ def seqfit(y, channel, sigma, omega, lag=0, rank=500, **kwargs):
 
     y = asarray(y)
     if y.ndim < 2:
-        y = y[..., None]
+        y = y[..., newaxis]
     if y.ndim < 3:
-        y = y[None, ...]
+        y = y[newaxis, ...]
     channel = asarray(channel)
     ntrial, ntime, nchannel = y.shape
     nlatent = sigma.shape[0]
@@ -850,13 +784,16 @@ def seqfit(y, channel, sigma, omega, lag=0, rank=500, **kwargs):
     # initialize posterior
     fa = FactorAnalysis(n_components=nlatent, svd_method='lapack')
     mu = fa.fit_transform(y.reshape((-1, nchannel)))
+    a = fa.components_
+    # constrain loading and center latent
+    mu *= norm(a, ord=inf, axis=1)
     mu -= mu.mean(axis=0)
-    a = fa.components_ * norm(mu, ord=inf, axis=0, keepdims=True).T
-    mu /= norm(mu, ord=inf, axis=0)
+    a /= norm(a, ord=inf, axis=1)[..., newaxis]
+    # mu /= norm(mu, ord=inf, axis=0)
     mu = mu.reshape((ntrial, ntime, nlatent))
-    L = empty((ntrial, nlatent, ntime, rank))
+    # L = empty((ntrial, nlatent, ntime, rank))
     w = zeros((ntrial, ntime, nlatent))
-    v = zeros((ntrial, ntime, nlatent))
+    v = np.repeat(sigma[newaxis, ...], ntrial * ntime, axis=1).reshape((ntrial, ntime, nlatent))
 
     # initialize parameters
     b = empty((1 + lag, nchannel), dtype=FLOAT)
@@ -922,20 +859,16 @@ def leave_one_out(trial, model, **kwargs):
 
         # initialize posterior
         if trial['mu0'] is None:
-            fa = FactorAnalysis(n_components=nlatent, svd_method='lapack')
-            mu = fa.fit_transform(obj['y'].reshape((-1, nchannel - 1)))
-            mu -= mu.mean(axis=0)
-            mu /= norm(mu, ord=inf, axis=0)
-            mu = mu.reshape((ntrial, ntime, nlatent))
+            mu = lstsq(a.T, y.reshape((-1, nchannel)).T)[0].T.reshape((ntrial, ntime, nlatent))
         else:
             mu = trial['mu0']
         obj['mu'] = mu
-        obj['w'] = zeros((ntrial, ntime, nlatent))
-        obj['v'] = zeros((ntrial, ntime, nlatent))
         obj['sigma'] = model['sigma'].copy()
         obj['omega'] = model['omega'].copy()
         obj['chol'] = model['chol'].copy()
         obj['L'] = model['L'].copy()
+        obj['w'] = zeros((ntrial, ntime, nlatent))
+        obj['v'] = np.repeat(obj['omega'][newaxis, ...], ntrial * ntime, axis=1).reshape((ntrial, ntime, nlatent))
 
         # set parameters
         obj['a'] = model['a'][:, included]
@@ -978,9 +911,9 @@ def cv(y, channel, sigma, omega, a0=None, mu0=None, lag=0, rank=500, **kwargs):
 
     y = asarray(y)
     if y.ndim < 2:
-        y = y[..., None]
+        y = y[..., newaxis]
     if y.ndim < 3:
-        y = y[None, ...]
+        y = y[newaxis, ...]
     channel = asarray(channel)
     ntrial, ntime, nchannel = y.shape
 
@@ -992,10 +925,12 @@ def cv(y, channel, sigma, omega, a0=None, mu0=None, lag=0, rank=500, **kwargs):
     yhat = empty_like(y, dtype=FLOAT)
     # do leave-one-out trial by trial
     for itrial in range(ntrial):
-        test_trial = {'y': y[itrial, :][None, ...], 'h': h[:, itrial, :, :][:, None, :, :],
-                      'yhat': yhat[itrial, :][None, ...], 'mu0': mu0[itrial, :][None, ...] if mu0 is not None else None}
+        test_trial = {'y': y[itrial, :][newaxis, ...], 'h': h[:, itrial, :, :][:, newaxis, :, :],
+                      'yhat': yhat[itrial, :][newaxis, ...], 'mu0': mu0[itrial, :][newaxis, ...] if mu0 is not None else None}
         itrain = arange(ntrial) != itrial
-        model = fit(y[itrain, :], channel, sigma, omega, x=None, a0=a0, mu0=mu0[itrain, :], alpha=None, beta=None, lag=lag, rank=rank, **kwargs)
+        model = fit(y[itrain, :], channel, sigma, omega, x=None, a0=a0, mu0=mu0[itrain, :] if mu0 is not None else None,
+                    alpha=None, beta=None,
+                    lag=lag, rank=rank, **kwargs)
         kwargs['verbose'] = False
         kwargs['hyper'] = False
         kwargs['dmu_acc'] = zeros_like(model['mu'])
