@@ -973,3 +973,30 @@ def postprocess(obj):
     obj.pop('stat', None)
     return obj
 
+
+def predict(y, x, a, b):
+    """
+    Predict firing rate
+    Args:
+        y:
+        x:
+        a:
+        b:
+
+    Returns:
+
+    """
+    ntrial, ntime, ntrain = y.shape
+    nlatent = x.shape[-1]
+    lag = b.shape[0] - 1
+
+    # make matrix of regression
+    # h = empty((ntrain, ntrial, ntime, 1 + lag), dtype=FLOAT)
+    reg = empty_like(y)
+    for itrain in range(ntrain):
+        for itrial in range(ntrial):
+            h = add_constant(lagmat(y[itrial, :, itrain], lag=lag))
+            reg[itrial, :, itrain] = h.dot(b[:, itrain])
+
+    yhat = np.exp(x.reshape((-1, nlatent)).dot(a) + reg.reshape((-1, ntrain))).reshape(y.shape)
+    return yhat
