@@ -747,7 +747,7 @@ def fit(y, channel, sigma, omega, a=None, b=None, mu=None, x=None, alpha=None, b
 
 
 def seqfit(y, channel, sigma, omega, lag=0, rank=500, **kwargs):
-    """Sequential inference API
+    """Sequential inference
     Args:
         y:       observation matrix
         channel: channel type indicator (spike/lfp)
@@ -948,7 +948,7 @@ def postprocess(obj):
         obj: raw inference
 
     Returns:
-
+        infernece
     """
     ntrial = obj['mu'].shape[0]
     chol = obj['chol']
@@ -963,7 +963,7 @@ def postprocess(obj):
             A = eyer - GtWG + GtWG.dot(solve(eyer + GtWG, GtWG, sym_pos=True))  # A should be PD but numerically not
             eigval, eigvec = eigh(A)
             eigval.clip(0, PINF, out=eigval)  # remove negative eigenvalues
-            L[itrial, ilatent, :] = G.dot(eigvec.dot(diag(sqrt(eigval))))  # lower posterior covariance
+            L[itrial, ilatent, :] = G.dot(eigvec.dot(diag(sqrt(eigval))))
     obj['L'] = L
     keys = list(obj.keys())
     for key in keys:
@@ -974,29 +974,30 @@ def postprocess(obj):
     return obj
 
 
-def predict(y, x, a, b):
+def predict(y, x, a, b, v=None):
     """
     Predict firing rate
     Args:
-        y:
-        x:
-        a:
-        b:
+        y: spike trains
+        x: latent
+        a: loading
+        b: regression
+        v: posterior variance
 
     Returns:
-
+        yhat: predicted firing rate
     """
     ntrial, ntime, ntrain = y.shape
     nlatent = x.shape[-1]
     lag = b.shape[0] - 1
 
-    # make matrix of regression
-    # h = empty((ntrain, ntrial, ntime, 1 + lag), dtype=FLOAT)
+    # regression (h dot b) part
     reg = empty_like(y)
     for itrain in range(ntrain):
         for itrial in range(ntrial):
             h = add_constant(lagmat(y[itrial, :, itrain], lag=lag))
             reg[itrial, :, itrain] = h.dot(b[:, itrain])
-
-    yhat = np.exp(x.reshape((-1, nlatent)).dot(a) + reg.reshape((-1, ntrain))).reshape(y.shape)
+    eta = x.reshape((-1, nlatent)).dot(a) + reg.reshape((-1, ntrain))
+    lam = np.exp(eta + 0.5 * v.reshape((-1, nlatent)).dot(a ** 2)) if v is not None else np.exp(eta)
+    yhat = lam.reshape(y.shape)
     return yhat
