@@ -33,26 +33,34 @@ fit_0_90_4D = loadmat(op.join(outputpath, 'Graf_5_0_90_vLGP_4D_2'), squeeze_me=T
 
 print('Start inferring')
 np.random.seed(0)
-sigma = np.full(4, fill_value=1.0)
+sigma = np.full(4, fill_value=3.0)
 
 for ori in unique_ori:
-    print('Ori: {}'.format(ori))
-    fit = vlgp.fit(y[orient == ori, :], ['spike'] * y.shape[-1], sigma, omega, a=fit_0_90_4D['a'], b=fit_0_90_4D['b'],
-               lag=2, rank=100, niter=50, tol=1e-5, verbose=False, infer='posterior', w=0, v=1,
-               learning_rate=1, learn_sigma=False, learn_omega=False, adjhess=True, decay=0, MAP=False)
-    with open(op.join(outputpath, 'Graf5_vLGP_4D_2_{:d}deg.dat'.format(int(ori))), 'wb') as outfile:
-        pickle.dump(fit, outfile, protocol=pickle.HIGHEST_PROTOCOL)
+	try:
+	    print('Ori: {}'.format(ori))
+	    fit = vlgp.fit(y[orient == ori, :], ['spike'] * y.shape[-1], sigma, omega, a=fit_0_90_4D['a'], b=fit_0_90_4D['b'],
+	               lag=2, rank=100, niter=50, tol=1e-5, verbose=False, infer='posterior', 
+	               learning_rate=1, learn_sigma=False, learn_omega=False, adjhess=True, decay=0, MAP=False)
+	    with open(op.join(outputpath, 'graf5Sigma100Deg{:d}.dat'.format(int(ori))), 'wb') as outfile:
+	        pickle.dump(fit, outfile, protocol=pickle.HIGHEST_PROTOCOL)
+	except Exception as e:
+		print('{:d} degree failed'.format(ori))
 print('Inference ends')
 
 print('Concatenating latent')
 mu = []
+v = []
 for ori in unique_ori:
-    fit = pickle.load(open(op.join(outputpath, 'Graf5_vLGP_4D_2_{:d}deg.dat'.format(int(ori))), 'rb'))
+    fit = pickle.load(open(op.join(outputpath, 'graf5Sigma100Deg{:d}.dat'.format(int(ori))), 'rb'))
     mu.append(fit['mu'])
-
+    v.append(fit['v'])
+    
 latent = np.concatenate(mu)
-print(latent.shape)
-with open(op.join(outputpath, 'Graf5_vLGP_2_4D.dat'), 'wb') as outfile:
+var = np.concatenate(v)
+print(latent.shape, var.shape)
+with open(op.join(outputpath, 'graf5Sigma100.dat'), 'wb') as outfile:
     pickle.dump(latent, outfile, protocol=pickle.HIGHEST_PROTOCOL)
+with open(op.join(outputpath, 'graf5Sigma100var.dat'), 'wb') as outfile:
+    pickle.dump(var, outfile, protocol=pickle.HIGHEST_PROTOCOL)
 
 print('Finished')
