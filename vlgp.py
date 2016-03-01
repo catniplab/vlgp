@@ -19,6 +19,10 @@ from util import add_constant, rotate, lagmat
 FLOAT = np.float32
 
 
+# TODO: scale mu after normalize loading
+# TODO: factor out variance and correlation from prior covariance
+
+
 def elbo(obj):
     """Evidence Lower BOund
     Args:
@@ -66,10 +70,10 @@ def elbo(obj):
         for l in range(nlatent):
             G = chol[l, :]
             GtWG = G.T.dot(w[:, l].reshape((ntime, 1)) * G)
-            A = GtWG.dot(solve(eyer + GtWG, GtWG, sym_pos=True))
+            tmp = GtWG.dot(solve(eyer + GtWG, GtWG, sym_pos=True))  # expected to be nonsingular
             G_mldiv_mu = lstsq(G, mu[:, l])[0]
-            tr = ntime - trace(GtWG) + trace(A)
-            lndet = slogdet(eyer - GtWG + A)[1]
+            tr = ntime - trace(GtWG) + trace(tmp)
+            lndet = slogdet(eyer - GtWG + tmp)[1]
 
             lb += -0.5 * inner(G_mldiv_mu, G_mldiv_mu) - 0.5 * tr + 0.5 * lndet + 0.5 * ntime
 
@@ -123,7 +127,7 @@ def inferpost(obj, **kwargs):
     lfp = channel == 'lfp'
 
     eyer = identity(rank)
-    res = empty((ntime, nchannel), dtype=float)
+    resid = empty((ntime, nchannel), dtype=float)
     U = empty((ntime, nchannel), dtype=float)
 
     for itrial in range(ntrial):
@@ -140,6 +144,7 @@ def inferpost(obj, **kwargs):
             eta = mu.dot(a) + einsum('ijk, ki -> ji', h, b)  # (neuron, time, lag) . (lag, neuron)
             lam = sexp(eta + 0.5 * v.dot(a ** 2))
             G = chol[ilatent, :, :]
+
             # TODO: Possibly update v here
             grad_mu = (y[:, spike] - lam[:, spike]).dot(a[ilatent, spike]) + \
                       ((y[:, lfp] - eta[:, lfp]) /
@@ -153,10 +158,16 @@ def inferpost(obj, **kwargs):
                 wadj = w[:, [ilatent]]  # keep dimension
             GtWG = G.T.dot(wadj * G)
 
-            res[:, spike] = y[:, spike] - lam[:, spike]
-            res[:, lfp] = (y[:, lfp] - eta[:, lfp]) / noise[lfp]
+            # update temporal variance
+            # if not kwargs['MAP']:
+            #     GtWGv = G.T.dot(w[:, [ilatent]] * G)
+            #     v[:, ilatent] = (G * (G - G.dot(GtWGv) +
+            #                           G.dot(GtWGv.dot(solve(eyer + GtWGv, GtWGv, sym_pos=True))))).sum(axis=1)
 
-            u = G.dot(G.T.dot(res.dot(a[ilatent, :]))) - mu[:, ilatent]
+            resid[:, spike] = y[:, spike] - lam[:, spike]  # residuals of Poisson observations
+            resid[:, lfp] = (y[:, lfp] - eta[:, lfp]) / noise[lfp]  # residuals of Gaussian observations
+
+            u = G.dot(G.T.dot(resid.dot(a[ilatent, :]))) - mu[:, ilatent]
             delta_mu = u - G.dot((wadj * G).T.dot(u)) + \
                        G.dot(GtWG.dot(solve(eyer + GtWG, (wadj * G).T.dot(u), sym_pos=True)))
 
@@ -165,7 +176,7 @@ def inferpost(obj, **kwargs):
             # scale = norm(mu[:, ilatent], ord=inf)
             # mu[:, ilatent] /= scale
 
-            # center over all trials
+            # center over all trials if not only infer posterior
             if kwargs['infer'] != 'posterior':
                 shape = obj['mu'].shape
                 mu_over_trials = obj['mu'].reshape((-1, nlatent))
@@ -181,8 +192,7 @@ def inferpost(obj, **kwargs):
             # TODO: think the order of updating w and v
             for ilatent in range(nlatent):
                 G = chol[ilatent, :, :]
-                W = w[:, [ilatent]]
-                GtWG = G.T.dot(W * G)
+                GtWG = G.T.dot(w[:, [ilatent]] * G)
                 v[:, ilatent] = (G * (G - G.dot(GtWG) + G.dot(GtWG.dot(solve(eyer + GtWG, GtWG, sym_pos=True))))).sum(axis=1)
 
 
@@ -272,7 +282,10 @@ def inferparam(obj, **kwargs):
     obj['noise'] = var(y - eta, axis=0, ddof=0)  # MLE
 
     # constrain loading
-    a /= norm(a, ord=inf, axis=1)[..., newaxis]
+    scale = norm(a, ord=inf, axis=1)[..., newaxis]
+    a /= scale
+    mu *= scale.squeeze()
+    obj['mu'] = mu.reshape(obj['mu'].shape)
 
 
 def fillargs(**kwargs):
@@ -960,8 +973,12 @@ def postprocess(obj):
         for ilatent in range(nlatent):
             G = chol[ilatent, :, :]
             GtWG = G.T.dot(w[itrial, :, ilatent].reshape((ntime, 1)) * G)
-            A = eyer - GtWG + GtWG.dot(solve(eyer + GtWG, GtWG, sym_pos=True))  # A should be PD but numerically not
-            eigval, eigvec = eigh(A)
+            try:
+                tmp = eyer - GtWG + GtWG.dot(solve(eyer + GtWG, GtWG, sym_pos=True))  # A should be PD but numerically not
+            except LinAlgError:
+                print('Singular matrix. Use least squares instead.')
+                tmp = eyer - GtWG + GtWG.dot(lstsq(eyer + GtWG, GtWG)[0])  # least squares
+            eigval, eigvec = eigh(tmp)
             eigval.clip(0, PINF, out=eigval)  # remove negative eigenvalues
             L[itrial, ilatent, :] = G.dot(eigvec.dot(diag(sqrt(eigval))))
     obj['L'] = L
