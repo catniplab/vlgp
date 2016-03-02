@@ -1,9 +1,13 @@
 """
 Tool functions
 """
+import sys
+
+import numpy as np
 from numpy import exp, column_stack, roll, pi, sum, dot
 from numpy import zeros, ones, diag, arange, eye, asarray, atleast_3d, rollaxis
 from scipy.linalg import svd, lstsq, toeplitz
+import h5py
 
 
 def makeregressor(obs, p):
@@ -178,3 +182,27 @@ def align(x):
             diff = ax[i - 1, -1, :] - ax[i, 0, :]
             ax[i, :, :] += diff
     return ax
+
+
+def save(obj, fname):
+    """
+    Save inference object in HDF5
+    Args:
+        obj: inference
+        fname: absolute path and filename
+
+    Returns:
+
+    """
+    with h5py.File(fname, 'w') as hf:
+        for k, v in obj.items():
+            try:
+                hf.create_dataset(k, data=v, compression="gzip")
+            except TypeError:
+                print('Discard unsupported type ({}, {})'.format(k, v.dtype), file=sys.stderr)
+
+
+def load(fname):
+    with h5py.File(fname, 'r') as hf:
+        obj = {k: np.array(v) for k, v in hf.items()}
+    return obj

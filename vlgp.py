@@ -16,11 +16,8 @@ from hyper import learngp
 from mathf import ichol_gauss, subspace, sexp
 from util import add_constant, rotate, lagmat
 
+
 FLOAT = np.float32
-
-
-# TODO: scale mu after normalize loading
-# TODO: factor out variance and correlation from prior covariance
 
 
 def elbo(obj):
@@ -89,7 +86,7 @@ def accumulate(accu, grad, decay=1):
         decay: expoential decay
 
     Returns:
-
+        sum of squared gradients
     """
     if decay < 1:
         return decay * accu + (1 - decay) * grad ** 2
@@ -104,7 +101,7 @@ def inferpost(obj, **kwargs):
         **kwargs: optional arguments controlling inference
 
     Returns:
-
+        inference object
     """
     nchannel, ntrial, ntime, lag = obj['h'].shape  # neuron, trial, time, lag
     nlatent, _, rank = obj['chol'].shape  # latent, time, rank
@@ -145,7 +142,6 @@ def inferpost(obj, **kwargs):
             lam = sexp(eta + 0.5 * v.dot(a ** 2))
             G = chol[ilatent, :, :]
 
-            # TODO: Possibly update v here
             grad_mu = (y[:, spike] - lam[:, spike]).dot(a[ilatent, spike]) + \
                       ((y[:, lfp] - eta[:, lfp]) /
                        noise[lfp]).dot(a[ilatent, lfp]) - lstsq(G.T, lstsq(G, mu[:, ilatent])[0])[0]
@@ -180,7 +176,9 @@ def inferpost(obj, **kwargs):
             if kwargs['infer'] != 'posterior':
                 shape = obj['mu'].shape
                 mu_over_trials = obj['mu'].reshape((-1, nlatent))
-                mu_over_trials -= mu_over_trials.mean(axis=0)
+                mean_over_trials = mu_over_trials.mean(axis=0)
+                obj['b'][0, :] += mean_over_trials.dot(obj['a'])  # compensate bias
+                mu_over_trials -= mean_over_trials
                 obj['mu'] = mu_over_trials.reshape(shape)
 
         eta = mu.dot(a) + einsum('ijk, ki -> ji', h, b)
@@ -189,7 +187,6 @@ def inferpost(obj, **kwargs):
         U[:, lfp] = 1 / noise[lfp]
         w[:] = U.dot(a.T ** 2)
         if not kwargs['MAP']:
-            # TODO: think the order of updating w and v
             for ilatent in range(nlatent):
                 G = chol[ilatent, :, :]
                 GtWG = G.T.dot(w[:, [ilatent]] * G)
@@ -203,7 +200,7 @@ def inferparam(obj, **kwargs):
         **kwargs: optional arguments controlling inference
 
     Returns:
-
+        inference object
     """
     nchannel, ntrial, ntime, lag1 = obj['h'].shape  # neuron, trial, time, lag + 1
     nlatent, _, rank = obj['chol'].shape  # latent, time, rank
@@ -281,10 +278,10 @@ def inferparam(obj, **kwargs):
             print('Undefined channel')
     obj['noise'] = var(y - eta, axis=0, ddof=0)  # MLE
 
-    # constrain loading
+    # normalize loading by latent and rescale latent
     scale = norm(a, ord=inf, axis=1)[..., newaxis]
     a /= scale
-    mu *= scale.squeeze()
+    mu *= scale.squeeze()  # compensate latent
     obj['mu'] = mu.reshape(obj['mu'].shape)
 
 
@@ -463,6 +460,7 @@ def infer(obj, fstat=None, **kwargs):
         iter_tock = timeit.default_timer()
         elapsed[iiter, 2] = iter_tock - iter_tick
 
+        # statistics of current iteration
         stat[iiter] = fstat(obj) if fstat is not None else {}
         stat[iiter]['Elapsed Post'] = elapsed[iiter, 0]
         stat[iiter]['Elapsed Param'] = elapsed[iiter, 1]
@@ -746,10 +744,8 @@ def fit(y, channel, sigma, omega, a=None, b=None, mu=None, x=None, alpha=None, b
     else:
         v = np.repeat(sigma[newaxis, ...], ntrial * ntime, axis=1).reshape((ntrial, ntime, nlatent))
 
-    obj = {'y': y, 'channel': channel, 'h': h,
-           'sigma': sigma, 'omega': omega, 'chol': chol, 'sigma0': sigma, 'omega0': omega,
-           'mu': mu, 'w': w, 'v': v, 'L': L,
-           'x': x, 'a': a, 'b': b, 'noise': noise, 'alpha': alpha, 'beta': beta}
+    obj = dict(y=y, channel=channel, h=h, sigma=sigma, omega=omega, chol=chol, mu=mu, w=w, v=v, L=L, a=a, b=b,
+               noise=noise, x=x, alpha=alpha, beta=beta)
 
     kwargs['dmu_acc'] = zeros_like(mu)
     kwargs['da_acc'] = zeros_like(a)
@@ -961,7 +957,7 @@ def postprocess(obj):
         obj: raw inference
 
     Returns:
-        infernece
+        infernece object
     """
     ntrial = obj['mu'].shape[0]
     chol = obj['chol']
@@ -1015,6 +1011,7 @@ def predict(y, x, a, b, v=None):
             h = add_constant(lagmat(y[itrial, :, itrain], lag=lag))
             reg[itrial, :, itrain] = h.dot(b[:, itrain])
     eta = x.reshape((-1, nlatent)).dot(a) + reg.reshape((-1, ntrain))
+    # eta = x.reshape((-1, nlatent)).dot(a) + b[0, :]
     lam = np.exp(eta + 0.5 * v.reshape((-1, nlatent)).dot(a ** 2)) if v is not None else np.exp(eta)
     yhat = lam.reshape(y.shape)
     return yhat
