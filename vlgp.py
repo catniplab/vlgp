@@ -187,7 +187,8 @@ def inferpost(obj, **kwargs):
             for ilatent in range(nlatent):
                 G = chol[ilatent, :, :]
                 GtWG = G.T.dot(w[:, [ilatent]] * G)
-                v[:, ilatent] = (G * (G - G.dot(GtWG) + G.dot(GtWG.dot(solve(eyer + GtWG, GtWG, sym_pos=True))))).sum(axis=1)
+                v[:, ilatent] = (G * (G - G.dot(GtWG) + G.dot(GtWG.dot(solve(eyer + GtWG, GtWG, sym_pos=True))))).sum(
+                    axis=1)
 
 
 def inferparam(obj, **kwargs):
@@ -251,7 +252,7 @@ def inferparam(obj, **kwargs):
                 neghess_b = h[ichannel, :].T.dot(lam[:, ichannel, newaxis] * h[ichannel, :])
                 # TODO: inactive neurons never fire across all trials which may cause zero Hessian
                 if adjhess:
-                        delta_b = solve(neghess_b + diag(sqrt(eps + db_acc[:, ichannel])), grad_b, sym_pos=True)
+                    delta_b = solve(neghess_b + diag(sqrt(eps + db_acc[:, ichannel])), grad_b, sym_pos=True)
                 else:
                     try:
                         delta_b = solve(neghess_b, grad_b, sym_pos=True)
@@ -470,8 +471,8 @@ def infer(obj, fstat=None, **kwargs):
         # TODO: change stat to OrderedDict
         if kwargs['verbose']:
             print('\n[{}]'.format(iiter))
-            for k, v in stat[iiter].items():
-                print('{}: {}'.format(k, v))
+            for k in sorted(stat[iiter]):
+                print('{}: {}'.format(k, stat[iiter][k]))
 
         iiter += 1
     infer_tock = timeit.default_timer()
@@ -565,7 +566,8 @@ def fit(y, channel, sigma, omega, a=None, b=None, mu=None, x=None, alpha=None, b
     if b is None:
         b = empty((1 + lag, nchannel), dtype=float)
         for ichannel in range(nchannel):
-            b[:, ichannel] = lstsq(h.reshape((nchannel, -1, 1 + lag))[ichannel, :], y.reshape((-1, nchannel))[:, ichannel])[0]
+            b[:, ichannel] = \
+            lstsq(h.reshape((nchannel, -1, 1 + lag))[ichannel, :], y.reshape((-1, nchannel))[:, ichannel])[0]
 
     # initialize noises of guassian channels
     noise = var(y.reshape((-1, nchannel)), axis=0, ddof=0)
@@ -588,7 +590,7 @@ def fit(y, channel, sigma, omega, a=None, b=None, mu=None, x=None, alpha=None, b
     return inference
 
 
-def seqfit(y, channel, sigma, omega, lag=0, rank=500, **kwargs):
+def seqfit(y, channel, sigma, omega, lag=0, rank=500, copy=False, **kwargs):
     """Sequential inference
     Args:
         y:       observation matrix
@@ -597,6 +599,7 @@ def seqfit(y, channel, sigma, omega, lag=0, rank=500, **kwargs):
         omega:   initial prior timescale
         lag:     autoregressive lag
         rank:    prior covariance rank
+        copy:    False: start from last inference
         **kwargs: optional arguments controlling inference
 
     Returns:
@@ -629,9 +632,10 @@ def seqfit(y, channel, sigma, omega, lag=0, rank=500, **kwargs):
     a = fa.components_
 
     # constrain loading and center latent
+    anorm = norm(a, ord=inf, axis=1)
     mu -= mu.mean(axis=0)
-    mu *= norm(a, ord=inf, axis=1)
-    a /= norm(a, ord=inf, axis=1)[..., newaxis]
+    mu *= anorm
+    a /= anorm[..., newaxis]
     mu = mu.reshape((ntrial, ntime, nlatent))
     # L = empty((ntrial, nlatent, ntime, rank))
     w = zeros((ntrial, ntime, nlatent))
@@ -649,17 +653,15 @@ def seqfit(y, channel, sigma, omega, lag=0, rank=500, **kwargs):
         print('\nSequential fit')
     for ilatent in range(nlatent):
         print('\n{} latent(s)'.format(ilatent + 1))
-        # copyto(mu[:, :, ilatent], mu[:, :, 0])
-        # copyto(w[:, :, ilatent], w[:, :, 0])
-        # copyto(v[:, :, ilatent], v[:, :, 0])
-        # copyto(chol[ilatent, :], chol[0, :])
-        # copyto(sigma[ilatent], sigma[0])
-        # copyto(omega[ilatent], omega[0])
-        obj = {'y': y, 'channel': channel, 'h': h,
-               'sigma': sigma[:ilatent + 1].copy(), 'omega': omega[:ilatent + 1].copy(),
-               'chol': chol[:ilatent + 1, :].copy(),
-               'mu': mu[:, :, :ilatent + 1], 'w': w[:, :, :ilatent + 1], 'v': v[:, :, :ilatent + 1],
-               'a': a[:ilatent + 1, :], 'b': b, 'noise': noise}
+        if copy:
+            obj = dict(y=y, channel=channel, h=h, sigma=sigma[:ilatent + 1].copy(), omega=omega[:ilatent + 1].copy(),
+                       chol=chol[:ilatent + 1, :].copy(), mu=mu[:, :, :ilatent + 1].copy(),
+                       w=w[:, :, :ilatent + 1].copy(), v=v[:, :, :ilatent + 1].copy(), a=a[:ilatent + 1, :].copy(),
+                       b=b.copy(), noise=noise.copy())
+        else:
+            obj = dict(y=y, channel=channel, h=h, sigma=sigma[:ilatent + 1], omega=omega[:ilatent + 1],
+                       chol=chol[:ilatent + 1, :], mu=mu[:, :, :ilatent + 1], w=w[:, :, :ilatent + 1],
+                       v=v[:, :, :ilatent + 1], a=a[:ilatent + 1, :], b=b, noise=noise)
 
         kwargs['dmu_acc'] = zeros_like(mu[:, :, :ilatent + 1])
         kwargs['da_acc'] = zeros_like(a[:ilatent + 1, :])
@@ -722,7 +724,7 @@ def leave_one_out(trial, model, **kwargs):
         obj = infer(obj, **kwargs)
         eta = obj['mu'].reshape((-1, nlatent)).dot(a[:, ichannel]) + htest.reshape((ntime, -1)).dot(b[:, ichannel])
         if channel[ichannel] == 'spike':
-            yhat[:, :, ichannel] = exp(eta + 0.5*obj['v'].dot(a[:, ichannel] ** 2))
+            yhat[:, :, ichannel] = exp(eta + 0.5 * obj['v'].dot(a[:, ichannel] ** 2))
         else:
             yhat[:, :, ichannel] = eta
 
@@ -765,7 +767,8 @@ def cv(y, channel, sigma, omega, a0=None, mu0=None, lag=0, rank=500, **kwargs):
     # do leave-one-out trial by trial
     for itrial in range(ntrial):
         test_trial = {'y': y[itrial, :][newaxis, ...], 'h': h[:, itrial, :, :][:, newaxis, :, :],
-                      'yhat': yhat[itrial, :][newaxis, ...], 'mu0': mu0[itrial, :][newaxis, ...] if mu0 is not None else None}
+                      'yhat': yhat[itrial, :][newaxis, ...],
+                      'mu0': mu0[itrial, :][newaxis, ...] if mu0 is not None else None}
         itrain = arange(ntrial) != itrial
         model = fit(y[itrain, :], channel, sigma, omega, x=None, a0=a0, mu0=mu0[itrain, :] if mu0 is not None else None,
                     alpha=None, beta=None,
@@ -800,7 +803,8 @@ def postprocess(obj):
             G = chol[ilatent, :, :]
             GtWG = G.T.dot(w[itrial, :, ilatent].reshape((ntime, 1)) * G)
             try:
-                tmp = eyer - GtWG + GtWG.dot(solve(eyer + GtWG, GtWG, sym_pos=True))  # A should be PD but numerically not
+                tmp = eyer - GtWG + GtWG.dot(
+                    solve(eyer + GtWG, GtWG, sym_pos=True))  # A should be PD but numerically not
             except LinAlgError:
                 print('Singular matrix. Use least squares instead.')
                 tmp = eyer - GtWG + GtWG.dot(lstsq(eyer + GtWG, GtWG)[0])  # least squares
