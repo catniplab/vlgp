@@ -300,12 +300,12 @@ def fillargs(**kwargs):
     kwargs['tol'] = kwargs.get('tol', 1e-5)
     kwargs['eps'] = kwargs.get('eps', 1e-6)
     kwargs['nhyper'] = kwargs.get('nhyper', 5)
-    kwargs['decay'] = kwargs.get('decay', 1)
+    kwargs['decay'] = kwargs.get('decay', 0)
     kwargs['sigma_factor'] = kwargs.get('sigma_factor', 5)
     kwargs['omega_factor'] = kwargs.get('omega_factor', 5)
     kwargs['param_opt'] = kwargs.get('param_opt', 'NR')
     kwargs['moreparam'] = kwargs.get('moreparam', False)
-    kwargs['adjhess'] = kwargs.get('adjhess', False)
+    kwargs['adjhess'] = kwargs.get('adjhess', True)
     kwargs['learning_rate'] = kwargs.get('learning_rate', 1.0)
     kwargs['MAP'] = kwargs.get('MAP', False)
     return kwargs
@@ -710,9 +710,9 @@ def leave_one_out(trial, model, **kwargs):
         obj['sigma'] = model['sigma'].copy()
         obj['omega'] = model['omega'].copy()
         obj['chol'] = model['chol'].copy()
-        obj['L'] = model['L'].copy()
-        obj['w'] = zeros((ntrial, ntime, nlatent))
-        obj['v'] = np.repeat(obj['omega'][newaxis, ...], ntrial * ntime, axis=1).reshape((ntrial, ntime, nlatent))
+        # obj['L'] = zeros()
+        obj['w'] = zeros_like(mu)
+        obj['v'] = np.repeat(obj['sigma'][newaxis, ...], ntrial * ntime, axis=1).reshape((ntrial, ntime, nlatent))
 
         # set parameters
         obj['a'] = model['a'][:, included]
@@ -722,11 +722,11 @@ def leave_one_out(trial, model, **kwargs):
         kwargs['infer'] = 'posterior'
 
         obj = infer(obj, **kwargs)
-        eta = obj['mu'].reshape((-1, nlatent)).dot(a[:, ichannel]) + htest.reshape((ntime, -1)).dot(b[:, ichannel])
+        eta = obj['mu'].reshape((-1, nlatent)).dot(a[:, ichannel]) + htest.reshape((ntime * ntrial, -1)).dot(b[:, ichannel])
         if channel[ichannel] == 'spike':
-            yhat[:, :, ichannel] = exp(eta + 0.5 * obj['v'].dot(a[:, ichannel] ** 2))
+            yhat[:, :, ichannel] = exp(eta + 0.5 * obj['v'].reshape((-1, nlatent)).dot(a[:, ichannel] ** 2)).reshape((yhat.shape[0], yhat.shape[1]))
         else:
-            yhat[:, :, ichannel] = eta
+            yhat[:, :, ichannel] = eta.reshape((yhat.shape[0], yhat.shape[1]))
 
     return trial
 
