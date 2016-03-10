@@ -313,6 +313,7 @@ def fill_default_args(**kwargs):
     kwargs['adjhess'] = kwargs.get('adjhess', True)
     kwargs['learning_rate'] = kwargs.get('learning_rate', 1.0)
     kwargs['MAP'] = kwargs.get('MAP', False)
+    kwargs['post_prediction'] = kwargs.get('post_prediction', True)
     return kwargs
 
 
@@ -708,8 +709,11 @@ def leave_one_out(trial, model, **kwargs):
         eta = obj['mu'].reshape((-1, nlatent)).dot(a[:, ichannel]) + htest.reshape((ntime * ntrial, -1)).dot(
             b[:, ichannel])
         if channel[ichannel] == 'spike':
-            yhat[:, :, ichannel] = exp(eta + 0.5 * obj['v'].reshape((-1, nlatent)).dot(a[:, ichannel] ** 2)).reshape(
-                (yhat.shape[0], yhat.shape[1]))
+            if kwargs['post_prediction']:
+                yhat[:, :, ichannel] = exp(eta + 0.5 * obj['v'].reshape((-1, nlatent)).dot(a[:, ichannel] ** 2)).reshape(
+                    (yhat.shape[0], yhat.shape[1]))
+            else:
+                yhat[:, :, ichannel] = exp(eta).reshape((yhat.shape[0], yhat.shape[1]))
         else:
             yhat[:, :, ichannel] = eta.reshape((yhat.shape[0], yhat.shape[1]))
 
