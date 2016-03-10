@@ -170,7 +170,7 @@ def inferpost(obj, **kwargs):
             # mu[:, ilatent] /= scale
 
             # center over all trials if not only infer posterior
-            if kwargs['infer'] != 'posterior':
+            if kwargs['learn_param']:
                 shape = obj['mu'].shape
                 mu_over_trials = obj['mu'].reshape((-1, nlatent))
                 mean_over_trials = mu_over_trials.mean(axis=0)
@@ -277,13 +277,14 @@ def inferparam(obj, **kwargs):
     obj['noise'] = var(y - eta, axis=0, ddof=0)  # MLE
 
     # normalize loading by latent and rescale latent
-    scale = norm(a, ord=inf, axis=1)[..., newaxis]
-    a /= scale
-    mu *= scale.squeeze()  # compensate latent
-    obj['mu'] = mu.reshape(obj['mu'].shape)
+    if kwargs['learn_post']:
+        scale = norm(a, ord=inf, axis=1)[..., newaxis]
+        a /= scale
+        mu *= scale.squeeze()  # compensate latent
+        obj['mu'] = mu.reshape(obj['mu'].shape)
 
 
-def fillargs(**kwargs):
+def fill_default_args(**kwargs):
     """Fill default values of controlling arguments if missing
     Args:
         **kwargs: optional arguments controlling inference
@@ -293,7 +294,9 @@ def fillargs(**kwargs):
     """
     kwargs['verbose'] = kwargs.get('verbose', False)
     kwargs['niter'] = kwargs.get('niter', 50)
-    kwargs['infer'] = kwargs.get('infer', 'both')
+    # kwargs['infer'] = kwargs.get('infer', 'both')
+    kwargs['learn_post'] = kwargs.get('learn_post', True)
+    kwargs['learn_param'] = kwargs.get('learn_param', True)
     kwargs['learn_sigma'] = kwargs.get('learn_sigma', False)
     kwargs['learn_omega'] = kwargs.get('learn_omega', False)
     kwargs['nadjhess'] = kwargs.get('nadjhess', 5)
@@ -368,7 +371,7 @@ def infer(obj, fstat=None, **kwargs):
 
         # infer posterior
         post_tick = timeit.default_timer()
-        if kwargs['infer'] != 'param':
+        if kwargs['learn_post']:
             inferpost(obj, **kwargs)
         elbo(obj)
         post_tock = timeit.default_timer()
@@ -382,7 +385,7 @@ def infer(obj, fstat=None, **kwargs):
 
         # infer parameter
         param_tick = timeit.default_timer()
-        if kwargs['infer'] != 'posterior':
+        if kwargs['learn_param']:
             inferparam(obj, **kwargs)
         param_tock = timeit.default_timer()
         elapsed[iiter, 1] = param_tock - param_tick
@@ -491,7 +494,7 @@ def fit(y, channel, sigma, omega, a=None, b=None, mu=None, x=None, alpha=None, b
         inference object
     """
     assert sigma.shape == omega.shape
-    kwargs = fillargs(**kwargs)
+    kwargs = fill_default_args(**kwargs)
 
     y = asarray(y)
     y = y.astype(float)
@@ -581,7 +584,7 @@ def seqfit(y, channel, sigma, omega, lag=0, rank=500, copy=False, **kwargs):
         list of inference objects
     """
     assert sigma.shape == omega.shape
-    kwargs = fillargs(**kwargs)
+    kwargs = fill_default_args(**kwargs)
 
     y = asarray(y)
     if y.ndim < 2:
@@ -657,7 +660,7 @@ def leave_one_out(trial, model, **kwargs):
     Returns:
         trial with prediction
     """
-    kwargs = fillargs(**kwargs)
+    kwargs = fill_default_args(**kwargs)
     y = trial['y']
     h = trial['h']
     channel = model['channel']
@@ -693,7 +696,10 @@ def leave_one_out(trial, model, **kwargs):
         obj['a'] = model['a'][:, included]
         obj['b'] = model['b'][:, included]
         obj['noise'] = model['noise'][included]
-        kwargs['infer'] = 'posterior'
+
+        # kwargs['infer'] = 'posterior'
+        kwargs['learn_post'] = True
+        kwargs['learn_param'] = False
         kwargs['learn_sigma'] = False
         kwargs['learn_omega'] = False
 
@@ -723,7 +729,7 @@ def cv(y, channel, sigma, omega, a0=None, mu0=None, lag=0, rank=500, **kwargs):
     Returns:
         prediction of all neurons
     """
-    kwargs = fillargs(**kwargs)
+    kwargs = fill_default_args(**kwargs)
     assert sigma.shape == omega.shape
 
     y = asarray(y)
