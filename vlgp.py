@@ -228,14 +228,14 @@ def inferparam(obj, **kwargs):
             va = v * a[:, ichannel]  # (ntime, nlatent)
             wv = diag(lam[:, ichannel].dot(v))
             grad_a = mu.T.dot(y[:, ichannel]) - (mu + va).T.dot(lam[:, ichannel])
-            # grad_a = mu.T.dot(y[:, ichannel] - lam[:, ichannel])
+            # grad_a = mu.T.dot(y[:, train] - lam[:, train])
             da_acc[:, ichannel] = accumulate(da_acc[:, ichannel], grad_a, decay)
 
             if kwargs['param_opt'] == 'GA':
                 delta_a += grad_a / sqrt(eps + da_acc[:, ichannel])
             else:
                 neghess_a = (mu + va).T.dot(lam[:, ichannel, newaxis] * (mu + va)) + wv
-                # neghess_a = mu.T.dot(lam[:, ichannel, newaxis] * mu)
+                # neghess_a = mu.T.dot(lam[:, train, newaxis] * mu)
 
                 if adjhess:
                     delta_a = solve(neghess_a + diag(sqrt(eps + da_acc[:, ichannel])), grad_a, sym_pos=True)
@@ -342,21 +342,6 @@ def infer(obj, fstat=None, **kwargs):
     x = obj.get('x')
     alpha = obj.get('alpha')
 
-    # fully optimize latent at initialization
-    # old_elbo = NINF
-    # for _ in range(50):
-    #     inferpost(obj, **kwargs, adjhess=False, normalize=False)
-    #     new_elbo, _ = elbo(obj)
-    #     if new_elbo <= old_elbo:
-    #         copyto(obj['mu'], good_mu)
-    #         copyto(obj['w'], good_w)
-    #         copyto(obj['v'], good_v)
-    #         break
-    #     old_elbo = new_elbo
-    #     copyto(good_mu, obj['mu'])
-    #     copyto(good_w, obj['w'])
-    #     copyto(good_v, obj['v'])
-
     # iteration 0
     # lb[0], ll[0] = elbo(obj)
     lb[0], ll[0] = np.finfo(float).min, np.finfo(float).min
@@ -410,16 +395,6 @@ def infer(obj, fstat=None, **kwargs):
         converged = abs(lb[iiter] - lb[iiter - 1]) < kwargs['tol'] * abs(lb[iiter - 1])
         decreased = lb[iiter] < lb[iiter - 1]
         stop = converged or decreased
-        # stop = converged or (decreased and backtrack)
-
-        # keep optimizing loading after latent convergence
-        # if stop and kwargs['infer'] == 'both' and kwargs['moreparam']:
-        #     if kwargs['verbose']:
-        #         print('\nLoading only')
-        #     kwargs['infer'] = 'param'
-        #     kwargs['param_opt'] = 'GA'
-        #     kwargs['tol'] *= 0.1
-        #     stop = False
 
         if decreased:
             if kwargs['verbose']:
@@ -556,7 +531,7 @@ def fit(y, channel, sigma, omega, a=None, b=None, mu=None, x=None, alpha=None, b
     else:
         if a is not None:
             mu = lstsq(a.T, y.reshape((-1, nchannel)).T)[0].T.reshape((ntrial, ntime, nlatent))
-        if mu is not None:
+        elif mu is not None:
             a = lstsq(mu.reshape((-1, nlatent)), y.reshape((-1, nchannel)))[0]
 
     # initialize square root of posterior covariance
@@ -587,7 +562,7 @@ def fit(y, channel, sigma, omega, a=None, b=None, mu=None, x=None, alpha=None, b
     kwargs['db_acc'] = zeros_like(b)
 
     inference = postprocess(infer(obj, **kwargs))
-    return inference
+    return inference, kwargs
 
 
 def seqfit(y, channel, sigma, omega, lag=0, rank=500, copy=False, **kwargs):
@@ -718,8 +693,9 @@ def leave_one_out(trial, model, **kwargs):
         obj['a'] = model['a'][:, included]
         obj['b'] = model['b'][:, included]
         obj['noise'] = model['noise'][included]
-        kwargs['hyper'] = False
         kwargs['infer'] = 'posterior'
+        kwargs['learn_sigma'] = False
+        kwargs['learn_omega'] = False
 
         obj = infer(obj, **kwargs)
         eta = obj['mu'].reshape((-1, nlatent)).dot(a[:, ichannel]) + htest.reshape((ntime * ntrial, -1)).dot(b[:, ichannel])
@@ -774,7 +750,6 @@ def cv(y, channel, sigma, omega, a0=None, mu0=None, lag=0, rank=500, **kwargs):
                     alpha=None, beta=None,
                     lag=lag, rank=rank, **kwargs)
         kwargs['verbose'] = False
-        kwargs['hyper'] = False
         kwargs['dmu_acc'] = zeros_like(model['mu'])
         kwargs['da_acc'] = zeros_like(model['a'])
         kwargs['db_acc'] = zeros_like(model['b'])
