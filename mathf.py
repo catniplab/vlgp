@@ -153,7 +153,7 @@ def subspace(a, b, deg=True):
     Args:
         a: subspace
         b: subspace
-
+        deg: return in degree or radian
     Returns:
         angle in radian
     """
@@ -169,9 +169,11 @@ def subspace(a, b, deg=True):
 def orthogonalize(x, a, normalize_a=False):
     """
     Orthogonalize the rows of the loading matrix and apply the corresponding linear transform to the latent variables.
+
     Args:
         x: latent variables
         a: loading matrix
+        normalize_a: use loading or latent to orthogonalize
 
     Returns:
 

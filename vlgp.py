@@ -4,9 +4,9 @@ This file contains the functions used for inference.
 import timeit
 
 import numpy as np
-from numpy import identity, einsum, trace, inner, empty, mean, inf, diag, newaxis, var, asarray, zeros, zeros_like, \
+from numpy import identity, einsum, trace, inner, empty, inf, diag, newaxis, var, asarray, zeros, zeros_like, \
     empty_like, arange, sum, copyto, ones
-from numpy.core.umath import sqrt, PINF, log, exp, NINF
+from numpy.core.umath import sqrt, PINF, log, exp
 from numpy.linalg import norm, slogdet, LinAlgError
 from scipy import stats
 from scipy.linalg import lstsq, eigh, solve
@@ -232,7 +232,7 @@ def inferparam(obj, **kwargs):
             da_acc[:, ichannel] = accumulate(da_acc[:, ichannel], grad_a, decay)
 
             if kwargs['param_opt'] == 'GA':
-                delta_a += grad_a / sqrt(eps + da_acc[:, ichannel])
+                delta_a = grad_a / sqrt(eps + da_acc[:, ichannel])
             else:
                 neghess_a = (mu + va).T.dot(lam[:, ichannel, newaxis] * (mu + va)) + wv
                 # neghess_a = mu.T.dot(lam[:, train, newaxis] * mu)
@@ -240,7 +240,10 @@ def inferparam(obj, **kwargs):
                 if adjhess:
                     delta_a = solve(neghess_a + diag(sqrt(eps + da_acc[:, ichannel])), grad_a, sym_pos=True)
                 else:
-                    delta_a = solve(neghess_a, grad_a, sym_pos=True)
+                    try:
+                        delta_a = solve(neghess_a, grad_a, sym_pos=True)
+                    except LinAlgError:
+                        delta_a = .0
             a[:, ichannel] += learning_rate * delta_a
 
             # bias
@@ -257,9 +260,8 @@ def inferparam(obj, **kwargs):
                     try:
                         delta_b = solve(neghess_b, grad_b, sym_pos=True)
                     except LinAlgError:
-                        delta_b = solve(neghess_b + eps * identity(b.shape[0]), grad_b, sym_pos=True)
-                    else:
-                        delta_b = 0.0
+                        delta_b = .0
+
             b[:, ichannel] += learning_rate * delta_b
         elif channel[ichannel] == 'lfp':
             # a's least squares solution for Gaussian channel
@@ -274,7 +276,7 @@ def inferparam(obj, **kwargs):
                                    h[ichannel, :].T.dot(y[:, ichannel] - mu.dot(a[:, ichannel])), sym_pos=True)
         else:
             print('Undefined channel')
-    obj['noise'] = var(y - eta, axis=0, ddof=0)  # MLE
+        obj['noise'] = var(y - eta, axis=0, ddof=0)  # MLE
 
     # normalize loading by latent and rescale latent
     if kwargs['learn_post']:
@@ -318,6 +320,7 @@ def infer(obj, fstat=None, **kwargs):
     """Main inference procedure
     Args:
         obj: inference object
+        fstat: external function calculateing statistics at each iteration
         kwargs: optional arguments controlling inference
 
     Returns:
@@ -481,8 +484,6 @@ def fit(y, channel, sigma, omega, a=None, b=None, mu=None, x=None, alpha=None, b
         a:       initial value of loading
         b:       initial value of regression
         mu:      initial value of latent
-        w:       initial value of W matrix
-        v:       initial value of temporal slice of posterior variance
         x:       optional true latent
         alpha:   optional true loading
         beta:    optional true regression
@@ -545,7 +546,7 @@ def fit(y, channel, sigma, omega, a=None, b=None, mu=None, x=None, alpha=None, b
         b = empty((1 + lag, nchannel), dtype=float)
         for ichannel in range(nchannel):
             b[:, ichannel] = \
-            lstsq(h.reshape((nchannel, -1, 1 + lag))[ichannel, :], y.reshape((-1, nchannel))[:, ichannel])[0]
+                lstsq(h.reshape((nchannel, -1, 1 + lag))[ichannel, :], y.reshape((-1, nchannel))[:, ichannel])[0]
 
     # initialize noises of guassian channels
     noise = var(y.reshape((-1, nchannel)), axis=0, ddof=0)
@@ -704,9 +705,11 @@ def leave_one_out(trial, model, **kwargs):
         kwargs['learn_omega'] = False
 
         obj = infer(obj, **kwargs)
-        eta = obj['mu'].reshape((-1, nlatent)).dot(a[:, ichannel]) + htest.reshape((ntime * ntrial, -1)).dot(b[:, ichannel])
+        eta = obj['mu'].reshape((-1, nlatent)).dot(a[:, ichannel]) + htest.reshape((ntime * ntrial, -1)).dot(
+            b[:, ichannel])
         if channel[ichannel] == 'spike':
-            yhat[:, :, ichannel] = exp(eta + 0.5 * obj['v'].reshape((-1, nlatent)).dot(a[:, ichannel] ** 2)).reshape((yhat.shape[0], yhat.shape[1]))
+            yhat[:, :, ichannel] = exp(eta + 0.5 * obj['v'].reshape((-1, nlatent)).dot(a[:, ichannel] ** 2)).reshape(
+                (yhat.shape[0], yhat.shape[1]))
         else:
             yhat[:, :, ichannel] = eta.reshape((yhat.shape[0], yhat.shape[1]))
 
@@ -722,6 +725,8 @@ def cv(y, channel, sigma, omega, a0=None, mu0=None, lag=0, rank=500, **kwargs):
         channel: channel type indicator (spike/lfp)
         sigma:   initial prior variance
         omega:   initial prior time scale
+        a0:      initial loading
+        mu0:     initial latent
         lag:     autoregressive lag
         rank:    prior covariance rank
         **kwargs: optional arguments controlling inference

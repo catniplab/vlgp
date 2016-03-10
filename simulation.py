@@ -5,7 +5,7 @@ Spike train
 """
 import numpy as np
 from numpy import empty, empty_like
-from numpy import pi, log2, ceil, fft, einsum
+from numpy import log2, ceil, fft, einsum
 from numpy.random import random, multivariate_normal
 from scipy import stats
 
@@ -68,7 +68,7 @@ def gp(omega, ntime, std, dt=1.0, seed=None):
     w = arange(0, wu, dw)
 
     for l in range(omega.shape[0]):
-        B = 2 * sqrt(spectral(w, omega[l]) * dw) * exp(1j * random(M) * 2 * pi)
+        B = 2 * np.sqrt(spectral(w, omega[l]) * dw) * exp(1j * random(M) * 2 * pi)
         B[0] = 0
         x[:, l] = std * ntime * fft.ifft(B, ntime).real
 
