@@ -4,6 +4,7 @@ This file contains the functions used for inference.
 import timeit
 
 import numpy as np
+from mathf import ichol_gauss, subspace, sexp
 from numpy import identity, einsum, trace, inner, empty, inf, diag, newaxis, var, asarray, zeros, zeros_like, \
     empty_like, arange, sum, copyto, ones
 from numpy.core.umath import sqrt, PINF, log, exp
@@ -11,10 +12,9 @@ from numpy.linalg import norm, slogdet, LinAlgError
 from scipy import stats
 from scipy.linalg import lstsq, eigh, solve
 from sklearn.decomposition.factor_analysis import FactorAnalysis
-
-from hyper import learngp
-from mathf import ichol_gauss, subspace, sexp
 from util import add_constant, rotate, lagmat
+
+from vlgp.hyper import learngp
 
 
 def elbo(obj):

@@ -5,8 +5,8 @@ import numpy as np
 import scipy.linalg as lin
 from scipy import stats
 
-import util
 import vlgp
+from vlgp import util
 
 
 def cv(y, a, b, sigma, omega, nfold):

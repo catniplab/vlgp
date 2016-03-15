@@ -9,7 +9,7 @@ from numpy import log2, ceil, fft, einsum
 from numpy.random import random, multivariate_normal
 from scipy import stats
 
-from mathf import *
+from vlgp.mathf import *
 
 
 def sqexp(t, omega):
