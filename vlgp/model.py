@@ -2,6 +2,7 @@
 Inference
 """
 import timeit
+import warnings
 
 import numpy as np
 from numpy import identity, einsum, trace, inner, empty, inf, diag, newaxis, var, asarray, zeros, zeros_like, \
@@ -276,7 +277,7 @@ def inferparam(obj, **kwargs):
             b[:, ichannel] = solve(h[ichannel, :].T.dot(h[ichannel, :]),
                                    h[ichannel, :].T.dot(y[:, ichannel] - mu.dot(a[:, ichannel])), sym_pos=True)
         else:
-            print('Undefined channel')
+            raise ValueError('Unsupported channel')
         obj['noise'] = var(y - eta, axis=0, ddof=0)  # MLE
 
     # normalize loading by latent and rescale latent
@@ -797,7 +798,7 @@ def postprocess(obj):
                 tmp = eyer - GtWG + GtWG.dot(
                     solve(eyer + GtWG, GtWG, sym_pos=True))  # A should be PD but numerically not
             except LinAlgError:
-                print('Singular matrix. Use least squares instead.')
+                warnings.warn('Singular matrix. Use least squares instead.')
                 tmp = eyer - GtWG + GtWG.dot(lstsq(eyer + GtWG, GtWG)[0])  # least squares
             eigval, eigvec = eigh(tmp)
             eigval.clip(0, PINF, out=eigval)  # remove negative eigenvalues
