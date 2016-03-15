@@ -34,10 +34,10 @@ def cv(y, a, b, sigma, omega, nfold):
         ytest = y[:, :, each_test]
 
         model, kwargs = vlgp.fit(ytrain, ['spike'] * ytrain.shape[-1], sigma, omega, rank=100,
-                                 a=a[:, each_train], b=b[:, each_train], adjhess=True, decay=0,
-                                 niter=50, tol=1e-5, verbose=True,
-                                 learn_sigma=False, learn_omega=False, nhyper=5,
-                                 learn_param=False, learn_posterior=True)
+                            a=a[:, each_train], b=b[:, each_train], adjhess=True, decay=0,
+                            niter=50, tol=1e-5, verbose=True,
+                            learn_sigma=False, learn_omega=False, nhyper=5,
+                            learn_param=False, learn_posterior=True)
 
         orth_mu = model['mu'].reshape((-1, nlatent)).dot(ua)
         yhat = [np.exp(orth_mu[:, :i + 1].dot(orth_a[:i + 1, each_test]) + eta_b[:, each_test]).reshape(ytest.shape) for
