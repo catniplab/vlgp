@@ -6,7 +6,7 @@ import matplotlib as mpl
 import matplotlib.pyplot as plt
 
 
-def dynplot(x, ncol=4, figsize=None):
+def dynamics(x, ncol=4, figsize=None):
     """Plot latent dynamics of trials into subplots
     Args:
         x: latent dynamics
@@ -42,7 +42,7 @@ def dynplot(x, ncol=4, figsize=None):
     plt.tight_layout()
 
 
-def rasterplot(spike, ncol=4, figsize=None, margin=0.1):
+def spike(spike, ncol=4, figsize=None, margin=0.1):
     """Raster plot of spike trains
     Args:
         spike: spike trains

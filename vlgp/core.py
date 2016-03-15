@@ -15,8 +15,7 @@ from sklearn.decomposition.factor_analysis import FactorAnalysis
 
 from .math import ichol_gauss, subspace, sexp
 from .util import add_constant, rotate, lagmat
-
-from vlgp.hyper import learngp
+from .hyper import learngp
 
 
 def elbo(obj):
