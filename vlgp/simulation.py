@@ -4,12 +4,10 @@ Gaussian process
 Spike train
 """
 import numpy as np
-from numpy import empty, empty_like
-from numpy import log2, ceil, fft, einsum
 from numpy.random import random, multivariate_normal
 from scipy import stats
 
-from vlgp.mathf import *
+from .math import sexp, identity
 
 
 def sqexp(t, omega):
@@ -23,7 +21,7 @@ def sqexp(t, omega):
         correlation
     """
 
-    return exp(- omega * t ** 2)
+    return np.exp(- omega * t ** 2)
 
 
 def spectral(f, omega):
@@ -37,7 +35,7 @@ def spectral(f, omega):
         power
     """
 
-    return 0.5 * exp(- 0.25 * f * f / omega) / sqrt(pi * omega)
+    return 0.5 * np.exp(- 0.25 * f * f / omega) / np.sqrt(np.pi * omega)
 
 
 def gp(omega, ntime, std, dt=1.0, seed=None):
@@ -58,19 +56,19 @@ def gp(omega, ntime, std, dt=1.0, seed=None):
     if seed is not None:
         np.random.seed(seed)
 
-    x = zeros((ntime, omega.shape[0]), dtype=float)
+    x = np.zeros((ntime, omega.shape[0]), dtype=float)
 
-    M = int(2 ** ceil(log2(ntime)))
+    M = int(2 ** np.ceil(np.log2(ntime)))
     T0 = M * dt
-    dw = 2 * pi / T0
-    wu = 2 * pi / dt
-    t = arange(0, T0, dt)
-    w = arange(0, wu, dw)
+    dw = 2 * np.pi / T0
+    wu = 2 * np.pi / dt
+    t = np.arange(0, T0, dt)
+    w = np.arange(0, wu, dw)
 
     for l in range(omega.shape[0]):
-        B = 2 * np.sqrt(spectral(w, omega[l]) * dw) * exp(1j * random(M) * 2 * pi)
+        B = 2 * np.sqrt(spectral(w, omega[l]) * dw) * np.exp(1j * random(M) * 2 * np.pi)
         B[0] = 0
-        x[:, l] = std * ntime * fft.ifft(B, ntime).real
+        x[:, l] = std * ntime * np.fft.ifft(B, ntime).real
 
     return x, t[:ntime]
 
@@ -98,13 +96,13 @@ def spikes(x, a, b, link=sexp, seed=None):
     _, N = a.shape
     lag = b.shape[0] - 1
 
-    y = empty((T, N), dtype=float)
-    h = zeros((N, T, b.shape[0]), dtype=float)
+    y = np.empty((T, N), dtype=float)
+    h = np.zeros((N, T, b.shape[0]), dtype=float)
     h[:, :, 0] = 1
-    rate = empty_like(y, dtype=float)
+    rate = np.empty_like(y, dtype=float)
 
     for t in range(T):
-        eta = x[t, :].dot(a) + einsum('ij, ji -> i', h[:, t, :], b)
+        eta = x[t, :].dot(a) + np.einsum('ij, ji -> i', h[:, t, :], b)
         rate[t, :] = link(eta)
         # truncate y to 1 if y > 1
         # equivalent to Bernoulli P(1) = (1 - e^-(lam_t))
@@ -145,14 +143,14 @@ def spike(x, a, b, link=sexp, seed=None):
     nchannel = a.shape[1]
     lag = b.shape[0] - 1
 
-    y = empty((ntrial, ntime, nchannel), dtype=float)
-    h = zeros((nchannel, ntrial, ntime, 1+lag), dtype=float)
+    y = np.empty((ntrial, ntime, nchannel), dtype=float)
+    h = np.zeros((nchannel, ntrial, ntime, 1+lag), dtype=float)
     h[:, :, :, 0] = 1
-    rate = empty_like(y, dtype=float)
+    rate = np.empty_like(y, dtype=float)
 
     for m in range(ntrial):
         for t in range(ntime):
-            eta = x[m, t, :].dot(a) + einsum('ij, ji -> i', h[:, m, t, :], b)
+            eta = x[m, t, :].dot(a) + np.einsum('ij, ji -> i', h[:, m, t, :], b)
             rate[m, t, :] = link(eta)
             # truncate y to 1 if y > 1
             # equivalent to Bernoulli P(1) = (1 - e^-(lam_t))
@@ -193,14 +191,14 @@ def lfp(x, a, b, K, link=identity, seed=None):
     nchannel = a.shape[1]
     lag = b.shape[0] - 1
 
-    y = empty((ntrial, ntime, nchannel), dtype=float)
-    h = zeros((nchannel, ntrial, ntime, 1+lag), dtype=float)
+    y = np.empty((ntrial, ntime, nchannel), dtype=float)
+    h = np.zeros((nchannel, ntrial, ntime, 1+lag), dtype=float)
     h[:, :, :, 0] = 1
-    mu = empty_like(y, dtype=float)
+    mu = np.empty_like(y, dtype=float)
 
     for m in range(ntrial):
         for t in range(ntime):
-            mu[m, t, :] = link(x[m, t, :].dot(a) + einsum('ij, ji -> i', h[:, m, t, :], b))
+            mu[m, t, :] = link(x[m, t, :].dot(a) + np.einsum('ij, ji -> i', h[:, m, t, :], b))
             y[m, t, :] = multivariate_normal(mu[m, t, :], K)
             if t + 1 < ntime and lag > 0:
                 h[:, m, t + 1, 2:] = h[:, m, t, 1:lag]  # roll rightward
@@ -237,14 +235,14 @@ def observation(x, a, b, dist=multivariate_normal, link=identity, seed=None, *ar
     nchannel = a.shape[1]
     lag = b.shape[0] - 1
 
-    y = empty((ntrial, ntime, nchannel), dtype=float)
-    h = zeros((nchannel, ntrial, ntime, 1+lag), dtype=float)
+    y = np.empty((ntrial, ntime, nchannel), dtype=float)
+    h = np.zeros((nchannel, ntrial, ntime, 1+lag), dtype=float)
     h[:, :, :, 0] = 1
-    mu = empty_like(y, dtype=float)
+    mu = np.empty_like(y, dtype=float)
 
     for m in range(ntrial):
         for t in range(ntime):
-            mu[m, t, :] = link(x[m, t, :].dot(a) + einsum('ij, ji -> i', h[:, m, t, :], b))
+            mu[m, t, :] = link(x[m, t, :].dot(a) + np.einsum('ij, ji -> i', h[:, m, t, :], b))
             y[m, t, :] = dist(mu[m, t, :], *args)
             if t + 1 < ntime and lag > 0:
                 h[:, m, t + 1, 2:] = h[:, m, t, 1:lag]  # roll rightward

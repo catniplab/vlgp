@@ -1,7 +1,7 @@
 """
 Tool functions
 """
-import sys
+import warnings
 
 import h5py
 import numpy as np
@@ -199,7 +199,7 @@ def save(obj, fname):
             try:
                 hf.create_dataset(k, data=v, compression="gzip")
             except TypeError:
-                print('Discard unsupported type ({})'.format(k), file=sys.stderr)
+                warnings.warn('Discard unsupported type ({})'.format(k))
 
 
 def load(fname):

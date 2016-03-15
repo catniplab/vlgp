@@ -1,5 +1,5 @@
 """
-This file contains the functions of hyperparameter optimization
+Hyperparameter optimization
 """
 from numpy import identity, arange, trace, dstack, diag
 from numpy.core.umath import exp, log, sqrt
@@ -9,8 +9,8 @@ from scipy.linalg import lstsq, solve, toeplitz
 from scipy.optimize import minimize_scalar
 
 
-def KLprime(theta, sigma, n, mu, M, S, eps=1e-6):
-    """Derivative of KL part of ELBO w.r.t. hyperparameter
+def klprime(theta, sigma, n, mu, M, S, eps=1e-6):
+    """Derivative of kl part of ELBO w.r.t. hyperparameter
     Args:
         theta: log of timescale
         sigma: variance
@@ -40,8 +40,8 @@ def KLprime(theta, sigma, n, mu, M, S, eps=1e-6):
     return grad / 2
 
 
-def KL(theta, sigma, n, mu, M, S, eps=1e-6):
-    """KL part of ELBO
+def kl(theta, sigma, n, mu, M, S, eps=1e-6):
+    """kl part of ELBO
     Args:
         theta: log of timescale
         sigma: variance
@@ -110,10 +110,10 @@ def learngp(obj, latents=None, **kwargs):
                     solve(C, S[:, :, iseg], sym_pos=True))
             sigma[ilatent] = sqrt(tmp / (window * nseg))
         # M = dstack([outer(win_mu[:, ilatent, iseg], win_mu[:, ilatent, iseg]) for iseg in range(nseg)])
-        # mini = minimize(KL, x0=log(omega[ilatent]), jac=KLprime, args=(sigma[ilatent], window, win_mu[:, ilatent, :],
+        # mini = minimize(kl, x0=log(omega[ilatent]), jac=klprime, args=(sigma[ilatent], window, win_mu[:, ilatent, :],
         # M, S, eps))
         if kwargs['learn_omega']:
-            mini = minimize_scalar(KL, bounds=(log(omega[ilatent] / of), log(omega[ilatent] * of)),
+            mini = minimize_scalar(kl, bounds=(log(omega[ilatent] / of), log(omega[ilatent] * of)),
                                    args=(obj['sigma'][ilatent], window, win_mu[:, ilatent, :], None, S, eps),
                                    method='bounded')
             omega[ilatent] = exp(mini.x)
