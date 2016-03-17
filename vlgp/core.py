@@ -762,7 +762,7 @@ def cv(y, channel, sigma, omega, a0=None, mu0=None, lag=0, rank=500, **kwargs):
                       'yhat': yhat[itrial, :][newaxis, ...],
                       'mu0': mu0[itrial, :][newaxis, ...] if mu0 is not None else None}
         itrain = arange(ntrial) != itrial
-        model = fit(y[itrain, :], channel, sigma, omega, x=None, a0=a0, mu0=mu0[itrain, :] if mu0 is not None else None,
+        model, _ = fit(y[itrain, :], channel, sigma, omega, x=None, a0=a0, mu0=mu0[itrain, :] if mu0 is not None else None,
                     alpha=None, beta=None,
                     lag=lag, rank=rank, **kwargs)
         kwargs['verbose'] = False

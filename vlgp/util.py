@@ -199,7 +199,8 @@ def save(obj, fname):
             try:
                 hf.create_dataset(k, data=v, compression="gzip")
             except TypeError:
-                warnings.warn('Discard unsupported type ({})'.format(k))
+                msg = 'Discard unsupported type ({})'.format(k)
+                warnings.warn(msg)
 
 
 def load(fname):

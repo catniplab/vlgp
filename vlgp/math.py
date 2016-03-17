@@ -72,7 +72,7 @@ def ichol_gauss(n, omega, r, tol=1e-6):
     pvec = np.arange(n, dtype=int)
     i = 0
     G = np.zeros((n, r), dtype=float)
-    while i < r and sum(diag[i:]) > tol * n:
+    while i < r and np.sum(diag[i:]) > tol * n:
         if i > 0:
             jast = diag[i:].argmax()
             jast += i
@@ -85,7 +85,7 @@ def ichol_gauss(n, omega, r, tol=1e-6):
         G[i, i] = np.sqrt(diag[jast])
         nextcol = np.exp(- omega * (x[pvec[i + 1:]] - x[pvec[i]]) ** 2)
         G[i + 1:, i] = (nextcol - G[i + 1:, :i].dot(G[i, :i].T)) / G[i, i]
-        diag[i + 1:] = 1 - sum((G[i + 1:, :i + 1]) ** 2, axis=1)
+        diag[i + 1:] = 1 - np.sum((G[i + 1:, :i + 1]) ** 2, axis=1)
 
         i += 1
     if i == r:
@@ -115,7 +115,7 @@ def ichol(a, tol=1e-6):
     pvec = np.arange(n, dtype=int)
     i = 0
     G = np.zeros((n, n), dtype=float)
-    while i < n and sum(diag[i:]) > tol:
+    while i < n and np.sum(diag[i:]) > tol:
         if i > 0:
             jast = diag[i:].argmax()
             jast += i
@@ -128,7 +128,7 @@ def ichol(a, tol=1e-6):
         G[i, i] = np.sqrt(diag[jast])
         nextcol = a[pvec[i + 1:], pvec[i]]
         G[i + 1:, i] = (nextcol - G[i + 1:, :i].dot(G[i, :i].T)) / G[i, i]
-        diag[i + 1:] = 1 - sum((G[i + 1:, :i + 1]) ** 2, axis=1)
+        diag[i + 1:] = 1 - np.sum((G[i + 1:, :i + 1]) ** 2, axis=1)
 
         i += 1
     return G[pvec.argsort(), :]
@@ -148,8 +148,8 @@ def subspace(a, b, deg=True):
     Returns:
         angle in radian
     """
-    oa = np.orth(a)
-    ob = np.orth(b)
+    oa = linalg.orth(a)
+    ob = linalg.orth(b)
     if oa.shape[1] < ob.shape[1]:
         oa, ob = ob.copy(), oa.copy()
     ob -= oa.dot(oa.T.dot(ob))
