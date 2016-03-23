@@ -2,8 +2,8 @@
 
 # Welcome
 
-This package is written by Yuan Zhao ([yuan.zhao@stonybrook.edu]). 
-This repository contains methods of variational Latent Gaussian Process model based on Yuan Zhao and Il Memming Park's ([memming.park@stonybrook.edu]) work.
+This package is written by Yuan Zhao ([yuan.zhao@stonybrook.edu](yuan.zhao@stonybrook.edu])). 
+This repository contains methods of variational Latent Gaussian Process model based on Yuan Zhao and Il Memming Park's ([memming.park@stonybrook.edu](memming.park@stonybrook.edu)) work.
 It has been developed and implemented with the goal of recovering dynamics from population spike trains. 
 
 ## Usage
