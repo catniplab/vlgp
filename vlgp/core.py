@@ -492,6 +492,16 @@ def fit(y, channel, sigma, omega, a=None, b=None, mu=None, x=None, alpha=None, b
         lag:     autoregressive lag
         rank:    prior covariance rank
         **kwargs: optional arguments controlling inference
+            niter: max number of iterations
+            tol: relative tolerance for checking convergence
+            adjhess: adjust Hessian by gradient
+            decay: decay speed for the adjustment to Hessian
+            verbose: display info in every iteration
+            learn_post: optimize the posterior
+            learn_param: optimize the parameters
+            learn_sigma: optimize prior variance
+            learn_omega: optimize prior timescale
+            nhyper: optimize hyperparameters every nhyper iteration
 
     Returns:
         inference object
