@@ -10,7 +10,9 @@ The code is written in Python 3. It needs further testing and is subject to chan
 
 ## Usage
 
-To get started, see the examples in notebook: ./tutorial.ipynb.
+To get started, see the examples in notebook: ./tutorial.ipynb. 
+There are 5 Lorenz simulations and 5 LDS simulations in './data' for the tutorial. The corresponding inference and cross-validation results are in './output'. 
+You may skip the code in tutorial and load them directly to save time.
 
 The default options controlling algorithm are recommended for the purpose of stability but not necessarily the optimal.
 If you encounter any numerical error (most likely singular matrix errors), try to change the prior and enable the Hessian adjustment.
