@@ -1,10 +1,14 @@
 """
 Cross validation
 """
+import sys
+import os.path as op
+
 import numpy as np
 import scipy.linalg as lin
 from scipy import stats
 
+sys.path.insert(0, op.abspath('..'))
 import vlgp
 from vlgp import util
 
