@@ -363,7 +363,8 @@ def infer(obj, fstat=None, **kwargs):
         for itrial in range(x.shape[0]):
             rotated[itrial, :] = rotate(add_constant(obj['mu'][itrial, :]), x[itrial, :])
         latent_angle[0] = subspace(rotated.reshape((-1, x.shape[-1])), x.reshape((-1, x.shape[-1])))
-        latent_corr[0] = np.diag(spearmanr(rotated.reshape((-1, x.shape[-1])), x.reshape((-1, x.shape[-1]))))
+        rho, _ = spearmanr(rotated.reshape((-1, x.shape[-1])), x.reshape((-1, x.shape[-1])))
+        latent_corr[0] = rho[np.arange(x.shape[-1]), np.arange(x.shape[-1]) + x.shape[-1]]
 
     #
     iiter = 1
@@ -390,7 +391,8 @@ def infer(obj, fstat=None, **kwargs):
             for itrial in range(x.shape[0]):
                 rotated[itrial, :] = rotate(add_constant(obj['mu'][itrial, :]), x[itrial, :])
             latent_angle[iiter] = subspace(rotated.reshape((-1, x.shape[-1])), x.reshape((-1, x.shape[-1])))
-            latent_corr[iiter] = np.diag(spearmanr(rotated.reshape((-1, x.shape[-1])), x.reshape((-1, x.shape[-1]))))
+            rho, _ = spearmanr(rotated.reshape((-1, x.shape[-1])), x.reshape((-1, x.shape[-1])))
+            latent_corr[iiter] = rho[np.arange(x.shape[-1]), np.arange(x.shape[-1]) + x.shape[-1]]
 
         # infer parameter
         param_tick = timeit.default_timer()
