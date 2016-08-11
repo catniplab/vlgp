@@ -10,6 +10,7 @@ from numpy import identity, einsum, trace, inner, empty, inf, diag, newaxis, var
 from numpy.core.umath import sqrt, PINF, log, exp
 from numpy.linalg import norm, slogdet, LinAlgError
 from scipy import stats
+from scipy.stats import spearmanr
 from scipy.linalg import lstsq, eigh, solve
 from sklearn.decomposition.factor_analysis import FactorAnalysis
 
@@ -345,6 +346,7 @@ def infer(obj, fstat=None, **kwargs):
     elapsed = zeros((kwargs['niter'], 3), dtype=float)
     loading_angle = zeros(kwargs['niter'], dtype=float)
     latent_angle = zeros(kwargs['niter'], dtype=float)
+    latent_corr =  zeros((kwargs['niter'], obj['mu'].shape[-1]), dtype=float)
     nlatent, ntime, rank = obj['chol'].shape
 
     x = obj.get('x')
@@ -361,6 +363,7 @@ def infer(obj, fstat=None, **kwargs):
         for itrial in range(x.shape[0]):
             rotated[itrial, :] = rotate(add_constant(obj['mu'][itrial, :]), x[itrial, :])
         latent_angle[0] = subspace(rotated.reshape((-1, x.shape[-1])), x.reshape((-1, x.shape[-1])))
+        latent_corr[0] = np.diag(spearmanr(rotated.reshape((-1, x.shape[-1])), x.reshape((-1, x.shape[-1]))))
 
     #
     iiter = 1
@@ -387,6 +390,7 @@ def infer(obj, fstat=None, **kwargs):
             for itrial in range(x.shape[0]):
                 rotated[itrial, :] = rotate(add_constant(obj['mu'][itrial, :]), x[itrial, :])
             latent_angle[iiter] = subspace(rotated.reshape((-1, x.shape[-1])), x.reshape((-1, x.shape[-1])))
+            latent_corr[iiter] = np.diag(spearmanr(rotated.reshape((-1, x.shape[-1])), x.reshape((-1, x.shape[-1]))))
 
         # infer parameter
         param_tick = timeit.default_timer()
@@ -470,6 +474,7 @@ def infer(obj, fstat=None, **kwargs):
     obj['Elapsed'] = elapsed[:iiter, :]
     obj['LoadingAngle'] = loading_angle[:iiter]
     obj['LatentAngle'] = latent_angle[:iiter]
+    obj['RankCorr'] = latent_corr[:iiter]
     obj['LL'] = ll[:iiter]
     obj['stat'] = stat
     return obj
