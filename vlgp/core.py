@@ -11,7 +11,7 @@ from numpy.core.umath import sqrt, PINF, log, exp
 from numpy.linalg import norm, slogdet, LinAlgError
 from scipy import stats
 from scipy.stats import spearmanr
-from scipy.linalg import lstsq, eigh, solve
+from scipy.linalg import lstsq, eigh, solve, svd
 from sklearn.decomposition.factor_analysis import FactorAnalysis
 
 from .math import ichol_gauss, subspace, sexp
@@ -165,7 +165,6 @@ def inferpost(obj, **kwargs):
             u = G.dot(G.T.dot(resid.dot(a[ilatent, :]))) - mu[:, ilatent]
             delta_mu = u - G.dot((wadj * G).T.dot(u)) + \
                        G.dot(GtWG.dot(solve(eyer + GtWG, (wadj * G).T.dot(u), sym_pos=True)))
-
             mu[:, ilatent] += learning_rate * delta_mu
             # mu[:, ilatent] -= mean(mu[:, ilatent])
             # scale = norm(mu[:, ilatent], ord=inf)
@@ -282,10 +281,13 @@ def inferparam(obj, **kwargs):
 
     # normalize loading by latent and rescale latent
     if kwargs['learn_post']:
-        scale = norm(a, ord=inf, axis=1)[..., newaxis]
-        a /= scale
-        mu *= scale.squeeze()  # compensate latent
-        obj['mu'] = mu.reshape(obj['mu'].shape)
+        # scale = norm(a, ord=inf, axis=1)[..., newaxis]
+        # a /= scale
+        # mu *= scale.squeeze()  # compensate latent
+        # obj['mu'] = mu.reshape(obj['mu'].shape)
+        U, s, Vh = svd(a, full_matrices=False)
+        a[:] = Vh
+        obj['mu'] = np.reshape(mu @ Vh @ Vh.T, obj['mu'].shape)
 
 
 def fill_default_args(**kwargs):
@@ -408,18 +410,19 @@ def infer(obj, fstat=None, **kwargs):
         lb[iiter], ll[iiter] = elbo(obj)
         converged = abs(lb[iiter] - lb[iiter - 1]) < kwargs['tol'] * abs(lb[iiter - 1])
         decreased = lb[iiter] < lb[iiter - 1]
-        stop = converged or decreased
+        # stop = converged or decreased
+        stop = converged
 
         if decreased:
             if kwargs['verbose']:
                 print('\nELBO decreased. Backtracking.')
-            copyto(obj['mu'], good_mu)
-            copyto(obj['w'], good_w)
-            copyto(obj['v'], good_v)
-            copyto(obj['a'], good_a)
-            copyto(obj['b'], good_b)
-            copyto(obj['noise'], good_noise)
-            lb[iiter] = lb[iiter - 1]
+            # copyto(obj['mu'], good_mu)
+            # copyto(obj['w'], good_w)
+            # copyto(obj['v'], good_v)
+            # copyto(obj['a'], good_a)
+            # copyto(obj['b'], good_b)
+            # copyto(obj['noise'], good_noise)
+            # lb[iiter] = lb[iiter - 1]
         else:
             copyto(good_mu, obj['mu'])
             copyto(good_w, obj['w'])
@@ -546,10 +549,13 @@ def fit(y, channel, sigma, omega, a=None, b=None, mu=None, x=None, alpha=None, b
         a = fa.components_
 
         # constrain loading and center latent
-        mu -= mu.mean(axis=0)
-        mu *= norm(a, ord=inf, axis=1)
-        a /= norm(a, ord=inf, axis=1)[..., newaxis]
-        mu = mu.reshape((ntrial, ntime, nlatent))
+        # mu -= mu.mean(axis=0)
+        # mu *= norm(a, ord=inf, axis=1)
+        # a /= norm(a, ord=inf, axis=1)[..., newaxis]
+        # mu = mu.reshape((ntrial, ntime, nlatent))
+        U, s, Vh = svd(a, full_matrices=False)
+        a[:] = Vh
+        mu = np.reshape(mu @ Vh @ Vh.T, (ntrial, ntime, nlatent))
     else:
         if a is not None:
             mu = lstsq(a.T, y.reshape((-1, nchannel)).T)[0].T.reshape((ntrial, ntime, nlatent))
