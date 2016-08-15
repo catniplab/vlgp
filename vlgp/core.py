@@ -318,6 +318,7 @@ def fill_default_args(**kwargs):
     kwargs['learning_rate'] = kwargs.get('learning_rate', 1.0)
     kwargs['MAP'] = kwargs.get('MAP', False)
     kwargs['post_prediction'] = kwargs.get('post_prediction', True)
+    kwargs['backtrack'] = kwargs.get('backtrack', True)
     return kwargs
 
 
@@ -415,14 +416,15 @@ def infer(obj, fstat=None, **kwargs):
 
         if decreased:
             if kwargs['verbose']:
-                print('\nELBO decreased. Backtracking.')
-            # copyto(obj['mu'], good_mu)
-            # copyto(obj['w'], good_w)
-            # copyto(obj['v'], good_v)
-            # copyto(obj['a'], good_a)
-            # copyto(obj['b'], good_b)
-            # copyto(obj['noise'], good_noise)
-            # lb[iiter] = lb[iiter - 1]
+                print('\nELBO decreased.')
+            if kwargs['backtrack']:
+                copyto(obj['mu'], good_mu)
+                copyto(obj['w'], good_w)
+                copyto(obj['v'], good_v)
+                copyto(obj['a'], good_a)
+                copyto(obj['b'], good_b)
+                copyto(obj['noise'], good_noise)
+                lb[iiter] = lb[iiter - 1]
         else:
             copyto(good_mu, obj['mu'])
             copyto(good_w, obj['w'])

@@ -7,7 +7,7 @@ import numpy as np
 from numpy.random import random, multivariate_normal
 from scipy import stats
 
-from .math import sexp, identity
+from .math import sexp, identity, ichol_gauss
 
 
 def sqexp(t, omega):
@@ -36,8 +36,11 @@ def spectral(f, omega):
     """
 
     return 0.5 * np.exp(- 0.25 * f * f / omega) / np.sqrt(np.pi * omega)
+    # return np.exp(- f * f / omega)
 
 
+# Do not use.
+# fixme
 def gp(omega, ntime, std, dt=1.0, seed=None):
     """Simulate SE Gaussian processes
 
@@ -68,9 +71,35 @@ def gp(omega, ntime, std, dt=1.0, seed=None):
     for l in range(omega.shape[0]):
         B = 2 * np.sqrt(spectral(w, omega[l]) * dw) * np.exp(1j * random(M) * 2 * np.pi)
         B[0] = 0
-        x[:, l] = std * ntime * np.fft.ifft(B, ntime).real
+        raw_x = np.fft.ifft(B, ntime).real
+        x[:, l] = std * raw_x / raw_x.std()
 
     return x, t[:ntime]
+
+
+def gaussproc(omega, nbin, std, r=None, tol=1e-6, seed=None):
+    """Simulate Gaussian processes by incomplete Choleksy factorization
+
+    Args:
+        omega: scale
+        nbin: # of time bins
+        std: standard deviation
+        r: rank of incomplete Cholesky
+        tol: numerical tolerance for incomplete Cholelsy
+        seed: random number seed
+
+    Returns:
+        x: simulation (nbin,)
+    """
+    if seed is not None:
+        np.random.seed(seed)
+    if r is None:
+        r = int(np.log(nbin))
+
+    G = ichol_gauss(nbin, omega, r, tol)
+    z = np.random.randn(r)
+    x = std * G @ z
+    return x
 
 
 def spikes(x, a, b, link=sexp, seed=None):
@@ -144,7 +173,7 @@ def spike(x, a, b, link=sexp, seed=None):
     lag = b.shape[0] - 1
 
     y = np.empty((ntrial, ntime, nchannel), dtype=float)
-    h = np.zeros((nchannel, ntrial, ntime, 1+lag), dtype=float)
+    h = np.zeros((nchannel, ntrial, ntime, 1 + lag), dtype=float)
     h[:, :, :, 0] = 1
     rate = np.empty_like(y, dtype=float)
 
@@ -192,7 +221,7 @@ def lfp(x, a, b, K, link=identity, seed=None):
     lag = b.shape[0] - 1
 
     y = np.empty((ntrial, ntime, nchannel), dtype=float)
-    h = np.zeros((nchannel, ntrial, ntime, 1+lag), dtype=float)
+    h = np.zeros((nchannel, ntrial, ntime, 1 + lag), dtype=float)
     h[:, :, :, 0] = 1
     mu = np.empty_like(y, dtype=float)
 
@@ -236,7 +265,7 @@ def observation(x, a, b, dist=multivariate_normal, link=identity, seed=None, *ar
     lag = b.shape[0] - 1
 
     y = np.empty((ntrial, ntime, nchannel), dtype=float)
-    h = np.zeros((nchannel, ntrial, ntime, 1+lag), dtype=float)
+    h = np.zeros((nchannel, ntrial, ntime, 1 + lag), dtype=float)
     h[:, :, :, 0] = 1
     mu = np.empty_like(y, dtype=float)
 
@@ -270,9 +299,9 @@ def lorenz(n, dt=0.01, s=10, r=28, b=2.667, x0=None, constraint=True):
     from numpy.linalg import norm
 
     def dlorenz(x, y, z):
-        x_dot = s*(y - x)
-        y_dot = r*x - y - x*z
-        z_dot = x*y - b*z
+        x_dot = s * (y - x)
+        y_dot = r * x - y - x * z
+        z_dot = x * y - b * z
         return x_dot, y_dot, z_dot
 
     xs = empty((n, 3), dtype=float)
