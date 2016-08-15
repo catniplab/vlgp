@@ -409,10 +409,7 @@ def infer(obj, fstat=None, **kwargs):
             loading_angle[iiter] = subspace(alpha.T, obj['a'].T)
 
         lb[iiter], ll[iiter] = elbo(obj)
-        converged = abs(lb[iiter] - lb[iiter - 1]) < kwargs['tol'] * abs(lb[iiter - 1])
         decreased = lb[iiter] < lb[iiter - 1]
-        # stop = converged or decreased
-        stop = converged
 
         if decreased:
             if kwargs['verbose']:
@@ -432,6 +429,10 @@ def infer(obj, fstat=None, **kwargs):
             copyto(good_a, obj['a'])
             copyto(good_b, obj['b'])
             copyto(good_noise, obj['noise'])
+
+        converged = abs(lb[iiter] - lb[iiter - 1]) < kwargs['tol'] * abs(lb[iiter - 1])
+        # stop = converged or decreased
+        stop = converged
 
         if iiter % kwargs['nhyper'] == 0 and (kwargs['learn_sigma'] or kwargs['learn_omega']):
             gp = learngp(obj, **kwargs)
