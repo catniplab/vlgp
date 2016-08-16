@@ -8,10 +8,12 @@ import numpy as np
 from numpy import identity, einsum, trace, inner, empty, inf, diag, newaxis, var, asarray, zeros, zeros_like, \
     empty_like, arange, sum, copyto, ones
 from numpy.core.umath import sqrt, PINF, log, exp
-from numpy.linalg import norm, slogdet, LinAlgError
+from numpy.linalg import norm, slogdet, LinAlgError, cond
 from scipy import stats
+from scipy.sparse import csc_matrix
+from scipy.sparse.linalg import spilu
 from scipy.stats import spearmanr
-from scipy.linalg import lstsq, eigh, solve, svd
+from scipy.linalg import lstsq, eigh, solve, svd, svdvals
 from sklearn.decomposition.factor_analysis import FactorAnalysis
 
 from .math import ichol_gauss, subspace, sexp
@@ -67,11 +69,14 @@ def elbo(obj):
             G = chol[l, :]
             GtWG = G.T.dot(w[:, l].reshape((ntime, 1)) * G)
             tmp = GtWG.dot(solve(eyer + GtWG, GtWG, sym_pos=True))  # expected to be nonsingular
-            G_mldiv_mu = lstsq(G, mu[:, l])[0]
+            # G_mldiv_mu = lstsq(G, mu[:, l])[0]
+            # mu_Kinv_mu = inner(G_mldiv_mu, G_mldiv_mu)
+            K = G @ G.T
+            mu_Kinv_mu = mu[:, l] @ spilu(csc_matrix(K)).solve(mu[:, l])
             tr = ntime - trace(GtWG) + trace(tmp)
             lndet = slogdet(eyer - GtWG + tmp)[1]
 
-            lb += -0.5 * inner(G_mldiv_mu, G_mldiv_mu) - 0.5 * tr + 0.5 * lndet + 0.5 * ntime
+            lb += -0.5 * mu_Kinv_mu - 0.5 * tr + 0.5 * lndet + 0.5 * ntime
 
     return lb, ll
 
@@ -127,7 +132,7 @@ def inferpost(obj, **kwargs):
     U = empty((ntime, nchannel), dtype=float)
 
     for itrial in range(ntrial):
-        # trial-wise
+        # trial slices
         y = obj['y'][itrial, :]
         h = obj['h'][:, itrial, :, :]
         mu = obj['mu'][itrial, :]
@@ -136,36 +141,53 @@ def inferpost(obj, **kwargs):
 
         # eta = mu.dot(a) + einsum('ijk, ki -> ji', h, b)  # (neuron, time, lag) . (lag, neuron)
         # lam = exp((eta + 0.5 * v.dot(a ** 2)).clip(MIN_EXP, MAX_EXP))
+        eta_b = einsum('ijk, ki -> ji', h, b)
         for ilatent in range(nlatent):
-            eta = mu.dot(a) + einsum('ijk, ki -> ji', h, b)  # (neuron, time, lag) . (lag, neuron)
+            eta = mu.dot(a) + eta_b  # (neuron, time, lag) . (lag, neuron)
             lam = sexp(eta + 0.5 * v.dot(a ** 2))
             G = chol[ilatent, :, :]
-
-            grad_mu = (y[:, spike] - lam[:, spike]).dot(a[ilatent, spike]) + \
-                      ((y[:, lfp] - eta[:, lfp]) /
-                       noise[lfp]).dot(a[ilatent, lfp]) - lstsq(G.T, lstsq(G, mu[:, ilatent])[0])[0]
-
-            dmu_acc[itrial, :, ilatent] = accumulate(dmu_acc[itrial, :, ilatent], grad_mu, decay)
-
-            if adjhess:
-                wadj = (w[:, [ilatent]] + sqrt(eps + dmu_acc[itrial, :, ilatent])[..., newaxis])  # adjusted Hessian
-            else:
-                wadj = w[:, [ilatent]]  # keep dimension
-            GtWG = G.T.dot(wadj * G)
-
-            # update temporal variance
-            # if not kwargs['MAP']:
-            #     GtWGv = G.T.dot(w[:, [ilatent]] * G)
-            #     v[:, ilatent] = (G * (G - G.dot(GtWGv) +
-            #                           G.dot(GtWGv.dot(solve(eyer + GtWGv, GtWGv, sym_pos=True))))).sum(axis=1)
 
             resid[:, spike] = y[:, spike] - lam[:, spike]  # residuals of Poisson observations
             resid[:, lfp] = (y[:, lfp] - eta[:, lfp]) / noise[lfp]  # residuals of Gaussian observations
 
-            u = G.dot(G.T.dot(resid.dot(a[ilatent, :]))) - mu[:, ilatent]
-            delta_mu = u - G.dot((wadj * G).T.dot(u)) + \
-                       G.dot(GtWG.dot(solve(eyer + GtWG, (wadj * G).T.dot(u), sym_pos=True)))
-            mu[:, ilatent] += learning_rate * delta_mu
+            grad_mu_resid = (y[:, spike] - lam[:, spike]) @ a[ilatent, spike] + \
+                            ((y[:, lfp] - eta[:, lfp]) / noise[lfp]) @ a[ilatent, lfp]
+            # inner loop
+            old_slice = mu[:, ilatent]
+            for _ in range(kwargs['inner_niter']):
+                grad_mu = grad_mu_resid - lstsq(G.T, lstsq(G, mu[:, ilatent])[0])[0]
+                K = G @ G.T
+                # grad_mu = grad_mu_resid - spilu(csc_matrix(K)).solve(mu[:, ilatent])
+                # s_max = cond(K)
+                # grad_mu = grad_mu_resid - solve(G @ G.T + s_max * identity(G.shape[0]), mu[:, ilatent], sym_pos=True) * s_max
+                dmu_acc[itrial, :, ilatent] = accumulate(dmu_acc[itrial, :, ilatent], grad_mu, decay)
+
+                if adjhess:
+                    wadj = (w[:, [ilatent]] + sqrt(eps + dmu_acc[itrial, :, ilatent])[..., newaxis])  # adjusted Hessian
+                else:
+                    wadj = w[:, [ilatent]]  # keep dimension
+                GtWG = G.T @ (wadj * G)
+
+                # update temporal variance
+                # if not kwargs['MAP']:
+                #     GtWGv = G.T.dot(w[:, [ilatent]] * G)
+                #     v[:, ilatent] = (G * (G - G.dot(GtWGv) +
+                #                           G.dot(GtWGv.dot(solve(eyer + GtWGv, GtWGv, sym_pos=True))))).sum(axis=1)
+
+                u = G.dot(G.T.dot(resid.dot(a[ilatent, :]))) - mu[:, ilatent]
+                delta_mu = u - G.dot((wadj * G).T.dot(u)) + \
+                           G.dot(GtWG.dot(solve(eyer + GtWG, (wadj * G).T.dot(u), sym_pos=True)))
+
+                # dmu_acc[itrial, :, ilatent] = accumulate(dmu_acc[itrial, :, ilatent], delta_mu, decay)
+
+                new_slice = old_slice + learning_rate * delta_mu
+
+                if np.allclose(old_slice, new_slice):
+                    break
+
+                old_slice = new_slice
+            mu[:, ilatent] = old_slice
+            # mu[:, ilatent] += learning_rate * delta_mu
             # mu[:, ilatent] -= mean(mu[:, ilatent])
             # scale = norm(mu[:, ilatent], ord=inf)
             # mu[:, ilatent] /= scale
@@ -228,42 +250,56 @@ def inferparam(obj, **kwargs):
             # loading
             va = v * a[:, ichannel]  # (ntime, nlatent)
             wv = diag(lam[:, ichannel].dot(v))
-            grad_a = mu.T.dot(y[:, ichannel]) - (mu + va).T.dot(lam[:, ichannel])
-            # grad_a = mu.T.dot(y[:, train] - lam[:, train])
-            da_acc[:, ichannel] = accumulate(da_acc[:, ichannel], grad_a, decay)
 
-            if kwargs['param_opt'] == 'GA':
-                delta_a = grad_a / sqrt(eps + da_acc[:, ichannel])
-            else:
-                neghess_a = (mu + va).T.dot(lam[:, ichannel, newaxis] * (mu + va)) + wv
-                # neghess_a = mu.T.dot(lam[:, train, newaxis] * mu)
+            # inner loop
+            old_slice = a[:, ichannel]
+            for _ in range(kwargs['inner_niter']):
+                grad_a = mu.T.dot(y[:, ichannel]) - (mu + va).T.dot(lam[:, ichannel])
+                # grad_a = mu.T.dot(y[:, train] - lam[:, train])
+                da_acc[:, ichannel] = accumulate(da_acc[:, ichannel], grad_a, decay)
 
-                if adjhess:
-                    delta_a = solve(neghess_a + diag(sqrt(eps + da_acc[:, ichannel])), grad_a, sym_pos=True)
+                if kwargs['param_opt'] == 'GA':
+                    delta_a = grad_a / sqrt(eps + da_acc[:, ichannel])
                 else:
-                    try:
-                        delta_a = solve(neghess_a, grad_a, sym_pos=True)
-                    except LinAlgError:
-                        delta_a = .0
-            a[:, ichannel] += learning_rate * delta_a
+                    neghess_a = (mu + va).T.dot(lam[:, ichannel, newaxis] * (mu + va)) + wv
+                    # neghess_a = mu.T.dot(lam[:, train, newaxis] * mu)
+
+                    if adjhess:
+                        delta_a = solve(neghess_a + diag(sqrt(eps + da_acc[:, ichannel])), grad_a, sym_pos=True)
+                    else:
+                        try:
+                            delta_a = solve(neghess_a, grad_a, sym_pos=True)
+                        except LinAlgError:
+                            delta_a = .0
+                new_slice = old_slice + learning_rate * delta_a
+                if np.allclose(old_slice, new_slice):
+                    break
+                old_slice = new_slice
+            a[:, ichannel] = old_slice
 
             # bias
-            grad_b = h[ichannel, :].T.dot(y[:, ichannel] - lam[:, ichannel])
-            db_acc[:, ichannel] = accumulate(db_acc[:, ichannel], grad_b, decay)
-            if kwargs['param_opt'] == 'GA':
-                delta_b = grad_b / sqrt(eps + db_acc[:, ichannel])
-            else:
-                neghess_b = h[ichannel, :].T.dot(lam[:, ichannel, newaxis] * h[ichannel, :])
-                # TODO: inactive neurons never fire across all trials which may cause zero Hessian
-                if adjhess:
-                    delta_b = solve(neghess_b + diag(sqrt(eps + db_acc[:, ichannel])), grad_b, sym_pos=True)
+            old_slice = a[:, ichannel]
+            for _ in range(kwargs['inner_niter']):
+                grad_b = h[ichannel, :].T.dot(y[:, ichannel] - lam[:, ichannel])
+                db_acc[:, ichannel] = accumulate(db_acc[:, ichannel], grad_b, decay)
+                if kwargs['param_opt'] == 'GA':
+                    delta_b = grad_b / sqrt(eps + db_acc[:, ichannel])
                 else:
-                    try:
-                        delta_b = solve(neghess_b, grad_b, sym_pos=True)
-                    except LinAlgError:
-                        delta_b = .0
+                    neghess_b = h[ichannel, :].T.dot(lam[:, ichannel, newaxis] * h[ichannel, :])
+                    # TODO: inactive neurons never fire across all trials which may cause zero Hessian
+                    if adjhess:
+                        delta_b = solve(neghess_b + diag(sqrt(eps + db_acc[:, ichannel])), grad_b, sym_pos=True)
+                    else:
+                        try:
+                            delta_b = solve(neghess_b, grad_b, sym_pos=True)
+                        except LinAlgError:
+                            delta_b = .0
 
-            b[:, ichannel] += learning_rate * delta_b
+                new_slice = old_slice + learning_rate * delta_b
+                if np.allclose(old_slice, new_slice):
+                    break
+                old_slice = new_slice
+            b[:, ichannel] = old_slice
         elif channel[ichannel] == 'lfp':
             # a's least squares solution for Gaussian channel
             # (m'm + diag(j'v))^-1 m'(y - Hb)
@@ -281,13 +317,13 @@ def inferparam(obj, **kwargs):
 
     # normalize loading by latent and rescale latent
     if kwargs['learn_post']:
-        # scale = norm(a, ord=inf, axis=1)[..., newaxis]
-        # a /= scale
-        # mu *= scale.squeeze()  # compensate latent
-        # obj['mu'] = mu.reshape(obj['mu'].shape)
-        U, s, Vh = svd(a, full_matrices=False)
-        a[:] = Vh
-        obj['mu'] = np.reshape(mu @ Vh @ Vh.T, obj['mu'].shape)
+        scale = norm(a, ord=inf, axis=1)[..., newaxis]
+        a /= scale
+        mu *= scale.squeeze()  # compensate latent
+        obj['mu'] = mu.reshape(obj['mu'].shape)
+        # U, s, Vh = svd(a, full_matrices=False)
+        # a[:] = Vh
+        # obj['mu'] = np.reshape(mu @ Vh @ Vh.T, obj['mu'].shape)
 
 
 def fill_default_args(**kwargs):
@@ -349,7 +385,7 @@ def infer(obj, fstat=None, **kwargs):
     elapsed = zeros((kwargs['niter'], 3), dtype=float)
     loading_angle = zeros(kwargs['niter'], dtype=float)
     latent_angle = zeros(kwargs['niter'], dtype=float)
-    latent_corr =  zeros((kwargs['niter'], obj['mu'].shape[-1]), dtype=float)
+    latent_corr = zeros((kwargs['niter'], obj['mu'].shape[-1]), dtype=float)
     nlatent, ntime, rank = obj['chol'].shape
 
     x = obj.get('x')
@@ -381,6 +417,8 @@ def infer(obj, fstat=None, **kwargs):
     while not stop and iiter < kwargs['niter']:
         iter_tick = timeit.default_timer()
 
+        # kwargs['learning_rate'] = 2 / (1 + 1.002 ** (iiter - 1))
+
         # infer posterior
         post_tick = timeit.default_timer()
         if kwargs['learn_post']:
@@ -408,8 +446,11 @@ def infer(obj, fstat=None, **kwargs):
         if alpha is not None:
             loading_angle[iiter] = subspace(alpha.T, obj['a'].T)
 
-        lb[iiter], ll[iiter] = elbo(obj)
+        # lb[iiter], ll[iiter] = elbo(obj)
+        lb[iiter], ll[iiter] = 0, 0
         decreased = lb[iiter] < lb[iiter - 1]
+        # converged = np.allclose(obj['mu'], good_mu)
+        converged = np.allclose(obj['mu'], good_mu)
 
         if decreased:
             if kwargs['verbose']:
@@ -430,7 +471,7 @@ def infer(obj, fstat=None, **kwargs):
             copyto(good_b, obj['b'])
             copyto(good_noise, obj['noise'])
 
-        converged = abs(lb[iiter] - lb[iiter - 1]) < kwargs['tol'] * abs(lb[iiter - 1])
+        converged = converged  # or abs(lb[iiter] - lb[iiter - 1]) < kwargs['tol'] * abs(lb[iiter - 1])
         # stop = converged or decreased
         stop = converged
 
@@ -464,7 +505,7 @@ def infer(obj, fstat=None, **kwargs):
         stat[iiter]['omega'] = good_omega
 
         # TODO: change stat to OrderedDict
-        if kwargs['verbose']:
+        if kwargs['verbose'] and iiter % 10 == 0:
             print('\n[{}]'.format(iiter))
             for k in sorted(stat[iiter]):
                 print('{}: {}'.format(k, stat[iiter][k]))
@@ -552,13 +593,13 @@ def fit(y, channel, sigma, omega, a=None, b=None, mu=None, x=None, alpha=None, b
         a = fa.components_
 
         # constrain loading and center latent
-        # mu -= mu.mean(axis=0)
-        # mu *= norm(a, ord=inf, axis=1)
-        # a /= norm(a, ord=inf, axis=1)[..., newaxis]
-        # mu = mu.reshape((ntrial, ntime, nlatent))
-        U, s, Vh = svd(a, full_matrices=False)
-        a[:] = Vh
-        mu = np.reshape(mu @ Vh @ Vh.T, (ntrial, ntime, nlatent))
+        mu -= mu.mean(axis=0)
+        mu *= norm(a, ord=inf, axis=1)
+        a /= norm(a, ord=inf, axis=1)[..., newaxis]
+        mu = mu.reshape((ntrial, ntime, nlatent))
+        # U, s, Vh = svd(a, full_matrices=False)
+        # a[:] = Vh
+        # mu = np.reshape(mu @ Vh @ Vh.T, (ntrial, ntime, nlatent))
     else:
         if a is not None:
             mu = lstsq(a.T, y.reshape((-1, nchannel)).T)[0].T.reshape((ntrial, ntime, nlatent))
@@ -736,7 +777,8 @@ def leave_one_out(trial, model, **kwargs):
             b[:, ichannel])
         if channel[ichannel] == 'spike':
             if kwargs['post_prediction']:
-                yhat[:, :, ichannel] = exp(eta + 0.5 * obj['v'].reshape((-1, nlatent)).dot(a[:, ichannel] ** 2)).reshape(
+                yhat[:, :, ichannel] = exp(
+                    eta + 0.5 * obj['v'].reshape((-1, nlatent)).dot(a[:, ichannel] ** 2)).reshape(
                     (yhat.shape[0], yhat.shape[1]))
             else:
                 yhat[:, :, ichannel] = exp(eta).reshape((yhat.shape[0], yhat.shape[1]))
@@ -787,9 +829,10 @@ def cv(y, channel, sigma, omega, a0=None, mu0=None, lag=0, rank=500, **kwargs):
                       'yhat': yhat[itrial, :][newaxis, ...],
                       'mu0': mu0[itrial, :][newaxis, ...] if mu0 is not None else None}
         itrain = arange(ntrial) != itrial
-        model, _ = fit(y[itrain, :], channel, sigma, omega, x=None, a0=a0, mu0=mu0[itrain, :] if mu0 is not None else None,
-                    alpha=None, beta=None,
-                    lag=lag, rank=rank, **kwargs)
+        model, _ = fit(y[itrain, :], channel, sigma, omega, x=None, a0=a0,
+                       mu0=mu0[itrain, :] if mu0 is not None else None,
+                       alpha=None, beta=None,
+                       lag=lag, rank=rank, **kwargs)
         kwargs['verbose'] = False
         kwargs['dmu_acc'] = zeros_like(model['mu'])
         kwargs['da_acc'] = zeros_like(model['a'])
