@@ -184,8 +184,8 @@ def inferpost(obj, **kwargs):
 
                 if np.allclose(old_slice, new_slice):
                     break
-
                 old_slice = new_slice
+
             mu[:, ilatent] = old_slice
             # mu[:, ilatent] += learning_rate * delta_mu
             # mu[:, ilatent] -= mean(mu[:, ilatent])
@@ -294,6 +294,7 @@ def inferparam(obj, **kwargs):
                             delta_b = solve(neghess_b, grad_b, sym_pos=True)
                         except LinAlgError:
                             delta_b = .0
+
                 new_slice = old_slice + learning_rate * delta_b
                 if np.allclose(old_slice, new_slice):
                     break
@@ -354,6 +355,7 @@ def fill_default_args(**kwargs):
     kwargs['MAP'] = kwargs.get('MAP', False)
     kwargs['post_prediction'] = kwargs.get('post_prediction', True)
     kwargs['backtrack'] = kwargs.get('backtrack', True)
+    kwargs['inner_niter'] = kwargs.get('inner_niter', 1)
     return kwargs
 
 
@@ -470,7 +472,7 @@ def infer(obj, fstat=None, **kwargs):
             copyto(good_b, obj['b'])
             copyto(good_noise, obj['noise'])
 
-        converged = converged  # or abs(lb[iiter] - lb[iiter - 1]) < kwargs['tol'] * abs(lb[iiter - 1])
+        # converged = converged  # or abs(lb[iiter] - lb[iiter - 1]) < kwargs['tol'] * abs(lb[iiter - 1])
         # stop = converged or decreased
         stop = converged
 
