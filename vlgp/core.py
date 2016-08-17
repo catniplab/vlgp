@@ -278,7 +278,7 @@ def inferparam(obj, **kwargs):
             a[:, ichannel] = old_slice
 
             # bias
-            old_slice = a[:, ichannel]
+            old_slice = b[:, ichannel]
             for _ in range(kwargs['inner_niter']):
                 grad_b = h[ichannel, :].T.dot(y[:, ichannel] - lam[:, ichannel])
                 db_acc[:, ichannel] = accumulate(db_acc[:, ichannel], grad_b, decay)
@@ -294,7 +294,6 @@ def inferparam(obj, **kwargs):
                             delta_b = solve(neghess_b, grad_b, sym_pos=True)
                         except LinAlgError:
                             delta_b = .0
-
                 new_slice = old_slice + learning_rate * delta_b
                 if np.allclose(old_slice, new_slice):
                     break
