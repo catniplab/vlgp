@@ -266,8 +266,8 @@ def inferparam(obj, **kwargs):
                             delta_a = solve(neghess_a, grad_a, sym_pos=True)
                         except LinAlgError:
                             delta_a = .0
-                # if kwargs['Adam']:
-                #     delta_a = optimizer_a.update(delta_a)
+                if kwargs['Adam']:
+                    delta_a = optimizer_a.update(delta_a)
                 new_slice = old_slice + learning_rate * delta_a
                 if np.allclose(old_slice, new_slice):
                     break
@@ -291,8 +291,8 @@ def inferparam(obj, **kwargs):
                             delta_b = solve(neghess_b, grad_b, sym_pos=True)
                         except LinAlgError:
                             delta_b = .0
-                # if kwargs['Adam']:
-                #     delta_b = optimizer_b.update(delta_b)
+                if kwargs['Adam']:
+                    delta_b = optimizer_b.update(delta_b)
                 new_slice = old_slice + learning_rate * delta_b
                 if np.allclose(old_slice, new_slice):
                     break
@@ -608,9 +608,9 @@ def fit(y, channel, sigma, omega, a=None, b=None, mu=None, x=None, alpha=None, b
         a[:] = Vh
         mu = np.reshape(mu @ Vh @ Vh.T, (ntrial, ntime, nlatent))
     else:
-        if a is not None:
+        if mu is None:
             mu = lstsq(a.T, y.reshape((-1, nchannel)).T)[0].T.reshape((ntrial, ntime, nlatent))
-        elif mu is not None:
+        elif a is None:
             a = lstsq(mu.reshape((-1, nlatent)), y.reshape((-1, nchannel)))[0]
 
     # initialize square root of posterior covariance
