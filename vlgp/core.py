@@ -19,6 +19,7 @@ from sklearn.decomposition.factor_analysis import FactorAnalysis
 from .math import ichol_gauss, subspace, sexp
 from .util import add_constant, rotate, lagmat
 from .hyper import learngp
+from .optimizer import Optimizer, AdamOptimizer
 
 
 def elbo(obj):
@@ -69,10 +70,10 @@ def elbo(obj):
             G = chol[l, :]
             GtWG = G.T.dot(w[:, l].reshape((ntime, 1)) * G)
             tmp = GtWG.dot(solve(eyer + GtWG, GtWG, sym_pos=True))  # expected to be nonsingular
-            # G_mldiv_mu = lstsq(G, mu[:, l])[0]
-            # mu_Kinv_mu = inner(G_mldiv_mu, G_mldiv_mu)
-            K = G @ G.T
-            mu_Kinv_mu = mu[:, l] @ spilu(csc_matrix(K)).solve(mu[:, l])
+            G_mldiv_mu = lstsq(G, mu[:, l])[0]
+            mu_Kinv_mu = inner(G_mldiv_mu, G_mldiv_mu)
+            # K = G @ G.T
+            # mu_Kinv_mu = mu[:, l] @ spilu(csc_matrix(K)).solve(mu[:, l])
             tr = ntime - trace(GtWG) + trace(tmp)
             lndet = slogdet(eyer - GtWG + tmp)[1]
 
@@ -153,6 +154,7 @@ def inferpost(obj, **kwargs):
             grad_mu_resid = (y[:, spike] - lam[:, spike]) @ a[ilatent, spike] + \
                             ((y[:, lfp] - eta[:, lfp]) / noise[lfp]) @ a[ilatent, lfp]
             # inner loop
+            optimizer = kwargs['optimizer_mu'][itrial, ilatent]
             old_slice = mu[:, ilatent]
             for _ in range(kwargs['inner_niter']):
                 grad_mu = grad_mu_resid - lstsq(G.T, lstsq(G, old_slice)[0])[0]
@@ -168,18 +170,12 @@ def inferpost(obj, **kwargs):
                     wadj = w[:, [ilatent]]  # keep dimension
                 GtWG = G.T @ (wadj * G)
 
-                # update temporal variance
-                # if not kwargs['MAP']:
-                #     GtWGv = G.T.dot(w[:, [ilatent]] * G)
-                #     v[:, ilatent] = (G * (G - G.dot(GtWGv) +
-                #                           G.dot(GtWGv.dot(solve(eyer + GtWGv, GtWGv, sym_pos=True))))).sum(axis=1)
+                u = G @ (G.T @ (resid @ a[ilatent, :])) - old_slice
+                delta_mu = u - G @ ((wadj * G).T @ u) + \
+                           G @ (GtWG @ solve(eyer + GtWG, (wadj * G).T @ u, sym_pos=True))
 
-                u = G.dot(G.T.dot(resid.dot(a[ilatent, :]))) - old_slice
-                delta_mu = u - G.dot((wadj * G).T.dot(u)) + \
-                           G.dot(GtWG.dot(solve(eyer + GtWG, (wadj * G).T.dot(u), sym_pos=True)))
-
-                # dmu_acc[itrial, :, ilatent] = accumulate(dmu_acc[itrial, :, ilatent], delta_mu, decay)
-
+                if kwargs['Adam']:
+                    delta_mu = optimizer.update(delta_mu)
                 new_slice = old_slice + learning_rate * delta_mu
 
                 if np.allclose(old_slice, new_slice):
@@ -187,17 +183,13 @@ def inferpost(obj, **kwargs):
                 old_slice = new_slice
 
             mu[:, ilatent] = old_slice
-            # mu[:, ilatent] += learning_rate * delta_mu
-            # mu[:, ilatent] -= mean(mu[:, ilatent])
-            # scale = norm(mu[:, ilatent], ord=inf)
-            # mu[:, ilatent] /= scale
 
             # center over all trials if not only infer posterior
             if kwargs['learn_param']:
                 shape = obj['mu'].shape
                 mu_over_trials = obj['mu'].reshape((-1, nlatent))
                 mean_over_trials = mu_over_trials.mean(axis=0)
-                obj['b'][0, :] += mean_over_trials.dot(obj['a'])  # compensate bias
+                obj['b'][0, :] += mean_over_trials @ obj['a']  # compensate bias
                 mu_over_trials -= mean_over_trials
                 obj['mu'] = mu_over_trials.reshape(shape)
 
@@ -205,7 +197,7 @@ def inferpost(obj, **kwargs):
         lam = sexp(eta + 0.5 * v.dot(a ** 2))
         U[:, spike] = lam[:, spike]
         U[:, lfp] = 1 / noise[lfp]
-        w[:] = U.dot(a.T ** 2)
+        w[:] = U @ (a.T ** 2)
         if not kwargs['MAP']:
             for ilatent in range(nlatent):
                 G = chol[ilatent, :, :]
@@ -244,6 +236,9 @@ def inferparam(obj, **kwargs):
     learning_rate = kwargs['learning_rate']
 
     for ichannel in range(nchannel):
+        optimizer_a = kwargs['optimizer_a'][ichannel]
+        optimizer_b = kwargs['optimizer_b'][ichannel]
+
         eta = mu.dot(a) + einsum('ijk, ki -> ji', h, b)
         lam = sexp(eta + 0.5 * v.dot(a ** 2))
         if channel[ichannel] == 'spike':
@@ -271,6 +266,8 @@ def inferparam(obj, **kwargs):
                             delta_a = solve(neghess_a, grad_a, sym_pos=True)
                         except LinAlgError:
                             delta_a = .0
+                # if kwargs['Adam']:
+                #     delta_a = optimizer_a.update(delta_a)
                 new_slice = old_slice + learning_rate * delta_a
                 if np.allclose(old_slice, new_slice):
                     break
@@ -294,7 +291,8 @@ def inferparam(obj, **kwargs):
                             delta_b = solve(neghess_b, grad_b, sym_pos=True)
                         except LinAlgError:
                             delta_b = .0
-
+                # if kwargs['Adam']:
+                #     delta_b = optimizer_b.update(delta_b)
                 new_slice = old_slice + learning_rate * delta_b
                 if np.allclose(old_slice, new_slice):
                     break
@@ -317,13 +315,13 @@ def inferparam(obj, **kwargs):
 
     # normalize loading by latent and rescale latent
     if kwargs['learn_post']:
-        scale = norm(a, ord=inf, axis=1)[..., newaxis]
-        a /= scale
-        mu *= scale.squeeze()  # compensate latent
-        obj['mu'] = mu.reshape(obj['mu'].shape)
-        # U, s, Vh = svd(a, full_matrices=False)
-        # a[:] = Vh
-        # obj['mu'] = np.reshape(mu @ Vh @ Vh.T, obj['mu'].shape)
+        # scale = norm(a, ord=inf, axis=1)[..., newaxis]
+        # a /= scale
+        # mu *= scale.squeeze()  # compensate latent
+        # obj['mu'] = mu.reshape(obj['mu'].shape)
+        U, s, Vh = svd(a, full_matrices=False)
+        a[:] = Vh
+        obj['mu'] = np.reshape(mu @ Vh @ Vh.T, obj['mu'].shape)
 
 
 def fill_default_args(**kwargs):
@@ -424,7 +422,7 @@ def infer(obj, fstat=None, **kwargs):
         post_tick = timeit.default_timer()
         if kwargs['learn_post']:
             inferpost(obj, **kwargs)
-        elbo(obj)
+        # elbo(obj)
         post_tock = timeit.default_timer()
         elapsed[iiter, 0] = post_tock - post_tick
 
@@ -447,15 +445,15 @@ def infer(obj, fstat=None, **kwargs):
         if alpha is not None:
             loading_angle[iiter] = subspace(alpha.T, obj['a'].T)
 
-        # lb[iiter], ll[iiter] = elbo(obj)
-        lb[iiter], ll[iiter] = 0, 0
+        lb[iiter], ll[iiter] = elbo(obj)
+        # lb[iiter], ll[iiter] = 0, 0
         decreased = lb[iiter] < lb[iiter - 1]
         # converged = np.allclose(obj['mu'], good_mu)
         converged = np.allclose(obj['mu'], good_mu)
 
         if decreased:
-            if kwargs['verbose']:
-                print('\nELBO decreased.')
+            # if kwargs['verbose']:
+            #     print('\nELBO decreased.')
             if kwargs['backtrack']:
                 copyto(obj['mu'], good_mu)
                 copyto(obj['w'], good_w)
@@ -464,6 +462,13 @@ def infer(obj, fstat=None, **kwargs):
                 copyto(obj['b'], good_b)
                 copyto(obj['noise'], good_noise)
                 lb[iiter] = lb[iiter - 1]
+            else:
+                copyto(good_mu, obj['mu'])
+                copyto(good_w, obj['w'])
+                copyto(good_v, obj['v'])
+                copyto(good_a, obj['a'])
+                copyto(good_b, obj['b'])
+                copyto(good_noise, obj['noise'])
         else:
             copyto(good_mu, obj['mu'])
             copyto(good_w, obj['w'])
@@ -506,7 +511,7 @@ def infer(obj, fstat=None, **kwargs):
         stat[iiter]['omega'] = good_omega
 
         # TODO: change stat to OrderedDict
-        if kwargs['verbose'] and iiter % 10 == 0:
+        if kwargs['verbose'] and iiter % 50 == 0:
             print('\n[{}]'.format(iiter))
             for k in sorted(stat[iiter]):
                 print('{}: {}'.format(k, stat[iiter][k]))
@@ -594,13 +599,14 @@ def fit(y, channel, sigma, omega, a=None, b=None, mu=None, x=None, alpha=None, b
         a = fa.components_
 
         # constrain loading and center latent
-        mu -= mu.mean(axis=0)
-        mu *= norm(a, ord=inf, axis=1)
-        a /= norm(a, ord=inf, axis=1)[..., newaxis]
-        mu = mu.reshape((ntrial, ntime, nlatent))
-        # U, s, Vh = svd(a, full_matrices=False)
-        # a[:] = Vh
-        # mu = np.reshape(mu @ Vh @ Vh.T, (ntrial, ntime, nlatent))
+        # mu -= mu.mean(axis=0)
+        # mu *= norm(a, ord=inf, axis=1)
+        # a /= norm(a, ord=inf, axis=1)[..., newaxis]
+        # mu = mu.reshape((ntrial, ntime, nlatent))
+        # print(np.any(np.isnan(a)))
+        U, s, Vh = svd(a, full_matrices=False)
+        a[:] = Vh
+        mu = np.reshape(mu @ Vh @ Vh.T, (ntrial, ntime, nlatent))
     else:
         if a is not None:
             mu = lstsq(a.T, y.reshape((-1, nchannel)).T)[0].T.reshape((ntrial, ntime, nlatent))
@@ -633,6 +639,17 @@ def fit(y, channel, sigma, omega, a=None, b=None, mu=None, x=None, alpha=None, b
     kwargs['dmu_acc'] = zeros_like(mu)
     kwargs['da_acc'] = zeros_like(a)
     kwargs['db_acc'] = zeros_like(b)
+
+    kwargs['optimizer_mu'] = empty((ntrial, nlatent), dtype=object)
+    kwargs['optimizer_a'] = empty(nchannel, dtype=object)
+    kwargs['optimizer_b'] = empty(nchannel, dtype=object)
+
+    for each in np.nditer(kwargs['optimizer_mu'], flags=['refs_ok'], op_flags=['readwrite']):
+        each[...] = AdamOptimizer(ntime)
+    for each in np.nditer(kwargs['optimizer_a'], flags=['refs_ok'], op_flags=['readwrite']):
+        each[...] = AdamOptimizer(nlatent)
+    for each in np.nditer(kwargs['optimizer_b'], flags=['refs_ok'], op_flags=['readwrite']):
+        each[...] = AdamOptimizer(b.shape[0])
 
     inference = postprocess(infer(obj, **kwargs))
     return inference, kwargs

@@ -8,7 +8,7 @@ from scipy import linalg
 
 
 MIN_EXP = -20
-MAX_EXP = 20
+MAX_EXP = 10
 
 
 def rectlin(x):
