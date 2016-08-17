@@ -155,8 +155,8 @@ def inferpost(obj, **kwargs):
             # inner loop
             old_slice = mu[:, ilatent]
             for _ in range(kwargs['inner_niter']):
-                grad_mu = grad_mu_resid - lstsq(G.T, lstsq(G, mu[:, ilatent])[0])[0]
-                K = G @ G.T
+                grad_mu = grad_mu_resid - lstsq(G.T, lstsq(G, old_slice)[0])[0]
+                # K = G @ G.T
                 # grad_mu = grad_mu_resid - spilu(csc_matrix(K)).solve(mu[:, ilatent])
                 # s_max = cond(K)
                 # grad_mu = grad_mu_resid - solve(G @ G.T + s_max * identity(G.shape[0]), mu[:, ilatent], sym_pos=True) * s_max
@@ -174,7 +174,7 @@ def inferpost(obj, **kwargs):
                 #     v[:, ilatent] = (G * (G - G.dot(GtWGv) +
                 #                           G.dot(GtWGv.dot(solve(eyer + GtWGv, GtWGv, sym_pos=True))))).sum(axis=1)
 
-                u = G.dot(G.T.dot(resid.dot(a[ilatent, :]))) - mu[:, ilatent]
+                u = G.dot(G.T.dot(resid.dot(a[ilatent, :]))) - old_slice
                 delta_mu = u - G.dot((wadj * G).T.dot(u)) + \
                            G.dot(GtWG.dot(solve(eyer + GtWG, (wadj * G).T.dot(u), sym_pos=True)))
 
