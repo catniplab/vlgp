@@ -189,7 +189,7 @@ def inferpost(obj, **kwargs):
                 shape = obj['mu'].shape
                 mu_over_trials = obj['mu'].reshape((-1, nlatent))
                 mean_over_trials = mu_over_trials.mean(axis=0)
-                obj['b'][0, :] += mean_over_trials @ obj['a']  # compensate bias
+                # obj['b'][0, :] += mean_over_trials @ obj['a']  # compensate bias
                 mu_over_trials -= mean_over_trials
                 obj['mu'] = mu_over_trials.reshape(shape)
 
@@ -320,8 +320,8 @@ def inferparam(obj, **kwargs):
         # mu *= scale.squeeze()  # compensate latent
         # obj['mu'] = mu.reshape(obj['mu'].shape)
         U, s, Vh = svd(a, full_matrices=False)
+        obj['mu'] = np.reshape(mu @ a @ Vh.T, (ntrial, ntime, nlatent))
         a[:] = Vh
-        obj['mu'] = np.reshape(mu @ Vh @ Vh.T, obj['mu'].shape)
 
 
 def fill_default_args(**kwargs):
@@ -605,8 +605,8 @@ def fit(y, channel, sigma, omega, a=None, b=None, mu=None, x=None, alpha=None, b
         # mu = mu.reshape((ntrial, ntime, nlatent))
         # print(np.any(np.isnan(a)))
         U, s, Vh = svd(a, full_matrices=False)
+        mu = np.reshape(mu @ a @ Vh.T, (ntrial, ntime, nlatent))
         a[:] = Vh
-        mu = np.reshape(mu @ Vh @ Vh.T, (ntrial, ntime, nlatent))
     else:
         if mu is None:
             mu = lstsq(a.T, y.reshape((-1, nchannel)).T)[0].T.reshape((ntrial, ntime, nlatent))
