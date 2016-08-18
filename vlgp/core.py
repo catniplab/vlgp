@@ -189,7 +189,7 @@ def inferpost(obj, **kwargs):
                 shape = obj['mu'].shape
                 mu_over_trials = obj['mu'].reshape((-1, nlatent))
                 mean_over_trials = mu_over_trials.mean(axis=0)
-                # obj['b'][0, :] += mean_over_trials @ obj['a']  # compensate bias
+                obj['b'][0, :] += mean_over_trials @ obj['a']  # compensate bias
                 mu_over_trials -= mean_over_trials
                 obj['mu'] = mu_over_trials.reshape(shape)
 
@@ -265,7 +265,8 @@ def inferparam(obj, **kwargs):
                         try:
                             delta_a = solve(neghess_a, grad_a, sym_pos=True)
                         except LinAlgError:
-                            delta_a = .0
+                            print('Singular Hessian a')
+                            delta_a = grad_a
                 if kwargs['Adam']:
                     delta_a = optimizer_a.update(delta_a)
                 new_slice = old_slice + learning_rate * delta_a
@@ -290,7 +291,8 @@ def inferparam(obj, **kwargs):
                         try:
                             delta_b = solve(neghess_b, grad_b, sym_pos=True)
                         except LinAlgError:
-                            delta_b = .0
+                            print('Singular Hessian b')
+                            delta_b = grad_b
                 if kwargs['Adam']:
                     delta_b = optimizer_b.update(delta_b)
                 new_slice = old_slice + learning_rate * delta_b
@@ -622,6 +624,8 @@ def fit(y, channel, sigma, omega, a=None, b=None, mu=None, x=None, alpha=None, b
         for ichannel in range(nchannel):
             b[:, ichannel] = \
                 lstsq(h.reshape((nchannel, -1, 1 + lag))[ichannel, :], y.reshape((-1, nchannel))[:, ichannel])[0]
+    # else:
+    #     print('b is given.')
 
     # initialize noises of guassian channels
     noise = var(y.reshape((-1, nchannel)), axis=0, ddof=0)
