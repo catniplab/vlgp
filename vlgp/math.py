@@ -6,7 +6,7 @@ import warnings
 import numpy as np
 from scipy import linalg
 from numba import jit
-
+from scipy.linalg import svd
 
 MIN_EXP = -20
 MAX_EXP = 10
@@ -158,7 +158,7 @@ def subspace(a, b, deg=True):
     return np.degrees(rad) if deg else rad
 
 
-def orthogonalize(x, a, normalize_a=False):
+def orth(x, a):
     """
     Orthogonalize the rows of the loading matrix and apply the corresponding linear transform to the latent variables.
 
@@ -170,22 +170,10 @@ def orthogonalize(x, a, normalize_a=False):
     Returns:
 
     """
-    ntime, nlatent = x.shape
-    _, nchannel = a.shape
-
-    if nlatent == 1:
-        return x.copy()
-    else:
-        U, s, V = linalg.svd(a, full_matrices=False)
-        if normalize_a:
-            aorth = V
-            T = U.dot(np.diag(s))
-            xorth = x.dot(T)
-        else:
-            aorth = np.diag(s).dot(V)
-            T = U
-            xorth = x.dot(T)
-    return xorth, aorth, T
+    U, s, Vh = svd(a, full_matrices=False)  # scipy version
+    a_orth = Vh
+    x_orth = x @ a @ Vh.T
+    return x_orth, a_orth
 
 
 @jit
