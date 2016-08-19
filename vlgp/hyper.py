@@ -63,7 +63,7 @@ def kl(theta, sigma, n, mu, M, S, eps=1e-6):
     div = 0.0
     for iseg in range(nseg):
         KinvS = solve(K, S[:, :, iseg], sym_pos=True)
-        muKinvmu = mu[:, iseg].dot(solve(K, mu[:, iseg], sym_pos=True))
+        muKinvmu = mu[:, iseg] @ solve(K, mu[:, iseg], sym_pos=True)
         div += muKinvmu + trace(KinvS) - slogdet(KinvS)[1] - n
     return div / 2
 
@@ -101,12 +101,12 @@ def learngp(obj, latents=None, **kwargs):
     for ilatent in latents:
         C = exp(-omega[ilatent] * Dsq) + eps * identity(window)
         K = sigma[ilatent] ** 2 * exp(-omega[ilatent] * Dsq) + eps * identity(window)
-        S = dstack([K - K.dot(solve(diag(1 / (eps + win_w[:, ilatent, iseg])) + K, K, sym_pos=True)) for iseg in
+        S = dstack([K - K @ solve(diag(1 / (eps + win_w[:, ilatent, iseg])) + K, K, sym_pos=True) for iseg in
                     range(nseg)])
         if kwargs['learn_sigma']:
             tmp = 0.0
             for iseg in range(nseg):
-                tmp += win_mu[:, ilatent, iseg].dot(solve(C, win_mu[:, ilatent, iseg], sym_pos=True)) + trace(
+                tmp += win_mu[:, ilatent, iseg] @ solve(C, win_mu[:, ilatent, iseg], sym_pos=True) + trace(
                     solve(C, S[:, :, iseg], sym_pos=True))
             sigma[ilatent] = sqrt(tmp / (window * nseg))
         # M = dstack([outer(win_mu[:, ilatent, iseg], win_mu[:, ilatent, iseg]) for iseg in range(nseg)])

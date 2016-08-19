@@ -52,12 +52,12 @@ def elbo(obj):
     spike = channel == 'spike'
     lfp = channel == 'lfp'
 
-    eta = mu.dot(a) + einsum('ijk, ki -> ji', h.reshape((nchannel, ntime * ntrial, lag)), b)
-    lam = sexp(eta + 0.5 * v.dot(a ** 2))
+    eta = mu @ a + einsum('ijk, ki -> ji', h.reshape((nchannel, ntime * ntrial, lag)), b)
+    lam = sexp(eta + 0.5 * v @ (a ** 2))
 
     llspike = sum(y[:, spike] * eta[:, spike] - lam[:, spike])  # verified by predict()
 
-    lllfp = - 0.5 * sum(((y[:, lfp] - eta[:, lfp]) ** 2 + v.dot(a[:, lfp] ** 2)) / noise[lfp] + log(noise[lfp]))
+    lllfp = - 0.5 * sum(((y[:, lfp] - eta[:, lfp]) ** 2 + v @ (a[:, lfp] ** 2)) / noise[lfp] + log(noise[lfp]))
 
     ll = llspike + lllfp
 
@@ -68,8 +68,8 @@ def elbo(obj):
         w = obj['w'][itrial, :]
         for l in range(nlatent):
             G = chol[l, :]
-            GtWG = G.T.dot(w[:, l].reshape((ntime, 1)) * G)
-            tmp = GtWG.dot(solve(eyer + GtWG, GtWG, sym_pos=True))  # expected to be nonsingular
+            GtWG = G.T @ (w[:, [l]] * G)
+            tmp = GtWG @ solve(eyer + GtWG, GtWG, sym_pos=True)  # expected to be nonsingular
             G_mldiv_mu = lstsq(G, mu[:, l])[0]
             mu_Kinv_mu = inner(G_mldiv_mu, G_mldiv_mu)
             # K = G @ G.T
@@ -80,6 +80,13 @@ def elbo(obj):
             lb += -0.5 * mu_Kinv_mu - 0.5 * tr + 0.5 * lndet + 0.5 * ntime
 
     return lb, ll
+
+
+def firing_rate(mu, v, a, b, h):
+    eta_b = einsum('ijk, ki -> ji', h, b)
+    eta = mu @ a + eta_b  # (neuron, time, lag) . (lag, neuron)
+    lam = sexp(eta + 0.5 * v @ (a ** 2))
+    return lam, eta
 
 
 def accumulate(accu, grad, decay=1):
@@ -140,12 +147,10 @@ def inferpost(obj, **kwargs):
         w = obj['w'][itrial, :]
         v = obj['v'][itrial, :]
 
-        # eta = mu.dot(a) + einsum('ijk, ki -> ji', h, b)  # (neuron, time, lag) . (lag, neuron)
-        # lam = exp((eta + 0.5 * v.dot(a ** 2)).clip(MIN_EXP, MAX_EXP))
         eta_b = einsum('ijk, ki -> ji', h, b)
         for ilatent in range(nlatent):
-            eta = mu.dot(a) + eta_b  # (neuron, time, lag) . (lag, neuron)
-            lam = sexp(eta + 0.5 * v.dot(a ** 2))
+            eta = mu @ a + eta_b  # (neuron, time, lag) . (lag, neuron)
+            lam = sexp(eta + 0.5 * v @ (a ** 2))
             G = chol[ilatent, :, :]
 
             resid[:, spike] = y[:, spike] - lam[:, spike]  # residuals of Poisson observations
@@ -158,10 +163,6 @@ def inferpost(obj, **kwargs):
             old_slice = mu[:, ilatent]
             for _ in range(kwargs['inner_niter']):
                 grad_mu = grad_mu_resid - lstsq(G.T, lstsq(G, old_slice)[0])[0]
-                # K = G @ G.T
-                # grad_mu = grad_mu_resid - spilu(csc_matrix(K)).solve(mu[:, ilatent])
-                # s_max = cond(K)
-                # grad_mu = grad_mu_resid - solve(G @ G.T + s_max * identity(G.shape[0]), mu[:, ilatent], sym_pos=True) * s_max
                 dmu_acc[itrial, :, ilatent] = accumulate(dmu_acc[itrial, :, ilatent], grad_mu, decay)
 
                 if adjhess:
@@ -193,16 +194,16 @@ def inferpost(obj, **kwargs):
                 mu_over_trials -= mean_over_trials
                 obj['mu'] = mu_over_trials.reshape(shape)
 
-        eta = mu.dot(a) + einsum('ijk, ki -> ji', h, b)
-        lam = sexp(eta + 0.5 * v.dot(a ** 2))
+        eta = mu @ a + einsum('ijk, ki -> ji', h, b)
+        lam = sexp(eta + 0.5 * v @ (a ** 2))
         U[:, spike] = lam[:, spike]
         U[:, lfp] = 1 / noise[lfp]
         w[:] = U @ (a.T ** 2)
         if not kwargs['MAP']:
             for ilatent in range(nlatent):
                 G = chol[ilatent, :, :]
-                GtWG = G.T.dot(w[:, [ilatent]] * G)
-                v[:, ilatent] = (G * (G - G.dot(GtWG) + G.dot(GtWG.dot(solve(eyer + GtWG, GtWG, sym_pos=True))))).sum(
+                GtWG = G.T @ (w[:, [ilatent]] * G)
+                v[:, ilatent] = (G * (G - G @ GtWG + G @ (GtWG @ solve(eyer + GtWG, GtWG, sym_pos=True)))).sum(
                     axis=1)
 
 
@@ -239,8 +240,8 @@ def inferparam(obj, **kwargs):
         optimizer_a = kwargs['optimizer_a'][ichannel]
         optimizer_b = kwargs['optimizer_b'][ichannel]
 
-        eta = mu.dot(a) + einsum('ijk, ki -> ji', h, b)
-        lam = sexp(eta + 0.5 * v.dot(a ** 2))
+        eta = mu @ a + einsum('ijk, ki -> ji', h, b)
+        lam = sexp(eta + 0.5 * v @ (a ** 2))
         if channel[ichannel] == 'spike':
             # loading
             va = v * a[:, ichannel]  # (ntime, nlatent)
@@ -795,12 +796,11 @@ def leave_one_out(trial, model, **kwargs):
         kwargs['learn_omega'] = False
 
         obj = infer(obj, **kwargs)
-        eta = obj['mu'].reshape((-1, nlatent)).dot(a[:, ichannel]) + htest.reshape((ntime * ntrial, -1)).dot(
-            b[:, ichannel])
+        eta = obj['mu'].reshape((-1, nlatent)) @ a[:, ichannel] + htest.reshape((ntime * ntrial, -1)) @ b[:, ichannel]
         if channel[ichannel] == 'spike':
             if kwargs['post_prediction']:
                 yhat[:, :, ichannel] = exp(
-                    eta + 0.5 * obj['v'].reshape((-1, nlatent)).dot(a[:, ichannel] ** 2)).reshape(
+                    eta + 0.5 * obj['v'].reshape((-1, nlatent)) @ (a[:, ichannel] ** 2)).reshape(
                     (yhat.shape[0], yhat.shape[1]))
             else:
                 yhat[:, :, ichannel] = exp(eta).reshape((yhat.shape[0], yhat.shape[1]))
@@ -882,16 +882,15 @@ def postprocess(obj):
     for itrial in range(ntrial):
         for ilatent in range(nlatent):
             G = chol[ilatent, :, :]
-            GtWG = G.T.dot(w[itrial, :, ilatent].reshape((ntime, 1)) * G)
+            GtWG = G.T @ (w[itrial, :, [ilatent]] * G)
             try:
-                tmp = eyer - GtWG + GtWG.dot(
-                    solve(eyer + GtWG, GtWG, sym_pos=True))  # A should be PD but numerically not
+                tmp = eyer - GtWG + GtWG @ solve(eyer + GtWG, GtWG, sym_pos=True)  # A should be PD but numerically not
             except LinAlgError:
                 warnings.warn('Singular matrix. Use least squares instead.')
-                tmp = eyer - GtWG + GtWG.dot(lstsq(eyer + GtWG, GtWG)[0])  # least squares
+                tmp = eyer - GtWG + GtWG @ lstsq(eyer + GtWG, GtWG)[0]  # least squares
             eigval, eigvec = eigh(tmp)
             eigval.clip(0, PINF, out=eigval)  # remove negative eigenvalues
-            L[itrial, ilatent, :] = G.dot(eigvec.dot(diag(sqrt(eigval))))
+            L[itrial, ilatent, :] = G @ (eigvec @ diag(sqrt(eigval)))
     obj['L'] = L
     keys = list(obj.keys())
     for key in keys:
@@ -924,9 +923,8 @@ def predict(y, x, a, b, v=None):
     for itrain in range(ntrain):
         for itrial in range(ntrial):
             h = add_constant(lagmat(y[itrial, :, itrain], lag=lag))
-            reg[itrial, :, itrain] = h.dot(b[:, itrain])
-    eta = x.reshape((-1, nlatent)).dot(a) + reg.reshape((-1, ntrain))
-    # eta = x.reshape((-1, nlatent)).dot(a) + b[0, :]
-    lam = np.exp(eta + 0.5 * v.reshape((-1, nlatent)).dot(a ** 2)) if v is not None else np.exp(eta)
+            reg[itrial, :, itrain] = h @ b[:, itrain]
+    eta = x.reshape((-1, nlatent)) @ a + reg.reshape((-1, ntrain))
+    lam = np.exp(eta + 0.5 * v.reshape((-1, nlatent)) @ (a ** 2)) if v is not None else np.exp(eta)
     yhat = lam.reshape(y.shape)
     return yhat

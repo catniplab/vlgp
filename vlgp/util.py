@@ -129,7 +129,7 @@ def rotate(obj, ref):
     Returns:
 
     """
-    return obj.dot(lstsq(obj, ref)[0])
+    return obj @ lstsq(obj, ref)[0]
 
 
 def add_constant(x):

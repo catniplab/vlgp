@@ -93,7 +93,7 @@ def spikes(x, a, b, link=sexp, seed=None):
     rate = np.empty_like(y, dtype=float)
 
     for t in range(T):
-        eta = x[t, :].dot(a) + np.einsum('ij, ji -> i', h[:, t, :], b)
+        eta = x[t, :] @ a + np.einsum('ij, ji -> i', h[:, t, :], b)
         rate[t, :] = link(eta)
         # truncate y to 1 if y > 1
         # equivalent to Bernoulli P(1) = (1 - e^-(lam_t))
@@ -141,7 +141,7 @@ def spike(x, a, b, link=sexp, seed=None):
 
     for m in range(ntrial):
         for t in range(ntime):
-            eta = x[m, t, :].dot(a) + np.einsum('ij, ji -> i', h[:, m, t, :], b)
+            eta = x[m, t, :] @ a + np.einsum('ij, ji -> i', h[:, m, t, :], b)
             rate[m, t, :] = link(eta)
             # truncate y to 1 if y > 1
             # equivalent to Bernoulli P(1) = (1 - e^-(lam_t))
@@ -189,7 +189,7 @@ def lfp(x, a, b, K, link=identity, seed=None):
 
     for m in range(ntrial):
         for t in range(ntime):
-            mu[m, t, :] = link(x[m, t, :].dot(a) + np.einsum('ij, ji -> i', h[:, m, t, :], b))
+            mu[m, t, :] = link(x[m, t, :] @ a + np.einsum('ij, ji -> i', h[:, m, t, :], b))
             y[m, t, :] = multivariate_normal(mu[m, t, :], K)
             if t + 1 < ntime and lag > 0:
                 h[:, m, t + 1, 2:] = h[:, m, t, 1:lag]  # roll rightward
@@ -233,7 +233,7 @@ def observation(x, a, b, dist=multivariate_normal, link=identity, seed=None, *ar
 
     for m in range(ntrial):
         for t in range(ntime):
-            mu[m, t, :] = link(x[m, t, :].dot(a) + np.einsum('ij, ji -> i', h[:, m, t, :], b))
+            mu[m, t, :] = link(x[m, t, :] @ a + np.einsum('ij, ji -> i', h[:, m, t, :], b))
             y[m, t, :] = dist(mu[m, t, :], *args)
             if t + 1 < ntime and lag > 0:
                 h[:, m, t + 1, 2:] = h[:, m, t, 1:lag]  # roll rightward

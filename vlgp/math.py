@@ -85,7 +85,7 @@ def ichol_gauss(n, omega, r, tol=1e-6):
 
         G[i, i] = np.sqrt(diag[jast])
         nextcol = np.exp(- omega * (x[pvec[i + 1:]] - x[pvec[i]]) ** 2)
-        G[i + 1:, i] = (nextcol - G[i + 1:, :i].dot(G[i, :i].T)) / G[i, i]
+        G[i + 1:, i] = (nextcol - G[i + 1:, :i] @ G[i, :i].T) / G[i, i]
         diag[i + 1:] = 1 - np.sum((G[i + 1:, :i + 1]) ** 2, axis=1)
 
         i += 1
@@ -128,7 +128,7 @@ def ichol(a, tol=1e-6):
 
         G[i, i] = np.sqrt(diag[jast])
         nextcol = a[pvec[i + 1:], pvec[i]]
-        G[i + 1:, i] = (nextcol - G[i + 1:, :i].dot(G[i, :i].T)) / G[i, i]
+        G[i + 1:, i] = (nextcol - G[i + 1:, :i] @ G[i, :i].T) / G[i, i]
         diag[i + 1:] = 1 - np.sum((G[i + 1:, :i + 1]) ** 2, axis=1)
 
         i += 1
@@ -153,7 +153,7 @@ def subspace(a, b, deg=True):
     ob = linalg.orth(b)
     if oa.shape[1] < ob.shape[1]:
         oa, ob = ob.copy(), oa.copy()
-    ob -= oa.dot(oa.T.dot(ob))
+    ob -= oa @ (oa.T @ ob)
     rad = np.arcsin(min(1, linalg.norm(ob, ord=2)))
     return np.degrees(rad) if deg else rad
 
