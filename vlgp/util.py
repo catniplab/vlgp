@@ -171,19 +171,6 @@ def lagmat(x, lag):
     return mat[startrow:stoprow, ncol:]
 
 
-def align(x):
-    x = asarray(x)
-    ax = x.copy()
-    if ax.ndim < 3:
-        return ax
-    else:
-        ntrial = ax.shape[0]
-        for i in range(1, ntrial):
-            diff = ax[i - 1, -1, :] - ax[i, 0, :]
-            ax[i, :, :] += diff
-    return ax
-
-
 def save(obj, fname):
     """
     Save inference object in HDF5

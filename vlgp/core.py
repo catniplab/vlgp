@@ -10,18 +10,16 @@ import numpy as np
 from numpy import identity, einsum, trace, inner, empty, inf, diag, newaxis, var, asarray, zeros, zeros_like, \
     empty_like, arange, sum, copyto, ones
 from numpy.core.umath import sqrt, PINF, log, exp
-from numpy.linalg import norm, slogdet, LinAlgError, cond
+from numpy.linalg import norm, slogdet, LinAlgError
 from scipy import stats
-from scipy.sparse import csc_matrix
-from scipy.sparse.linalg import spilu
+from scipy.linalg import lstsq, eigh, solve, svd
 from scipy.stats import spearmanr
-from scipy.linalg import lstsq, eigh, solve, svd, svdvals
 from sklearn.decomposition.factor_analysis import FactorAnalysis
 
-from .math import ichol_gauss, subspace, sexp
-from .util import add_constant, rotate, lagmat
 from .hyper import learngp
-from .optimizer import Optimizer, AdamOptimizer
+from .math import ichol_gauss, subspace, sexp
+from .optimizer import AdamOptimizer
+from .util import add_constant, rotate, lagmat
 
 
 def elbo(obj):

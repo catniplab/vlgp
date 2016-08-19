@@ -39,45 +39,7 @@ def spectral(f, omega):
     # return np.exp(- f * f / omega)
 
 
-# Do not use.
-# fixme
-def gp(omega, ntime, std, dt=1.0, seed=None):
-    """Simulate SE Gaussian processes
-
-    Args:
-        omega: scale
-        ntime: duration
-        std: standard deviation
-        dt: time resolution
-        seed: random number seed
-
-    Returns:
-        x: simulation (ntime, L)
-        ticks: ticks (ntime,)
-    """
-
-    if seed is not None:
-        np.random.seed(seed)
-
-    x = np.zeros((ntime, omega.shape[0]), dtype=float)
-
-    M = int(2 ** np.ceil(np.log2(ntime)))
-    T0 = M * dt
-    dw = 2 * np.pi / T0
-    wu = 2 * np.pi / dt
-    t = np.arange(0, T0, dt)
-    w = np.arange(0, wu, dw)
-
-    for l in range(omega.shape[0]):
-        B = 2 * np.sqrt(spectral(w, omega[l]) * dw) * np.exp(1j * random(M) * 2 * np.pi)
-        B[0] = 0
-        raw_x = np.fft.ifft(B, ntime).real
-        x[:, l] = std * raw_x / raw_x.std()
-
-    return x, t[:ntime]
-
-
-def gaussproc(omega, nbin, std, r=None, tol=1e-6, seed=None):
+def gauss_proc(omega, nbin, std, r=None, tol=1e-6, seed=None):
     """Simulate Gaussian processes by incomplete Choleksy factorization
 
     Args:
