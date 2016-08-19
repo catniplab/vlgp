@@ -5,6 +5,7 @@ import warnings
 
 import numpy as np
 from scipy import linalg
+from numba import jit
 
 
 MIN_EXP = -20
@@ -131,7 +132,7 @@ def ichol(a, tol=1e-6):
         diag[i + 1:] = 1 - np.sum((G[i + 1:, :i + 1]) ** 2, axis=1)
 
         i += 1
-    return G[pvec.argsort(), :]
+    return G[pvec.argsort(), :i]
 
 
 def subspace(a, b, deg=True):
@@ -185,3 +186,44 @@ def orthogonalize(x, a, normalize_a=False):
             T = U
             xorth = x.dot(T)
     return xorth, aorth, T
+
+
+@jit
+def ichol_gauss2(n, omega):
+    """
+    Incomplete Cholesky factorization of squared exponential covariance
+
+    K \approx GG'
+
+    Args:
+        n: size of covariance matrix
+        omega: inverse of 2 * squared lengthscale
+        r: rank of factorization
+        atol: tolerance of convergence
+
+    Returns:
+        incomplete lower trianglar matrix (n, r)
+    """
+
+    x = np.arange(n)
+    diag = np.ones(n, dtype=float)
+    pvec = np.arange(n, dtype=int)
+    i = 0
+    chol = np.zeros((n, n), dtype=float)
+    while np.sum(diag[i:]) > 0.0:
+        if i > 0:
+            jast = diag[i:].argmax()
+            jast += i
+            # Be caseful! numpy indexing returns a view instead of a copy.
+            pvec[i], pvec[jast] = pvec[jast].copy(), pvec[i].copy()
+            chol[jast, :i + 1], chol[i, :i + 1] = chol[i, :i + 1].copy(), chol[jast, :i + 1].copy()
+        else:
+            jast = 0
+
+        chol[i, i] = np.sqrt(diag[jast])
+        next_col = np.exp(- omega * (x[pvec[i + 1:]] - x[pvec[i]]) ** 2)
+        chol[i + 1:, i] = (next_col - chol[i + 1:, :i] @ chol[i, :i].T) / chol[i, i]
+        diag[i + 1:] = 1 - np.sum((chol[i + 1:, :i + 1]) ** 2, axis=1)
+
+        i += 1
+    return chol[pvec.argsort(), :i]

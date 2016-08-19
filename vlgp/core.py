@@ -1,6 +1,8 @@
 """
 Inference
 """
+# TODO: change einsum to tensordot for performance
+
 import timeit
 import warnings
 

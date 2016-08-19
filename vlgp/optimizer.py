@@ -1,5 +1,5 @@
-import abc
 from abc import ABCMeta, abstractmethod
+
 import numpy as np
 
 
@@ -7,6 +7,10 @@ class Optimizer(metaclass=ABCMeta):
     @abstractmethod
     def update(self, grad):
         pass
+
+    @staticmethod
+    def new(cls, **kwargs):
+        return cls(**kwargs)
 
 
 class AdamOptimizer(Optimizer):
