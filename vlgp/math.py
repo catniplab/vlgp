@@ -9,7 +9,7 @@ from numba import jit
 from scipy.linalg import svd
 
 MIN_EXP = -20
-MAX_EXP = 10
+MAX_EXP = 20
 
 
 def rectlin(x):
@@ -22,6 +22,7 @@ def rectlin(x):
     return x.clip(0, np.inf)
 
 
+@jit
 def sexp(x):
     """
     truncated exp
@@ -29,7 +30,7 @@ def sexp(x):
     Args:
         x: linear predictor
     """
-    return np.exp(x.clip(MIN_EXP, MAX_EXP))
+    return np.exp(np.clip(x, MIN_EXP, MAX_EXP))
 
 
 def identity(x):

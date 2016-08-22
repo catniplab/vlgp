@@ -52,8 +52,10 @@ def elbo(obj):
     spike = channel == 'spike'
     lfp = channel == 'lfp'
 
-    eta = mu @ a + einsum('ijk, ki -> ji', h.reshape((nchannel, ntime * ntrial, lag)), b)
-    lam = sexp(eta + 0.5 * v @ (a ** 2))
+    # eta = mu @ a + einsum('ijk, ki -> ji', h.reshape((nchannel, ntime * ntrial, lag)), b)
+    # lam = sexp(eta + 0.5 * v @ (a ** 2))
+
+    lam, eta = firing_rate(mu, v, a, b, h.reshape((nchannel, ntime * ntrial, lag)))
 
     llspike = sum(y[:, spike] * eta[:, spike] - lam[:, spike])  # verified by predict()
 
@@ -83,8 +85,8 @@ def elbo(obj):
 
 
 def firing_rate(mu, v, a, b, h):
-    eta_b = einsum('ijk, ki -> ji', h, b)
-    eta = mu @ a + eta_b  # (neuron, time, lag) . (lag, neuron)
+    # eta_b = np.vstack(h_row @ b_col for h_row, b_col in zip(h, b.T)).T  # slower way
+    eta = mu @ a + np.einsum('ijk, ki -> ji', h, b)  # (neuron, time, lag) x (lag, neuron) -> (time, neuron)
     lam = sexp(eta + 0.5 * v @ (a ** 2))
     return lam, eta
 
@@ -130,7 +132,6 @@ def inferpost(obj, **kwargs):
     decay = kwargs['decay']
     adjhess = kwargs['adjhess']
     eps = kwargs['eps']
-    learning_rate = kwargs['learning_rate']
 
     spike = channel == 'spike'
     lfp = channel == 'lfp'
@@ -147,10 +148,10 @@ def inferpost(obj, **kwargs):
         w = obj['w'][itrial, :]
         v = obj['v'][itrial, :]
 
-        eta_b = einsum('ijk, ki -> ji', h, b)
+        # eta = mu @ a + einsum('ijk, ki -> ji', h, b) # (neuron, time, lag) . (lag, neuron)
+        # lam = sexp(eta + 0.5 * v @ (a ** 2))
+        lam, eta = firing_rate(mu, v, a, b, h)
         for ilatent in range(nlatent):
-            eta = mu @ a + eta_b  # (neuron, time, lag) . (lag, neuron)
-            lam = sexp(eta + 0.5 * v @ (a ** 2))
             G = chol[ilatent, :, :]
 
             resid[:, spike] = y[:, spike] - lam[:, spike]  # residuals of Poisson observations
@@ -162,7 +163,8 @@ def inferpost(obj, **kwargs):
             optimizer = kwargs['optimizer_mu'][itrial, ilatent]
             old_slice = mu[:, ilatent]
             for _ in range(kwargs['inner_niter']):
-                grad_mu = grad_mu_resid - lstsq(G.T, lstsq(G, old_slice)[0])[0]
+                # grad_mu = grad_mu_resid - lstsq(G.T, lstsq(G, old_slice)[0])[0]
+                grad_mu = grad_mu_resid
                 dmu_acc[itrial, :, ilatent] = accumulate(dmu_acc[itrial, :, ilatent], grad_mu, decay)
 
                 if adjhess:
@@ -177,7 +179,7 @@ def inferpost(obj, **kwargs):
 
                 if kwargs['Adam']:
                     delta_mu = optimizer.update(delta_mu)
-                new_slice = old_slice + learning_rate * delta_mu
+                new_slice = old_slice + delta_mu
 
                 if np.allclose(old_slice, new_slice):
                     break
@@ -194,8 +196,9 @@ def inferpost(obj, **kwargs):
                 mu_over_trials -= mean_over_trials
                 obj['mu'] = mu_over_trials.reshape(shape)
 
-        eta = mu @ a + einsum('ijk, ki -> ji', h, b)
-        lam = sexp(eta + 0.5 * v @ (a ** 2))
+        # eta = mu @ a + einsum('ijk, ki -> ji', h, b)
+        # lam = sexp(eta + 0.5 * v @ (a ** 2))
+        lam, eta = firing_rate(mu, v, a, b, h)
         U[:, spike] = lam[:, spike]
         U[:, lfp] = 1 / noise[lfp]
         w[:] = U @ (a.T ** 2)
@@ -234,14 +237,14 @@ def inferparam(obj, **kwargs):
     eps = kwargs['eps']
     da_acc = kwargs['da_acc']
     db_acc = kwargs['db_acc']
-    learning_rate = kwargs['learning_rate']
 
     for ichannel in range(nchannel):
         optimizer_a = kwargs['optimizer_a'][ichannel]
         optimizer_b = kwargs['optimizer_b'][ichannel]
 
-        eta = mu @ a + einsum('ijk, ki -> ji', h, b)
-        lam = sexp(eta + 0.5 * v @ (a ** 2))
+        # eta = mu @ a + einsum('ijk, ki -> ji', h, b)
+        # lam = sexp(eta + 0.5 * v @ (a ** 2))
+        lam, eta = firing_rate(mu, v, a, b, h)
         if channel[ichannel] == 'spike':
             # loading
             va = v * a[:, ichannel]  # (ntime, nlatent)
@@ -270,7 +273,7 @@ def inferparam(obj, **kwargs):
                             delta_a = grad_a
                 if kwargs['Adam']:
                     delta_a = optimizer_a.update(delta_a)
-                new_slice = old_slice + learning_rate * delta_a
+                new_slice = old_slice + delta_a
                 if np.allclose(old_slice, new_slice):
                     break
                 old_slice = new_slice
@@ -296,7 +299,7 @@ def inferparam(obj, **kwargs):
                             delta_b = grad_b
                 if kwargs['Adam']:
                     delta_b = optimizer_b.update(delta_b)
-                new_slice = old_slice + learning_rate * delta_b
+                new_slice = old_slice + delta_b
                 if np.allclose(old_slice, new_slice):
                     break
                 old_slice = new_slice
@@ -448,10 +451,8 @@ def infer(obj, fstat=None, **kwargs):
         if alpha is not None:
             loading_angle[iiter] = subspace(alpha.T, obj['a'].T)
 
-        lb[iiter], ll[iiter] = elbo(obj)
-        # lb[iiter], ll[iiter] = 0, 0
+        lb[iiter], ll[iiter] = 0, 0
         decreased = lb[iiter] < lb[iiter - 1]
-        # converged = np.allclose(obj['mu'], good_mu)
         converged = np.allclose(obj['mu'], good_mu)
 
         if decreased:
@@ -650,11 +651,11 @@ def fit(y, channel, sigma, omega, a=None, b=None, mu=None, x=None, alpha=None, b
     kwargs['optimizer_b'] = empty(nchannel, dtype=object)
 
     for each in np.nditer(kwargs['optimizer_mu'], flags=['refs_ok'], op_flags=['readwrite']):
-        each[...] = AdamOptimizer(ntime)
+        each[...] = AdamOptimizer(ntime, kwargs['learning_rate'])
     for each in np.nditer(kwargs['optimizer_a'], flags=['refs_ok'], op_flags=['readwrite']):
-        each[...] = AdamOptimizer(nlatent)
+        each[...] = AdamOptimizer(nlatent, kwargs['learning_rate'])
     for each in np.nditer(kwargs['optimizer_b'], flags=['refs_ok'], op_flags=['readwrite']):
-        each[...] = AdamOptimizer(b.shape[0])
+        each[...] = AdamOptimizer(b.shape[0], kwargs['learning_rate'])
 
     inference = postprocess(infer(obj, **kwargs))
     return inference, kwargs

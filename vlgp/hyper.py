@@ -2,9 +2,9 @@
 Hyperparameter optimization
 """
 from numpy import identity, arange, trace, dstack, diag
-from numpy.core.umath import exp, log, sqrt
+from numpy import exp, log, sqrt
 from numpy.linalg import slogdet
-from numpy.random.mtrand import choice
+from numpy.random import choice
 from scipy.linalg import lstsq, solve, toeplitz
 from scipy.optimize import minimize_scalar
 
