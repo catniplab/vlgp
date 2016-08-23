@@ -1,20 +1,9 @@
 from unittest import TestCase
 
 import numpy as np
-from scipy.linalg import toeplitz
 
 import vlgp
-from vlgp import simulation as sim
-
-
-def gp(theta, std, nbin, dim):
-    eps = 1e-10
-    dsq = np.arange(nbin) ** 2
-    k = np.exp(- theta * dsq)
-    K = toeplitz(k) + eps * np.identity(nbin)
-    x = std * np.random.multivariate_normal(np.zeros(nbin), K, dim).T
-    x -= x.mean(axis=0)
-    return x
+from vlgp.simulation import gp_mvn, spike
 
 
 class TestVLGPModel(TestCase):
@@ -30,7 +19,7 @@ class TestVLGPModel(TestCase):
         ntrial = 2
         neuron_dim = 100
 
-        x = gp(theta, std, nbin * ntrial, latent_dim)
+        x = gp_mvn(theta, std, nbin * ntrial, latent_dim)
         x -= x.mean(axis=0, keepdims=True)
 
         a = 0.5 * np.sort(
@@ -38,7 +27,7 @@ class TestVLGPModel(TestCase):
             axis=1)  # loading matrix
         b = np.vstack(
             (bias * np.ones(neuron_dim), -10 * np.ones(neuron_dim), -10 * np.ones(neuron_dim)))  # regression weights
-        y, _, _ = sim.spike(x, a, b)
+        y, _, _ = spike(x, a, b)
         y = y.reshape((-1, nbin, neuron_dim))[:ntrial, ...]
 
         model = vlgp.VLGPModel(latent_dim, neuron_dim, nbin, 2)

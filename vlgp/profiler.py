@@ -8,5 +8,10 @@ class Profiler(metaclass=ABCMeta):
 
 
 class DefaultProfiler(Profiler):
+    def __init__(self, x=None, a=None, b=None):
+        self._x = x
+        self._a = a
+        self._b = b
+
     def profile(self, fit):
         pass

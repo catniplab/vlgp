@@ -1,7 +1,7 @@
 import timeit
 
 
-class timed():
+class timed:
     def __init__(self, times):
         self._times = times
 
