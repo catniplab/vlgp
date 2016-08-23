@@ -10,7 +10,7 @@ class Optimizer(metaclass=ABCMeta):
 
 
 class AdamOptimizer(Optimizer):
-    def __init__(self, dim, learning_rate=0.01, b1=0.9, b2=0.999, eps=1e-8):
+    def __init__(self, dim, learning_rate=0.001, b1=0.9, b2=0.999, eps=1e-8):
         self._learning_rate = learning_rate
         self._b1 = b1
         self._b2 = b2
@@ -31,7 +31,7 @@ class AdamOptimizer(Optimizer):
 
 
 class AdagradOptimizer(Optimizer):
-    def __init__(self, dim, learning_rate=0.01, b=0.999, eps=1e-8):
+    def __init__(self, dim, learning_rate=0.001, b=0.999, eps=1e-8):
         self._learning_rate = learning_rate
         self._b = b
         self._eps = eps

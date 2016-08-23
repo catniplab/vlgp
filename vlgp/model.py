@@ -1,5 +1,5 @@
-# TODO: add logger
-
+import logging
+import timeit
 from abc import ABCMeta, abstractmethod
 
 import numpy as np
@@ -9,13 +9,12 @@ from numpy.random.mtrand import choice
 from scipy.linalg import solve, LinAlgError, svd, toeplitz
 from scipy.optimize import minimize_scalar
 
-from .decorator import timed
 from .profiler import DefaultProfiler
 from .initializer import FAInitializer
 from .util import add_constant, lagmat
 from .hyper import kl
 from .math import sexp, ichol_gauss
-from .optimizer import Optimizer, AdamOptimizer
+from .optimizer import AdamOptimizer
 
 
 class Model(metaclass=ABCMeta):
@@ -33,7 +32,10 @@ class VLGPModel(Model):
         self._nbin = nbin
         self._lag = lag
         self._fit = VLGPModelFit()
-        pass
+
+        # setup logging
+        logging.basicConfig(level=logging.INFO)
+        self._logger = logging.getLogger(__name__)
 
     def fit(self,
             y,
@@ -47,7 +49,7 @@ class VLGPModel(Model):
             a0=None,
             b0=None,
             optimizer_cls=AdamOptimizer,
-            optimizer_args={},
+            optimizer_args=None,
             hessian=True,
             regular_hessian=False,
             method='VB',
@@ -62,7 +64,12 @@ class VLGPModel(Model):
             rtol=1e-5,
             atol=1e-8,
             profiler_cls=DefaultProfiler,
-            profiler_args={}):
+            profiler_args=None):
+        if profiler_args is None:
+            profiler_args = {}
+        if optimizer_args is None:
+            optimizer_args = {}
+        logger = self._logger
         dyn_ndim = self._dyn_ndim
         obs_ndim = self._obs_ndim
         nbin = self._nbin
@@ -103,20 +110,11 @@ class VLGPModel(Model):
 
         ###
         # optimization options
-        options = {}
-        options['hessain'] = hessian
-        options['regular_hessian'] = regular_hessian
-        options['skip_estep'] = skip_estep
-        options['skip_mstep'] = skip_mstep
-        options['max_inner_niter'] = max_inner_niter
-        options['max_outer_niter'] = max_outer_niter
-        options['fixed_prior_std'] = fixed_prior_std
-        options['fixed_prior_scale'] = fixed_prior_scale
-        options['eps'] = eps
-        options['method'] = method
-        options['optimizer_mu'] = empty((ntrial, dyn_ndim), dtype=object)
-        options['optimizer_a'] = empty(obs_ndim, dtype=object)
-        options['optimizer_b'] = empty(obs_ndim, dtype=object)
+        options = {'hessian': hessian, 'regular_hessian': regular_hessian, 'skip_estep': skip_estep,
+                   'skip_mstep': skip_mstep, 'max_inner_niter': max_inner_niter, 'max_outer_niter': max_outer_niter,
+                   'fixed_prior_std': fixed_prior_std, 'fixed_prior_scale': fixed_prior_scale, 'eps': eps,
+                   'method': method, 'optimizer_mu': empty((ntrial, dyn_ndim), dtype=object),
+                   'optimizer_a': empty(obs_ndim, dtype=object), 'optimizer_b': empty(obs_ndim, dtype=object)}
 
         for each in np.nditer(options['optimizer_mu'], flags=['refs_ok'], op_flags=['readwrite']):
             each[...] = optimizer_cls(nbin, learning_rate, **optimizer_args)
@@ -145,20 +143,30 @@ class VLGPModel(Model):
         good_a = fit.a.copy()
         good_b = fit.b.copy()
 
-        converged = False
-        for outer_iter in range(1, max_outer_niter):
+        fit.stopwatch = []
+
+        for i in range(1, max_outer_niter + 1):
+            tock = tick = timeit.default_timer()
             if not skip_estep:
                 self.estep()
+                tock = timeit.default_timer()
+            fit.stopwatch.append([i, 'E', tock - tick])
+            logger.info('[{}], {}-step, time: {:.3f} s'.format(*fit.stopwatch[-1]))
 
+            tock = tick = timeit.default_timer()
             if not skip_mstep:
                 self.mstep()
+                tock = timeit.default_timer()
+            fit.stopwatch.append([i, 'M', tock - tick])
+            logger.info('[{}], {}-step, time: {:.3f} s'.format(*fit.stopwatch[-1]))
 
             profiler.profile(fit)
 
             # check convergence
-            converged = allclose(good_mu, mu, rtol=rtol, atol=atol) and \
-                        allclose(good_a, a, rtol=rtol, atol=atol) and \
-                        allclose(good_b, b, rtol=rtol, atol=atol)
+            converged = allclose(good_mu, mu, rtol=rtol, atol=atol) and allclose(good_a, a, rtol=rtol,
+                                                                                 atol=atol) and allclose(good_b, b,
+                                                                                                         rtol=rtol,
+                                                                                                         atol=atol)
 
             if converged:
                 break
@@ -168,16 +176,13 @@ class VLGPModel(Model):
             copyto(good_a, a)
             copyto(good_b, b)
 
-            if outer_iter % hyperstep == 0:
+            if i % hyperstep == 0:
                 self.hstep()
         else:
-            print('max niter reached')
-
-        print('converged: {}'.format(converged))
+            logger.warning('max niter reached')
 
         return fit
 
-    @timed
     def estep(self):
         fit = self._fit
         options = self._fit.options
@@ -258,9 +263,9 @@ class VLGPModel(Model):
             mu_over_trials -= mean_over_trials
             fit.mu = mu_over_trials.reshape(old_shape)
 
-    @timed
     def mstep(self):
         fit = self._fit
+        logger = self._logger
         options = self._fit.options
 
         obs_ndim, ntrial, nbin, lag1 = fit.h.shape  # neuron, trial, time, lag + 1
@@ -291,11 +296,16 @@ class VLGPModel(Model):
                 old_a_slice = a[:, obs_dim].copy()
                 for _ in range(options['max_inner_niter']):
                     grad_a = mu.T @ y[:, obs_dim] - (mu + va).T @ lam[:, obs_dim]
-                    neghess_a = (mu + va).T @ (lam[:, [obs_dim]] * (mu + va)) + wv
 
-                    try:
-                        delta_a = solve(neghess_a, grad_a, sym_pos=True)
-                    except LinAlgError:
+                    if options['hessian']:
+                        neghess_a = (mu + va).T @ (lam[:, [obs_dim]] * (mu + va)) + wv
+
+                        try:
+                            delta_a = solve(neghess_a, grad_a, sym_pos=True)
+                        except LinAlgError:
+                            logger.error('singular loading hessian')
+                            delta_a = grad_a
+                    else:
                         delta_a = grad_a
 
                     delta_a = optimizer_a.update(delta_a)
@@ -309,12 +319,16 @@ class VLGPModel(Model):
                 old_b_slice = b[:, obs_dim].copy()
                 for _ in range(options['max_inner_niter']):
                     grad_b = h[obs_dim, :].T @ (y[:, obs_dim] - lam[:, obs_dim])
-                    neghess_b = h[obs_dim, :].T @ (lam[:, [obs_dim]] * h[obs_dim, :])
 
-                    # TODO: inactive neurons never fire across all trials which may cause zero Hessian
-                    try:
-                        delta_b = solve(neghess_b, grad_b, sym_pos=True)
-                    except LinAlgError:
+                    if options['hessian']:
+                        neghess_b = h[obs_dim, :].T @ (lam[:, [obs_dim]] * h[obs_dim, :])
+                        # TODO: inactive neurons never fire across all trials which may cause zero Hessian
+                        try:
+                            delta_b = solve(neghess_b, grad_b, sym_pos=True)
+                        except LinAlgError:
+                            logger.error('singular regression hessian')
+                            delta_b = grad_b
+                    else:
                         delta_b = grad_b
 
                     delta_b = optimizer_b.update(delta_b)
@@ -345,6 +359,7 @@ class VLGPModel(Model):
             # a /= scale
             # mu *= scale.squeeze()  # compensate latent
             # obj['mu'] = mu.reshape(obj['mu'].shape)
+            # noinspection PyTupleAssignmentBalance
             U, s, Vh = svd(a, full_matrices=False)
             fit.mu = reshape(mu @ a @ Vh.T, (ntrial, nbin, dyn_ndim))
             fit.a = Vh
@@ -379,6 +394,7 @@ class VLGPModel(Model):
         for dyn_dim in range(dyn_ndim):
             corr_mat = exp(-omega[dyn_dim] * Dsq) + eps * identity(segment_size)
             cov_mat = sigma[dyn_dim] ** 2 * exp(-omega[dyn_dim] * Dsq) + eps * identity(segment_size)
+            # noinspection PyTypeChecker
             s_mat = dstack([cov_mat - cov_mat @ solve(diag(1 / (eps + w_segments[:, dyn_dim, segment])) + cov_mat,
                                                       cov_mat, sym_pos=True) for segment in
                             range(nsegment)])
@@ -387,9 +403,6 @@ class VLGPModel(Model):
                                                                     sym_pos=True) + trace(
                     solve(corr_mat, s_mat[:, :, segment], sym_pos=True)) for segment in range(nsegment)])
                 sigma[dyn_dim] = sqrt(acc / (segment_size * nsegment))
-            # M = dstack([outer(win_mu[:, ilatent, iseg], win_mu[:, ilatent, iseg]) for iseg in range(nseg)])
-            # mini = minimize(kl, x0=log(omega[ilatent]), jac=klprime, args=(sigma[ilatent], window, win_mu[:, ilatent, :],
-            # M, S, eps))
             if not options['fixed_prior_scale']:
                 mini = minimize_scalar(kl,
                                        bounds=(log(omega[dyn_dim] / omega_factor), log(omega[dyn_dim] * omega_factor)),

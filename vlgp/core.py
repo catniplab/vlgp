@@ -1,7 +1,6 @@
 """
 Inference
 """
-# TODO: change einsum to tensordot for performance
 
 import timeit
 import warnings
@@ -14,7 +13,7 @@ from numpy.linalg import norm, slogdet, LinAlgError
 from scipy import stats
 from scipy.linalg import lstsq, eigh, solve, svd
 from scipy.stats import spearmanr
-from sklearn.decomposition.factor_analysis import FactorAnalysis
+import sklearn.decomposition.factor_analysis
 
 from .hyper import learngp
 from .math import ichol_gauss, subspace, sexp
@@ -59,6 +58,7 @@ def elbo(obj):
 
     llspike = sum(y[:, spike] * eta[:, spike] - lam[:, spike])  # verified by predict()
 
+    # noinspection PyTypeChecker
     lllfp = - 0.5 * sum(((y[:, lfp] - eta[:, lfp]) ** 2 + v @ (a[:, lfp] ** 2)) / noise[lfp] + log(noise[lfp]))
 
     ll = llspike + lllfp
@@ -86,7 +86,7 @@ def elbo(obj):
 
 def firing_rate(mu, v, a, b, h):
     # eta_b = np.vstack(h_row @ b_col for h_row, b_col in zip(h, b.T)).T  # slower way
-    eta = mu @ a + np.einsum('ijk, ki -> ji', h, b)  # (neuron, time, lag) x (lag, neuron) -> (time, neuron)
+    eta = mu @ a + einsum('ijk, ki -> ji', h, b)  # (neuron, time, lag) x (lag, neuron) -> (time, neuron)
     lam = sexp(eta + 0.5 * v @ (a ** 2))
     return lam, eta
 
@@ -148,10 +148,8 @@ def inferpost(obj, **kwargs):
         w = obj['w'][itrial, :]
         v = obj['v'][itrial, :]
 
-        # eta = mu @ a + einsum('ijk, ki -> ji', h, b) # (neuron, time, lag) . (lag, neuron)
-        # lam = sexp(eta + 0.5 * v @ (a ** 2))
-        lam, eta = firing_rate(mu, v, a, b, h)
         for ilatent in range(nlatent):
+            lam, eta = firing_rate(mu, v, a, b, h)
             G = chol[ilatent, :, :]
 
             resid[:, spike] = y[:, spike] - lam[:, spike]  # residuals of Poisson observations
@@ -161,14 +159,14 @@ def inferpost(obj, **kwargs):
                             ((y[:, lfp] - eta[:, lfp]) / noise[lfp]) @ a[ilatent, lfp]
             # inner loop
             optimizer = kwargs['optimizer_mu'][itrial, ilatent]
-            old_slice = mu[:, ilatent]
+            old_slice = mu[:, ilatent].copy()
             for _ in range(kwargs['inner_niter']):
-                # grad_mu = grad_mu_resid - lstsq(G.T, lstsq(G, old_slice)[0])[0]
-                grad_mu = grad_mu_resid
+                grad_mu = grad_mu_resid - lstsq(G.T, lstsq(G, old_slice)[0])[0]
+                # grad_mu = grad_mu_resid
                 dmu_acc[itrial, :, ilatent] = accumulate(dmu_acc[itrial, :, ilatent], grad_mu, decay)
 
                 if adjhess:
-                    wadj = (w[:, [ilatent]] + sqrt(eps + dmu_acc[itrial, :, ilatent])[..., newaxis])  # adjusted Hessian
+                    wadj = (w[:, [ilatent]] + sqrt(eps + dmu_acc[itrial, :, [ilatent]]))  # adjusted Hessian
                 else:
                     wadj = w[:, [ilatent]]  # keep dimension
                 GtWG = G.T @ (wadj * G)
@@ -202,7 +200,7 @@ def inferpost(obj, **kwargs):
         U[:, spike] = lam[:, spike]
         U[:, lfp] = 1 / noise[lfp]
         w[:] = U @ (a.T ** 2)
-        if not kwargs['MAP']:
+        if kwargs['method'] == 'VB':
             for ilatent in range(nlatent):
                 G = chol[ilatent, :, :]
                 GtWG = G.T @ (w[:, [ilatent]] * G)
@@ -248,19 +246,17 @@ def inferparam(obj, **kwargs):
         if channel[ichannel] == 'spike':
             # loading
             va = v * a[:, ichannel]  # (ntime, nlatent)
-            wv = diag(lam[:, ichannel].dot(v))
+            wv = diag(lam[:, ichannel] @ v)
 
             # inner loop
-            old_slice = a[:, ichannel]
+            old_slice = a[:, ichannel].copy()
             for _ in range(kwargs['inner_niter']):
-                grad_a = mu.T.dot(y[:, ichannel]) - (mu + va).T.dot(lam[:, ichannel])
+                grad_a = mu.T @ y[:, ichannel] - (mu + va).T @ lam[:, ichannel]
                 # grad_a = mu.T.dot(y[:, train] - lam[:, train])
                 da_acc[:, ichannel] = accumulate(da_acc[:, ichannel], grad_a, decay)
 
-                if kwargs['param_opt'] == 'GA':
-                    delta_a = grad_a / sqrt(eps + da_acc[:, ichannel])
-                else:
-                    neghess_a = (mu + va).T.dot(lam[:, ichannel, newaxis] * (mu + va)) + wv
+                if kwargs['hessian']:
+                    neghess_a = (mu + va).T @ diag(lam[:, ichannel]) @ (mu + va) + wv
                     # neghess_a = mu.T.dot(lam[:, train, newaxis] * mu)
 
                     if adjhess:
@@ -269,8 +265,11 @@ def inferparam(obj, **kwargs):
                         try:
                             delta_a = solve(neghess_a, grad_a, sym_pos=True)
                         except LinAlgError:
-                            print('Singular Hessian a')
+                            print('singular Hessian a')
                             delta_a = grad_a
+                else:
+                    delta_a = grad_a
+
                 if kwargs['Adam']:
                     delta_a = optimizer_a.update(delta_a)
                 new_slice = old_slice + delta_a
@@ -280,14 +279,13 @@ def inferparam(obj, **kwargs):
             a[:, ichannel] = old_slice
 
             # bias
-            old_slice = b[:, ichannel]
+            old_slice = b[:, ichannel].copy()
             for _ in range(kwargs['inner_niter']):
-                grad_b = h[ichannel, :].T.dot(y[:, ichannel] - lam[:, ichannel])
+                grad_b = h[ichannel, :].T @ (y[:, ichannel] - lam[:, ichannel])
                 db_acc[:, ichannel] = accumulate(db_acc[:, ichannel], grad_b, decay)
-                if kwargs['param_opt'] == 'GA':
-                    delta_b = grad_b / sqrt(eps + db_acc[:, ichannel])
-                else:
-                    neghess_b = h[ichannel, :].T.dot(lam[:, ichannel, newaxis] * h[ichannel, :])
+
+                if kwargs['hessian']:
+                    neghess_b = h[ichannel, :].T @ diag(lam[:, ichannel]) @ h[ichannel, :]
                     # TODO: inactive neurons never fire across all trials which may cause zero Hessian
                     if adjhess:
                         delta_b = solve(neghess_b + diag(sqrt(eps + db_acc[:, ichannel])), grad_b, sym_pos=True)
@@ -295,8 +293,11 @@ def inferparam(obj, **kwargs):
                         try:
                             delta_b = solve(neghess_b, grad_b, sym_pos=True)
                         except LinAlgError:
-                            print('Singular Hessian b')
+                            print('singular Hessian b')
                             delta_b = grad_b
+                else:
+                    delta_b = grad_b
+
                 if kwargs['Adam']:
                     delta_b = optimizer_b.update(delta_b)
                 new_slice = old_slice + delta_b
@@ -307,27 +308,28 @@ def inferparam(obj, **kwargs):
         elif channel[ichannel] == 'lfp':
             # a's least squares solution for Gaussian channel
             # (m'm + diag(j'v))^-1 m'(y - Hb)
-            a[:, ichannel] = solve(mu.T.dot(mu) + diag(sum(v, axis=0)),
-                                   mu.T.dot(y[:, ichannel] - h[ichannel, :].dot(b[:, ichannel])),
-                                   sym_pos=True)
+            a[:, ichannel] = solve(mu.T @ mu + diag(sum(v, axis=0)),
+                                   mu.T @ (y[:, ichannel] - h[ichannel, :] @ b[:, ichannel]), sym_pos=True)
 
             # b's least squares solution for Gaussian channel
             # (H'H)^-1 H'(y - ma)
-            b[:, ichannel] = solve(h[ichannel, :].T.dot(h[ichannel, :]),
-                                   h[ichannel, :].T.dot(y[:, ichannel] - mu.dot(a[:, ichannel])), sym_pos=True)
+            b[:, ichannel] = solve(h[ichannel, :].T @ h[ichannel, :],
+                                   h[ichannel, :].T @ (y[:, ichannel] - mu @ a[:, ichannel]), sym_pos=True)
         else:
             raise ValueError('Unsupported channel')
+        lam, eta = firing_rate(mu, v, a, b, h)
         obj['noise'] = var(y - eta, axis=0, ddof=0)  # MLE
 
     # normalize loading by latent and rescale latent
     if kwargs['learn_post']:
-        # scale = norm(a, ord=inf, axis=1)[..., newaxis]
-        # a /= scale
-        # mu *= scale.squeeze()  # compensate latent
-        # obj['mu'] = mu.reshape(obj['mu'].shape)
-        U, s, Vh = svd(a, full_matrices=False)
-        obj['mu'] = np.reshape(mu @ a @ Vh.T, (ntrial, ntime, nlatent))
-        a[:] = Vh
+        scale = norm(a, ord=inf, axis=1)[..., newaxis]
+        a /= scale
+        mu *= scale.squeeze()  # compensate latent
+        obj['mu'] = mu.reshape(obj['mu'].shape)
+        # noinspection PyTupleAssignmentBalance
+        # U, s, Vh = svd(a, full_matrices=False)
+        # obj['mu'] = np.reshape(mu @ a @ Vh.T, (ntrial, ntime, nlatent))
+        # a[:] = Vh
 
 
 def fill_default_args(**kwargs):
@@ -345,18 +347,17 @@ def fill_default_args(**kwargs):
     kwargs['learn_param'] = kwargs.get('learn_param', True)
     kwargs['learn_sigma'] = kwargs.get('learn_sigma', False)
     kwargs['learn_omega'] = kwargs.get('learn_omega', False)
-    kwargs['nadjhess'] = kwargs.get('nadjhess', 5)
     kwargs['tol'] = kwargs.get('tol', 1e-5)
-    kwargs['eps'] = kwargs.get('eps', 1e-6)
+    kwargs['eps'] = kwargs.get('eps', 1e-8)
     kwargs['nhyper'] = kwargs.get('nhyper', 5)
     kwargs['decay'] = kwargs.get('decay', 0)
     kwargs['sigma_factor'] = kwargs.get('sigma_factor', 5)
     kwargs['omega_factor'] = kwargs.get('omega_factor', 5)
-    kwargs['param_opt'] = kwargs.get('param_opt', 'NR')
+    kwargs['hessian'] = kwargs.get('hessian', False)
     kwargs['moreparam'] = kwargs.get('moreparam', False)
     kwargs['adjhess'] = kwargs.get('adjhess', True)
-    kwargs['learning_rate'] = kwargs.get('learning_rate', 1.0)
-    kwargs['MAP'] = kwargs.get('MAP', False)
+    kwargs['learning_rate'] = kwargs.get('learning_rate', 0.001)
+    kwargs['method'] = kwargs.get('method', 'VB')
     kwargs['post_prediction'] = kwargs.get('post_prediction', True)
     kwargs['backtrack'] = kwargs.get('backtrack', True)
     kwargs['inner_niter'] = kwargs.get('inner_niter', 1)
@@ -415,6 +416,8 @@ def infer(obj, fstat=None, **kwargs):
     converged = False
     stop = False
     infer_tick = timeit.default_timer()
+
+    logging_counter = 0
 
     if kwargs['verbose']:
         print('\nInference starts')
@@ -515,17 +518,18 @@ def infer(obj, fstat=None, **kwargs):
         stat[iiter]['omega'] = good_omega
 
         # TODO: change stat to OrderedDict
-        if kwargs['verbose'] and iiter % 50 == 0:
+        if kwargs['verbose'] and iiter == 2 ** logging_counter:
             print('\n[{}]'.format(iiter))
             for k in sorted(stat[iiter]):
                 print('{}: {}'.format(k, stat[iiter][k]))
+            logging_counter += 1
 
         iiter += 1
     infer_tock = timeit.default_timer()
 
     if kwargs['verbose']:
         print('\nInference ends')
-        print('{} iterations, ELBO: {:.4f}, elapsed: {:.2f}, converged: {}\n'.format(iiter - 1,
+        print('{} iterations, ELBO: {:.4f}, elapsed: {:.3f}, converged: {}\n'.format(iiter - 1,
                                                                                      lb[iiter - 1],
                                                                                      infer_tock - infer_tick,
                                                                                      converged))
@@ -598,7 +602,7 @@ def fit(y, channel, sigma, omega, a=None, b=None, mu=None, x=None, alpha=None, b
     # Use factor analysis if both missing initial values
     # Use least squares if missing one of loading and latent
     if a is None and mu is None:
-        fa = FactorAnalysis(n_components=nlatent, svd_method='lapack')
+        fa = sklearn.decomposition.factor_analysis.FactorAnalysis(n_components=nlatent, svd_method='lapack')
         mu = fa.fit_transform(y.reshape((-1, nchannel)))
         a = fa.components_
 
@@ -608,6 +612,7 @@ def fit(y, channel, sigma, omega, a=None, b=None, mu=None, x=None, alpha=None, b
         # a /= norm(a, ord=inf, axis=1)[..., newaxis]
         # mu = mu.reshape((ntrial, ntime, nlatent))
         # print(np.any(np.isnan(a)))
+        # noinspection PyTupleAssignmentBalance
         U, s, Vh = svd(a, full_matrices=False)
         mu = np.reshape(mu @ a @ Vh.T, (ntrial, ntime, nlatent))
         a[:] = Vh
@@ -634,10 +639,10 @@ def fit(y, channel, sigma, omega, a=None, b=None, mu=None, x=None, alpha=None, b
 
     # w and v
     w = 0 * ones((ntrial, ntime, nlatent), dtype=float)
-    if kwargs['MAP']:
-        v = 0 * ones((ntrial, ntime, nlatent), dtype=float)
-    else:
+    if kwargs['method'] == 'VB':
         v = np.repeat(sigma[newaxis, ...], ntrial * ntime, axis=1).reshape((ntrial, ntime, nlatent))
+    else:
+        v = 0 * ones((ntrial, ntime, nlatent), dtype=float)
 
     obj = dict(y=y, channel=channel, h=h, sigma=sigma, omega=omega, chol=chol, mu=mu, w=w, v=v, L=L, a=a, b=b,
                noise=noise, x=x, alpha=alpha, beta=beta)
@@ -698,7 +703,7 @@ def seqfit(y, channel, sigma, omega, lag=0, rank=500, copy=False, **kwargs):
         chol[ilatent, :] = ichol_gauss(ntime, omega[ilatent], rank) * sigma[ilatent]
 
     # initialize posterior
-    fa = FactorAnalysis(n_components=nlatent, svd_method='lapack')
+    fa = sklearn.decomposition.factor_analysis.FactorAnalysis(n_components=nlatent, svd_method='lapack')
     mu = fa.fit_transform(y.reshape((-1, nchannel)))
     a = fa.components_
 

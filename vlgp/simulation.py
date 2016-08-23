@@ -6,6 +6,7 @@ Spike train
 import numpy as np
 from numpy.random import random, multivariate_normal
 from scipy import stats
+from scipy.linalg import toeplitz
 
 from .math import sexp, identity, ichol_gauss
 
@@ -24,22 +25,22 @@ def sqexp(t, omega):
     return np.exp(- omega * t ** 2)
 
 
-def spectral(f, omega):
-    """Spectral density of squared exponential covariance function
+# def spectral(f, omega):
+#     """Spectral density of squared exponential covariance function
+#
+#     Args:
+#         f: frequency
+#         omega: inverse of squared lengthscale
+#
+#     Returns:
+#         power
+#     """
+#
+#     return 0.5 * np.exp(- 0.25 * f * f / omega) / np.sqrt(np.pi * omega)
+#     # return np.exp(- f * f / omega)
 
-    Args:
-        f: frequency
-        omega: inverse of squared lengthscale
 
-    Returns:
-        power
-    """
-
-    return 0.5 * np.exp(- 0.25 * f * f / omega) / np.sqrt(np.pi * omega)
-    # return np.exp(- f * f / omega)
-
-
-def gauss_proc(omega, nbin, std, r=None, tol=1e-6, seed=None):
+def gp_ichol(omega, nbin, std, r=None, tol=1e-6, seed=None):
     """Simulate Gaussian processes by incomplete Choleksy factorization
 
     Args:
@@ -61,6 +62,20 @@ def gauss_proc(omega, nbin, std, r=None, tol=1e-6, seed=None):
     G = ichol_gauss(nbin, omega, r, tol)
     z = np.random.randn(r)
     x = std * G @ z
+    return x
+
+
+def gp_mvn(omega, std, nbin, ndim, eps=1e-8):
+    """Simulate GP using multivariate normal random variable
+    :param omega: 1/s^2
+    :param std: standard deviation
+    :param nbin: size
+    :param ndim: # dimensions
+    :param eps: tiny positive number
+    :return: (nbin, ndim)
+    """
+    cov = toeplitz(np.exp(- omega * np.arange(nbin) ** 2)) + eps * np.identity(nbin)
+    x = std * np.random.multivariate_normal(np.zeros(nbin), cov, ndim).T
     return x
 
 
@@ -198,51 +213,51 @@ def lfp(x, a, b, K, link=identity, seed=None):
     return y, h, mu
 
 
-def observation(x, a, b, dist=multivariate_normal, link=identity, seed=None, *args):
-    """Simulate observations driven by latent processes
+# def observation(x, a, b, dist=multivariate_normal, link=identity, seed=None, *args):
+#     """Simulate observations driven by latent processes
+#
+#     Args:
+#         x: latent processes (ntrial, ntime, nlatent)
+#         a: coefficients of x (nlatent, nchannel)
+#         b: coefficients of regression (1 + lag*nchannel, nchannel)
+#         dist: distribution
+#         link: link function
+#         seed: random seed
+#         args: arguments for random number generation
+#     Returns:
+#         y: observations (ntrial, ntime, nchannel)
+#         h: autoregressor (nchannel, ntrial, ntime, 1 + lag*nchannel)
+#         mu: mean (ntrial, ntime, nchannel)
+#     """
+#     if seed is not None:
+#         np.random.seed(seed)
+#
+#     x = np.asarray(x)
+#     if x.ndim < 3:
+#         x = np.atleast_3d(x)
+#         x = np.rollaxis(x, axis=-1)
+#
+#     ntrial, ntime, nlatent = x.shape
+#     nchannel = a.shape[1]
+#     lag = b.shape[0] - 1
+#
+#     y = np.empty((ntrial, ntime, nchannel), dtype=float)
+#     h = np.zeros((nchannel, ntrial, ntime, 1 + lag), dtype=float)
+#     h[:, :, :, 0] = 1
+#     mu = np.empty_like(y, dtype=float)
+#
+#     for m in range(ntrial):
+#         for t in range(ntime):
+#             mu[m, t, :] = link(x[m, t, :] @ a + np.einsum('ij, ji -> i', h[:, m, t, :], b))
+#             y[m, t, :] = dist(mu[m, t, :], *args)
+#             if t + 1 < ntime and lag > 0:
+#                 h[:, m, t + 1, 2:] = h[:, m, t, 1:lag]  # roll rightward
+#                 h[:, m, t + 1, 1] = y[m, t, :]
+#
+#     return y, h, mu
 
-    Args:
-        x: latent processes (ntrial, ntime, nlatent)
-        a: coefficients of x (nlatent, nchannel)
-        b: coefficients of regression (1 + lag*nchannel, nchannel)
-        dist: distribution
-        link: link function
-        seed: random seed
-        args: arguments for random number generation
-    Returns:
-        y: observations (ntrial, ntime, nchannel)
-        h: autoregressor (nchannel, ntrial, ntime, 1 + lag*nchannel)
-        mu: mean (ntrial, ntime, nchannel)
-    """
-    if seed is not None:
-        np.random.seed(seed)
 
-    x = np.asarray(x)
-    if x.ndim < 3:
-        x = np.atleast_3d(x)
-        x = np.rollaxis(x, axis=-1)
-
-    ntrial, ntime, nlatent = x.shape
-    nchannel = a.shape[1]
-    lag = b.shape[0] - 1
-
-    y = np.empty((ntrial, ntime, nchannel), dtype=float)
-    h = np.zeros((nchannel, ntrial, ntime, 1 + lag), dtype=float)
-    h[:, :, :, 0] = 1
-    mu = np.empty_like(y, dtype=float)
-
-    for m in range(ntrial):
-        for t in range(ntime):
-            mu[m, t, :] = link(x[m, t, :] @ a + np.einsum('ij, ji -> i', h[:, m, t, :], b))
-            y[m, t, :] = dist(mu[m, t, :], *args)
-            if t + 1 < ntime and lag > 0:
-                h[:, m, t + 1, 2:] = h[:, m, t, 1:lag]  # roll rightward
-                h[:, m, t + 1, 1] = y[m, t, :]
-
-    return y, h, mu
-
-
-def lorenz(n, dt=0.01, s=10, r=28, b=2.667, x0=None, constraint=True):
+def lorenz(n, dt=0.01, s=10, r=28, b=2.667, x0=None, regular=True):
     """Lorenz attractor
 
     Args:
@@ -252,7 +267,7 @@ def lorenz(n, dt=0.01, s=10, r=28, b=2.667, x0=None, constraint=True):
         r:
         b:
         x0: initial values
-        constraint: demean, rescale
+        regular: demean, rescale
 
     Returns:
         3-dimenional dynamics
@@ -280,6 +295,6 @@ def lorenz(n, dt=0.01, s=10, r=28, b=2.667, x0=None, constraint=True):
         xs[i + 1, 1] = xs[i, 1] + dy * dt
         xs[i + 1, 2] = xs[i, 2] + dz * dt
 
-    if constraint:
+    if regular:
         xs = (xs - xs.mean(axis=0)) / norm(xs, axis=0, ord=inf)
     return xs

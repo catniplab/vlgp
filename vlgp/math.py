@@ -23,7 +23,7 @@ def rectlin(x):
 
 
 @jit
-def sexp(x):
+def sexp(x: np.ndarray) -> np.ndarray:
     """
     truncated exp
 
