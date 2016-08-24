@@ -4,9 +4,9 @@ from abc import ABCMeta, abstractmethod
 
 import numpy as np
 from numpy import identity, empty, einsum, allclose, diag, var, reshape, arange, dstack, exp, sqrt, log, trace, \
-    expand_dims, zeros, ones, repeat, copyto, asarray
+    expand_dims, zeros, ones, repeat, copyto, asarray, inf
 from numpy.random.mtrand import choice
-from scipy.linalg import solve, LinAlgError, svd, toeplitz
+from scipy.linalg import solve, LinAlgError, svd, toeplitz, norm
 from scipy.optimize import minimize_scalar
 
 from .hyper import kl
@@ -212,9 +212,11 @@ class VLGPModel(Model):
             w = fit.w[trial, :]
             v = fit.v[trial, :]
 
-            eta = mu @ a + einsum('ijk, ki -> ji', h, b)  # (neuron, time, lag) . (lag, neuron)
+            hb = einsum('ijk, ki -> ji', h, b)
+            eta = mu @ a + hb
             lam = sexp(eta + 0.5 * v @ (a ** 2))
             for dyn_dim in range(dyn_ndim):
+                # lam, eta = firing_rate(mu, v, a, b, h)
                 G = prior_ichol[dyn_dim, :, :]
 
                 residual[:, spike_dims] = y[:, spike_dims] - lam[:, spike_dims]  # residuals of Poisson observations
@@ -224,29 +226,26 @@ class VLGPModel(Model):
                 # inner loop
                 optimizer = options['optimizer_mu'][trial, dyn_dim]
                 old_slice = mu[:, dyn_dim].copy()
-                for _ in range(options['max_inner_niter']):
-                    w_l = w[:, [dyn_dim]]  # keep dimension
-                    GtWG = G.T @ (w_l * G)
-
+                for _ in range(options['inner_niter']):
+                    wadj = w[:, [dyn_dim]]  # keep dimension
+                    GtWG = G.T @ (wadj * G)
                     u = G @ (G.T @ (residual @ a[dyn_dim, :])) - old_slice
-                    delta_mu = u - G @ ((w_l * G).T @ u) + \
-                               G @ (GtWG @ solve(eye_rank + GtWG, (w_l * G).T @ u, sym_pos=True))
+                    delta_mu = u - G @ ((wadj * G).T @ u) + G @ (
+                    GtWG @ solve(eye_rank + GtWG, (wadj * G).T @ u, sym_pos=True))
+                    new_slice = old_slice + optimizer.update(delta_mu)
 
-                    delta_mu = optimizer.update(delta_mu)
-                    new_slice = old_slice + delta_mu
-
-                    if allclose(old_slice, new_slice):
-                        break
+                    # if np.allclose(old_slice, new_slice):
+                    #     break
                     copyto(old_slice, new_slice)
 
                 mu[:, dyn_dim] = old_slice
 
-            eta = mu @ a + einsum('ijk, ki -> ji', h, b)
+            eta = mu @ a + hb
             lam = sexp(eta + 0.5 * v @ (a ** 2))
+            # lam, eta = firing_rate(mu, v, a, b, h)
             U[:, spike_dims] = lam[:, spike_dims]
             U[:, lfp_dims] = 1 / noise[lfp_dims]
             w[:] = U @ (a.T ** 2)
-
             if options['method'] == 'VB':
                 for dyn_dim in range(dyn_ndim):
                     G = prior_ichol[dyn_dim, :, :]
@@ -268,6 +267,8 @@ class VLGPModel(Model):
         logger = self._logger
         options = self._fit.options
 
+        eps = fit.options['eps']
+
         obs_ndim, ntrial, nbin, lag1 = fit.h.shape  # neuron, trial, time, lag + 1
         dyn_ndim, _, rank = fit.prior_ichol.shape  # latent, time, rank
 
@@ -283,6 +284,7 @@ class VLGPModel(Model):
 
         eta = mu @ a + einsum('ijk, ki -> ji', h, b)
         lam = sexp(eta + 0.5 * v @ (a ** 2))
+        fit.noise = var(y - eta, axis=0, ddof=0)  # MLE
         for obs_dim in range(obs_ndim):
             optimizer_a = options['optimizer_a'][obs_dim]
             optimizer_b = options['optimizer_b'][obs_dim]
@@ -310,8 +312,8 @@ class VLGPModel(Model):
 
                     delta_a = optimizer_a.update(delta_a)
                     new_a_slice = old_a_slice + delta_a
-                    if allclose(old_a_slice, new_a_slice):
-                        break
+                    # if allclose(old_a_slice, new_a_slice):
+                    #     break
                     copyto(old_a_slice, new_a_slice)
                 a[:, obs_dim] = old_a_slice
 
@@ -350,19 +352,18 @@ class VLGPModel(Model):
                                       h[obs_dim, :].T @ (y[:, obs_dim] - mu @ a[:, obs_dim]), sym_pos=True)
             else:
                 raise ValueError('unsupported observation type')
-        eta = mu @ a + einsum('ijk, ki -> ji', h, b)
-        fit.noise = var(y - eta, axis=0, ddof=0)  # MLE
 
         # normalize loading
         if not options['skip_estep']:
-            # scale = norm(a, ord=inf, axis=1)[..., newaxis]
-            # a /= scale
-            # mu *= scale.squeeze()  # compensate latent
-            # obj['mu'] = mu.reshape(obj['mu'].shape)
+            scale = norm(a, ord=inf, axis=1, keepdims=True) + eps
+            a /= scale
+            mu *= scale.squeeze()  # compensate latent
+            fit.mu = mu.reshape(fit.mu.shape)
+
             # noinspection PyTupleAssignmentBalance
-            U, s, Vh = svd(a, full_matrices=False)
-            fit.mu = reshape(mu @ a @ Vh.T, (ntrial, nbin, dyn_ndim))
-            fit.a = Vh
+            # U, s, Vh = svd(a, full_matrices=False)
+            # fit.mu = reshape(mu @ a @ Vh.T, (ntrial, nbin, dyn_ndim))
+            # fit.a = Vh
 
     def hstep(self):
         fit = self._fit

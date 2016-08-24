@@ -239,6 +239,7 @@ def mstep(obj, options):
 
     # TODO: # of neuron is much larger than L and p. It would better not looping on neuron
     lam, eta = firing_rate(mu, v, a, b, h)
+    obj['noise'] = var(y - eta, axis=0, ddof=0)  # MLE
     for obs_dim in range(obs_ndim):
         optimizer_a = options['optimizer_a'][obs_dim]
         optimizer_b = options['optimizer_b'][obs_dim]
@@ -319,8 +320,6 @@ def mstep(obj, options):
                                    h[obs_dim, :].T @ (y[:, obs_dim] - mu @ a[:, obs_dim]), sym_pos=True)
         else:
             raise ValueError('Unsupported channel')
-    lam, eta = firing_rate(mu, v, a, b, h)
-    obj['noise'] = var(y - eta, axis=0, ddof=0)  # MLE
 
     # normalize loading by latent and rescale latent
     if options['learn_post']:
@@ -332,38 +331,6 @@ def mstep(obj, options):
         # U, s, Vh = svd(a, full_matrices=False)
         # obj['mu'] = np.reshape(mu @ a @ Vh.T, (ntrial, nbin, dyn_ndim))
         # a[:] = Vh
-
-
-def fill_default_args(options):
-    """Fill default values of controlling arguments if missing
-    Args:
-        options: optional arguments controlling inference
-
-    Returns:
-        valid arguments
-    """
-    options['verbose'] = options.get('verbose', False)
-    options['niter'] = options.get('niter', 50)
-    # options['infer'] = options.get('infer', 'both')
-    options['learn_post'] = options.get('learn_post', True)
-    options['learn_param'] = options.get('learn_param', True)
-    options['learn_sigma'] = options.get('learn_sigma', False)
-    options['learn_omega'] = options.get('learn_omega', False)
-    options['tol'] = options.get('tol', 1e-5)
-    options['eps'] = options.get('eps', 1e-8)
-    options['nhyper'] = options.get('nhyper', 5)
-    options['decay'] = options.get('decay', 0)
-    options['sigma_factor'] = options.get('sigma_factor', 5)
-    options['omega_factor'] = options.get('omega_factor', 5)
-    options['hessian'] = options.get('hessian', False)
-    options['moreparam'] = options.get('moreparam', False)
-    options['adjhess'] = options.get('adjhess', True)
-    options['learning_rate'] = options.get('learning_rate', 0.001)
-    options['method'] = options.get('method', 'VB')
-    options['post_prediction'] = options.get('post_prediction', True)
-    options['backtrack'] = options.get('backtrack', True)
-    options['inner_niter'] = options.get('inner_niter', 1)
-    return options
 
 
 def infer(obj, options):
@@ -544,38 +511,51 @@ def infer(obj, options):
     return obj
 
 
-def fit(y, channel, sigma, omega, a=None, b=None, mu=None, x=None, alpha=None, beta=None, lag=0,
+def fit(y, obs_types, sigma, omega, a=None, b=None, mu=None, x=None, alpha=None, beta=None, lag=0,
         rank=500, eps=1e-8, tol=1e-5, **kwargs):
-    """Inference API
-    Args:
-        y:       observation matrix
-        channel: channel type indicator (spike/lfp)
-        sigma:   initial prior variance
-        omega:   initial prior timescale
-        a:       initial value of loading
-        b:       initial value of regression
-        mu:      initial value of latent
-        x:       optional true latent
-        alpha:   optional true loading
-        beta:    optional true regression
-        lag:     autoregressive lag
-        rank:    prior covariance rank
-        niter: max number of iterations
-        tol: relative tolerance for checking convergence
-        adjhess: adjust Hessian by gradient
-        decay: decay speed for the adjustment to Hessian
-        verbose: display info in every iteration
-        learn_post: optimize the posterior
-        learn_param: optimize the parameters
-        learn_sigma: optimize prior variance
-        learn_omega: optimize prior timescale
-        nhyper: optimize hyperparameters every nhyper iteration
+    """
+    vLGP main function
 
-    Returns:
-        inference object
+    Parameters
+    ----------
+    y : ndarray
+        obserbation
+    obs_types : ndarray
+        types of observation dimensions, 'spike' or 'lfp'
+    sigma : ndarray
+        prior variance
+    omega : ndarray
+        1 / prior timescale^2
+    a : ndarray, optional
+        initial value of loading
+    b : ndarray, optional
+        initial value of regression
+    mu : ndarray, optional
+        initial value of posterior mean
+    x : ndarray, optional
+        true value of latent
+    alpha : ndarray, optional
+        true value of loading
+    beta : ndarray, optional
+        true value of regression
+    lag : int, optional
+        autoregressive lag
+    rank : int, optional
+        rank of incomplete Cholesky
+    eps : double, optional
+        a small positive number
+    tol : double, optional
+        numerical tolerance
+    kwargs : dict, optional
+        algorithm options. See fill_options()
+
+    Returns
+    -------
+    dict
+        fit
     """
     assert sigma.shape == omega.shape
-    options = fill_default_args(kwargs)
+    options = fill_options(kwargs)
     options['eps'] = eps
     options['tol'] = tol
 
@@ -586,7 +566,7 @@ def fit(y, channel, sigma, omega, a=None, b=None, mu=None, x=None, alpha=None, b
     if y.ndim < 3:
         y = y[newaxis, ...]
 
-    channel = asarray(channel)
+    obs_types = asarray(obs_types)
     ntrial, nbin, obs_ndim = y.shape
     dyn_ndim = sigma.shape[0]
 
@@ -646,7 +626,7 @@ def fit(y, channel, sigma, omega, a=None, b=None, mu=None, x=None, alpha=None, b
     else:
         v = 0 * ones((ntrial, nbin, dyn_ndim), dtype=float)
 
-    obj = dict(y=y, channel=channel, h=h, sigma=sigma, omega=omega, chol=chol, mu=mu, w=w, v=v, L=L, a=a, b=b,
+    obj = dict(y=y, channel=obs_types, h=h, sigma=sigma, omega=omega, chol=chol, mu=mu, w=w, v=v, L=L, a=a, b=b,
                noise=noise, x=x, alpha=alpha, beta=beta)
 
     options['dmu_acc'] = zeros_like(mu)
@@ -668,6 +648,40 @@ def fit(y, channel, sigma, omega, a=None, b=None, mu=None, x=None, alpha=None, b
     return inference, options
 
 
+def fill_options(options):
+    """
+    Fill missing options with default values
+
+    Parameters
+    ----------
+    options : dict
+        options with missing values
+
+    Returns
+    -------
+    dict
+        full options
+    """
+    options['verbose'] = options.get('verbose', False)  # detailed output
+    options['niter'] = options.get('niter', 2000)  # max # of iteration
+    options['learn_post'] = options.get('learn_post', True)  # optimize posterior
+    options['learn_param'] = options.get('learn_param', True)  # optimize loading and regression
+    options['learn_sigma'] = options.get('learn_sigma', False)  # optimize prior variance
+    options['learn_omega'] = options.get('learn_omega', False)  # optimize prior timescale
+    options['nhyper'] = options.get('nhyper', 5)  # optimize hyperparams every # iterations
+    options['decay'] = options.get('decay', 0)  # decay rate of the second moment of gradient. TODO: move to optimizers
+    options['sigma_factor'] = options.get('sigma_factor', 5)  # multiplicative step length for optimizing sigma
+    options['omega_factor'] = options.get('omega_factor', 5)  # multiplicative step length for optimizing omega
+    options['hessian'] = options.get('hessian', False)  # use Hessian in M-step
+    options['adjhess'] = options.get('adjhess', True)  # regular Hessian by gradient
+    options['learning_rate'] = options.get('learning_rate', 0.001)  # learning rate
+    options['method'] = options.get('method', 'VB')  # method of estimate, 'VB' or 'MAP'
+    options['post_prediction'] = options.get('post_prediction', True)  # use posterior variance in predicted firing rate
+    options['backtrack'] = options.get('backtrack', True)  # recover from decreased ELBO. TODO: remove
+    options['inner_niter'] = options.get('inner_niter', 1)  # max # of inner loop
+    return options
+
+
 def seqfit(y, channel, sigma, omega, lag=0, rank=500, copy=False, **kwargs):
     """Sequential inference
     Args:
@@ -684,7 +698,7 @@ def seqfit(y, channel, sigma, omega, lag=0, rank=500, copy=False, **kwargs):
         list of inference objects
     """
     assert sigma.shape == omega.shape
-    kwargs = fill_default_args(**kwargs)
+    kwargs = fill_options(**kwargs)
 
     y = asarray(y)
     if y.ndim < 2:
@@ -760,7 +774,7 @@ def leave_one_out(trial, model, **kwargs):
     Returns:
         trial with prediction
     """
-    kwargs = fill_default_args(**kwargs)
+    kwargs = fill_options(**kwargs)
     y = trial['y']
     h = trial['h']
     channel = model['channel']
@@ -836,7 +850,7 @@ def cv(y, channel, sigma, omega, a0=None, mu0=None, lag=0, rank=500, **kwargs):
     Returns:
         prediction of all neurons
     """
-    kwargs = fill_default_args(**kwargs)
+    kwargs = fill_options(**kwargs)
     assert sigma.shape == omega.shape
 
     y = asarray(y)
@@ -874,23 +888,29 @@ def cv(y, channel, sigma, omega, a0=None, mu0=None, lag=0, rank=500, **kwargs):
 
 
 def postprocess(obj):
-    """Remove intermediate and empty variables, and compute decomposition of posterior covariance
-    Args:
-        obj: raw inference
+    """
+    Remove intermediate and empty variables, and compute decomposition of posterior covariance.
 
-    Returns:
-        infernece object
+    Parameters
+    ----------
+    obj : dict
+        raw fit
+
+    Returns
+    -------
+    dict
+        fit that contains prior, posterior, loading and regression
     """
     ntrial = obj['mu'].shape[0]
     chol = obj['chol']
-    nlatent, ntime, rank = chol.shape
+    dyn_ndim, nbin, rank = chol.shape
     w = obj['w']
     eyer = identity(rank)
-    L = empty((ntrial, nlatent, ntime, rank))
-    for itrial in range(ntrial):
-        for ilatent in range(nlatent):
-            G = chol[ilatent, :, :]
-            GtWG = G.T @ (w[itrial, :, [ilatent]] * G)
+    L = empty((ntrial, dyn_ndim, nbin, rank))
+    for trial in range(ntrial):
+        for dyn_dim in range(dyn_ndim):
+            G = chol[dyn_dim, :, :]
+            GtWG = G.T @ (w[trial, :, [dyn_dim]] * G)
             try:
                 tmp = eyer - GtWG + GtWG @ solve(eyer + GtWG, GtWG, sym_pos=True)  # A should be PD but numerically not
             except LinAlgError:
@@ -898,7 +918,7 @@ def postprocess(obj):
                 tmp = eyer - GtWG + GtWG @ lstsq(eyer + GtWG, GtWG)[0]  # least squares
             eigval, eigvec = eigh(tmp)
             eigval.clip(0, PINF, out=eigval)  # remove negative eigenvalues
-            L[itrial, ilatent, :] = G @ (eigvec @ diag(sqrt(eigval)))
+            L[trial, dyn_dim, :] = G @ (eigvec @ diag(sqrt(eigval)))
     obj['L'] = L
     keys = list(obj.keys())
     for key in keys:
@@ -912,27 +932,36 @@ def postprocess(obj):
 def predict(y, x, a, b, v=None):
     """
     Predict firing rate
-    Args:
-        y: spike trains
-        x: latent
-        a: loading
-        b: regression
-        v: posterior variance
 
-    Returns:
-        yhat: predicted firing rate
+    Parameters
+    ----------
+    y : ndarray
+        spike trains
+    x : ndarray
+        posterior mean
+    a : ndarray
+        loading
+    b : ndarray
+        regression
+    v : ndarray
+        posterior variance
+
+    Returns
+    -------
+    ndarray
+        predicted firing rate
     """
-    ntrial, ntime, ntrain = y.shape
-    nlatent = x.shape[-1]
+    ntrial, nbin, obs_ndim = y.shape
+    dyn_ndim = x.shape[-1]
     lag = b.shape[0] - 1
 
     # regression (h dot b) part
     reg = empty_like(y)
-    for itrain in range(ntrain):
-        for itrial in range(ntrial):
-            h = add_constant(lagmat(y[itrial, :, itrain], lag=lag))
-            reg[itrial, :, itrain] = h @ b[:, itrain]
-    eta = x.reshape((-1, nlatent)) @ a + reg.reshape((-1, ntrain))
-    lam = np.exp(eta + 0.5 * v.reshape((-1, nlatent)) @ (a ** 2)) if v is not None else np.exp(eta)
+    for obs_dim in range(obs_ndim):
+        for trial in range(ntrial):
+            h = add_constant(lagmat(y[trial, :, obs_dim], lag=lag))
+            reg[trial, :, obs_dim] = h @ b[:, obs_dim]
+    eta = x.reshape((-1, dyn_ndim)) @ a + reg.reshape((-1, obs_ndim))
+    lam = np.exp(eta + 0.5 * v.reshape((-1, dyn_ndim)) @ (a ** 2)) if v is not None else np.exp(eta)
     yhat = lam.reshape(y.shape)
     return yhat
