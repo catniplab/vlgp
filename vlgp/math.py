@@ -4,15 +4,15 @@ Math functions
 import warnings
 
 import numpy as np
-from scipy import linalg
 from numba import jit
+from scipy import linalg
 from scipy.linalg import svd
 
 MIN_EXP = -20
 MAX_EXP = 20
 
 
-def rectlin(x):
+def rectify(x):
     """
     rectangular linear link
 
@@ -22,8 +22,7 @@ def rectlin(x):
     return x.clip(0, np.inf)
 
 
-@jit
-def sexp(x: np.ndarray) -> np.ndarray:
+def sexp(x):
     """
     truncated exp
 

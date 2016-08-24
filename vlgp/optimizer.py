@@ -10,14 +10,29 @@ class Optimizer(metaclass=ABCMeta):
 
 
 class AdamOptimizer(Optimizer):
-    def __init__(self, dim, learning_rate=0.001, b1=0.9, b2=0.999, eps=1e-8):
+    def __init__(self, ndim, learning_rate=0.001, b1=0.9, b2=0.999, eps=1e-8):
+        """
+
+        Parameters
+        ----------
+        ndim : int
+            length of updating vector
+        learning_rate : double
+            it is what it is
+        b1 : double
+            decay rate of the first moment
+        b2 : double
+            decay rate of the second moment
+        eps : double
+            a small positive number
+        """
         self._learning_rate = learning_rate
         self._b1 = b1
         self._b2 = b2
         self._eps = eps
-        self._counter = 0
-        self._m = [np.zeros(dim)]  # first moment
-        self._v = [np.zeros(dim)]  # second moment
+        self._counter = 0  # count how many updates have been computed
+        self._m = [np.zeros(ndim)]  # first moment
+        self._v = [np.zeros(ndim)]  # second moment
 
     def update(self, grad):
         self._counter += 1
@@ -31,12 +46,25 @@ class AdamOptimizer(Optimizer):
 
 
 class AdagradOptimizer(Optimizer):
-    def __init__(self, dim, learning_rate=0.001, b=0.999, eps=1e-8):
+    def __init__(self, ndim, learning_rate=0.001, b=0.999, eps=1e-8):
+        """
+
+        Parameters
+        ----------
+        ndim : int
+            length of updating vector
+        learning_rate : double
+            it is what it is
+        b : double
+            decay rate of the second moment
+        eps : double
+            a small positive number
+        """
         self._learning_rate = learning_rate
         self._b = b
         self._eps = eps
         self._counter = 0
-        self._v = [np.zeros(dim)]  # second moment
+        self._v = [np.zeros(ndim)]  # second moment
 
     def update(self, grad):
         self._counter += 1

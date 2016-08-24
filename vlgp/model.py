@@ -9,12 +9,12 @@ from numpy.random.mtrand import choice
 from scipy.linalg import solve, LinAlgError, svd, toeplitz
 from scipy.optimize import minimize_scalar
 
-from .profiler import DefaultProfiler
-from .initializer import FAInitializer
-from .util import add_constant, lagmat
 from .hyper import kl
+from .initializer import FAInitializer
 from .math import sexp, ichol_gauss
 from .optimizer import AdamOptimizer
+from .profiler import DefaultProfiler
+from .util import add_constant, lagmat
 
 
 class Model(metaclass=ABCMeta):
