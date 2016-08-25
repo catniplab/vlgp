@@ -4,7 +4,6 @@ Math functions
 import warnings
 
 import numpy as np
-from numba import jit
 from scipy import linalg
 from scipy.linalg import svd
 
@@ -22,52 +21,77 @@ def rectify(x):
     return x.clip(0, np.inf)
 
 
-def sexp(x):
+def sexp(x, lbound=MIN_EXP, ubound=MAX_EXP):
     """
-    truncated exp
+    Truncated exp
 
-    Args:
-        x: linear predictor
+    Parameters
+    ----------
+    x : ndarray
+    lbound : double
+        lower bound of x
+    ubound : double
+        upper bound of x
+    Returns
+    -------
+    ndarray
+        exp(max(x, lbound) and min(x, ubound))
     """
-    return np.exp(np.clip(x, MIN_EXP, MAX_EXP))
+    # TODO: This still takes 10% time.
+    return np.exp(np.clip(x, lbound, ubound))
 
 
 def identity(x):
     """
-    identity link
+    Identity function
 
-    Args:
-        x: linear predictor
+    Parameters
+    ----------
+    x : ndarray
+
+    Returns
+    -------
+    ndarray
     """
     return x
 
 
 def log1exp(x):
     """
-    log(1 + exp(x))
+    Function: log(1 + exp(x))
 
-    Args:
-        x: linear predictor
+    Parameters
+    ----------
+    x : ndarray
+
+    Returns
+    -------
+    ndarray
     """
     return np.log1p(np.exp(x))
 
 
 def ichol_gauss(n, omega, r, tol=1e-6):
     """
-    Incomplete Cholesky factorization of squared exponential covariance
+    Incomplete Cholesky factorization of squared exponential covariance matrix
+    A ~= GG'
 
-    K \approx GG'
+    Parameters
+    ----------
+    n : int
+        size of matrix
+    omega : double
+        1 / (2 * timescale^2)
+    r : int
+        rank
+    tol : double
+        numerical tolerance
 
-    Args:
-        n: size of covariance matrix
-        omega: inverse of 2 * squared lengthscale
-        r: rank of factorization
-        tol: tolerance of convergence
-
-    Returns:
-        incomplete lower trianglar matrix (n, r)
+    Returns
+    -------
+    ndarray
+        (n, r) matrix
     """
-
     x = np.arange(n)
     diag = np.ones(n, dtype=float)
     pvec = np.arange(n, dtype=int)
@@ -137,17 +161,20 @@ def ichol(a, tol=1e-6):
 
 def subspace(a, b, deg=True):
     """
-    Angle between two subspaces
+    Angle between two subspaces specified by the columns of a and b
+    Ported from MATLAB 'subspace' function
 
-    Find the angle between two subspaces specified by the columns of a and b
-    Ported from MATLAB subspace
+    Parameters
+    ----------
+    a : matrix
+    b : matrix
+    deg : bool
+        return degree or radian
 
-    Args:
-        a: subspace
-        b: subspace
-        deg: return in degree or radian
-    Returns:
-        angle in radian
+    Returns
+    -------
+    double
+        angle
     """
     oa = linalg.orth(a)
     ob = linalg.orth(b)
@@ -176,23 +203,24 @@ def orth(x, a):
     return x_orth, a_orth
 
 
-@jit
 def ichol_gauss2(n, omega):
     """
-    Incomplete Cholesky factorization of squared exponential covariance
+    Incomplete Cholesky factorization of squared exponential covariance matrix
+    A ~= GG'
+    This version estimates the factorization's rank. However, it requires more space.
 
-    K \approx GG'
+    Parameters
+    ----------
+    n : int
+        matrix size
+    omega : double
+        1 / (2 * timescale^2)
 
-    Args:
-        n: size of covariance matrix
-        omega: inverse of 2 * squared lengthscale
-        r: rank of factorization
-        atol: tolerance of convergence
-
-    Returns:
-        incomplete lower trianglar matrix (n, r)
+    Returns
+    -------
+    matrix
+        (n, ?)
     """
-
     x = np.arange(n)
     diag = np.ones(n, dtype=float)
     pvec = np.arange(n, dtype=int)
