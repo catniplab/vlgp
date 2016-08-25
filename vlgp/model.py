@@ -3,10 +3,10 @@ import timeit
 from abc import ABCMeta, abstractmethod
 
 import numpy as np
-from numpy import identity, empty, einsum, allclose, diag, var, reshape, arange, dstack, exp, sqrt, log, trace, \
+from numpy import identity, empty, einsum, allclose, diag, var, arange, dstack, exp, sqrt, log, trace, \
     expand_dims, zeros, ones, repeat, copyto, asarray, inf
 from numpy.random.mtrand import choice
-from scipy.linalg import solve, LinAlgError, svd, toeplitz, norm
+from scipy.linalg import solve, LinAlgError, toeplitz, norm
 from scipy.optimize import minimize_scalar
 
 from .hyper import kl
@@ -436,8 +436,53 @@ class ModelFit(metaclass=ABCMeta):
     def __setattr__(self, key, value):
         self.__dict__[key] = value
 
+    @property
+    @abstractmethod
+    def posterior_mean(self):
+        pass
+
+    @property
+    @abstractmethod
+    def loading(self):
+        pass
+
+    @property
+    @abstractmethod
+    def regression(self):
+        pass
+
+    @property
+    @abstractmethod
+    def posterior_variance(self):
+        pass
+
+    @property
+    @abstractmethod
+    def prior(self):
+        pass
+
 
 class VLGPModelFit(ModelFit):
+    @property
+    def posterior_variance(self):
+        return self.v
+
+    @property
+    def loading(self):
+        return self.a
+
+    @property
+    def posterior_mean(self):
+        return self.mu
+
+    @property
+    def regression(self):
+        return self.b
+
+    @property
+    def prior(self):
+        return self.sigma, self.omega
+
     @staticmethod
     def load(path):
         pass

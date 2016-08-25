@@ -1,4 +1,5 @@
 """Module that does inference"""
+# TODO: Move estep and mstep into infer. Update eta and frate more timely
 import timeit
 import warnings
 
@@ -54,9 +55,9 @@ def elbo(model_fit):
     lfp = obs_types == 'lfp'
 
     eta = mu @ a + einsum('ijk, ki -> ji', h.reshape((obs_ndim, nbin * ntrial, lag1)), b)
-    lam = sexp(eta + 0.5 * v @ (a ** 2))
+    frate = sexp(eta + 0.5 * v @ (a ** 2))
 
-    llspike = sum(y[:, spike] * eta[:, spike] - lam[:, spike])  # verified by predict()
+    llspike = sum(y[:, spike] * eta[:, spike] - frate[:, spike])  # verified by predict()
 
     # noinspection PyTypeChecker
     lllfp = - 0.5 * sum(((y[:, lfp] - eta[:, lfp]) ** 2 + v @ (a[:, lfp] ** 2)) / noise[lfp] + log(noise[lfp]))
@@ -109,242 +110,6 @@ def accumulate(acc, grad, b=1):
         return acc + grad ** 2
 
 
-def estep(model_fit, options):
-    """
-    Optimize posterior (E step)
-
-    Parameters
-    ----------
-    model_fit : dict
-    options : dict
-
-    Returns
-    -------
-
-    """
-    obs_ndim, ntrial, nbin, lag1 = model_fit['h'].shape  # neuron, trial, time, lag
-    dyn_ndim, _, rank = model_fit['chol'].shape  # latent, time, rank
-
-    obs_types = model_fit['channel']
-
-    chol = model_fit['chol']
-
-    a = model_fit['a']
-    b = model_fit['b']
-    noise = model_fit['noise']
-
-    dmu_acc = options['dmu_acc']
-    decay = options['decay']
-    adjust_hessian = options['adjhess']
-    eps = options['eps']
-
-    spike = obs_types == 'spike'
-    lfp = obs_types == 'lfp'
-
-    eyer = identity(rank)
-    residual = empty((nbin, obs_ndim), dtype=float)
-    U = empty((nbin, obs_ndim), dtype=float)
-
-    for trial in range(ntrial):
-        # trial slices
-        y = model_fit['y'][trial, :]
-        h = model_fit['h'][:, trial, :, :]
-        mu = model_fit['mu'][trial, :]
-        w = model_fit['w'][trial, :]
-        v = model_fit['v'][trial, :]
-
-        hb = einsum('ijk, ki -> ji', h, b)
-        eta = mu @ a + hb
-        lam = sexp(eta + 0.5 * v @ (a ** 2))
-        for dyn_dim in range(dyn_ndim):
-            # lam, eta = firing_rate(mu, v, a, b, h)
-            G = chol[dyn_dim, :, :]
-
-            residual[:, spike] = y[:, spike] - lam[:, spike]  # residuals of Poisson observations
-            residual[:, lfp] = (y[:, lfp] - eta[:, lfp]) / noise[lfp]  # residuals of Gaussian observations
-
-            grad_mu_resid = (y[:, spike] - lam[:, spike]) @ a[dyn_dim, spike] + \
-                            ((y[:, lfp] - eta[:, lfp]) / noise[lfp]) @ a[dyn_dim, lfp]
-            # inner loop
-            optimizer = options['optimizer_mu'][trial, dyn_dim]
-            old_slice = mu[:, dyn_dim].copy()
-            for _ in range(options['inner_niter']):
-                grad_mu = grad_mu_resid  # - lstsq(G.T, lstsq(G, old_slice)[0])[0]
-                # grad_mu = grad_mu_resid
-                dmu_acc[trial, :, dyn_dim] = accumulate(dmu_acc[trial, :, dyn_dim], grad_mu, decay)
-
-                if adjust_hessian:
-                    wadj = (w[:, [dyn_dim]] + sqrt(eps + dmu_acc[trial, :, [dyn_dim]]))  # adjusted Hessian
-                else:
-                    wadj = w[:, [dyn_dim]]  # keep dimension
-                GtWG = G.T @ (wadj * G)
-
-                u = G @ (G.T @ (residual @ a[dyn_dim, :])) - old_slice
-                delta_mu = u - G @ ((wadj * G).T @ u) + \
-                           G @ (GtWG @ solve(eyer + GtWG, (wadj * G).T @ u, sym_pos=True))
-
-                if options['Adam']:
-                    delta_mu = optimizer.update(delta_mu)
-                new_slice = old_slice + delta_mu
-
-                # if np.allclose(old_slice, new_slice):
-                #     break
-                old_slice = new_slice
-
-            mu[:, dyn_dim] = old_slice
-
-        eta = mu @ a + hb
-        lam = sexp(eta + 0.5 * v @ (a ** 2))
-        # lam, eta = firing_rate(mu, v, a, b, h)
-        U[:, spike] = lam[:, spike]
-        U[:, lfp] = 1 / noise[lfp]
-        w[:] = U @ (a.T ** 2)
-        if options['method'] == 'VB':
-            for dyn_dim in range(dyn_ndim):
-                G = chol[dyn_dim, :, :]
-                GtWG = G.T @ (w[:, [dyn_dim]] * G)
-                v[:, dyn_dim] = (G * (G - G @ GtWG + G @ (GtWG @ solve(eyer + GtWG, GtWG, sym_pos=True)))).sum(
-                    axis=1)
-
-    # center over all trials if not only infer posterior
-    if options['learn_param']:
-        shape = model_fit['mu'].shape
-        mu_over_trials = model_fit['mu'].reshape((-1, dyn_ndim))
-        mean_over_trials = mu_over_trials.mean(axis=0)
-        model_fit['b'][0, :] += mean_over_trials @ model_fit['a']  # compensate bias
-        mu_over_trials -= mean_over_trials
-        model_fit['mu'] = mu_over_trials.reshape(shape)
-
-
-def mstep(model_fit, options):
-    """
-    Optimize loading and regression (M step)
-
-    Parameters
-    ----------
-    model_fit : dict
-    options : dict
-
-    Returns
-    -------
-
-    """
-    obs_ndim, ntrial, nbin, lag1 = model_fit['h'].shape  # neuron, trial, time, lag + 1
-    dyn_ndim, _, rank = model_fit['chol'].shape  # latent, time, rank
-
-    y = model_fit['y'].reshape((-1, obs_ndim))  # concatenate trials
-    h = model_fit['h'].reshape((obs_ndim, -1, lag1))  # concatenate trials
-    obs_types = model_fit['channel']
-
-    mu = model_fit['mu'].reshape((-1, dyn_ndim))
-    v = model_fit['v'].reshape((-1, dyn_ndim))
-
-    a = model_fit['a']
-    b = model_fit['b']
-
-    decay = options['decay']
-    adjust_hessian = options['adjhess']
-    eps = options['eps']
-    da_acc = options['da_acc']
-    db_acc = options['db_acc']
-
-    eta = mu @ a + einsum('ijk, ki -> ji', h, b)  # (neuron, time, lag) x (lag, neuron) -> (time, neuron)
-    lam = sexp(eta + 0.5 * v @ (a ** 2))
-    model_fit['noise'] = var(y - eta, axis=0, ddof=0)  # MLE
-    for obs_dim in range(obs_ndim):
-        optimizer_a = options['optimizer_a'][obs_dim]
-        optimizer_b = options['optimizer_b'][obs_dim]
-
-        # eta = mu @ a + einsum('ijk, ki -> ji', h, b)
-        # lam = sexp(eta + 0.5 * v @ (a ** 2))
-        if obs_types[obs_dim] == 'spike':
-            # loading
-            va = v * a[:, obs_dim]  # (ntime, nlatent)
-            wv = diag(lam[:, obs_dim] @ v)
-
-            # inner loop
-            old_slice = a[:, obs_dim].copy()
-            for _ in range(options['inner_niter']):
-                grad_a = mu.T @ y[:, obs_dim] - (mu + va).T @ lam[:, obs_dim]
-                # grad_a = mu.T.dot(y[:, train] - lam[:, train])
-                da_acc[:, obs_dim] = accumulate(da_acc[:, obs_dim], grad_a, decay)
-
-                if options['hessian']:
-                    neghess_a = (mu + va).T @ diag(lam[:, obs_dim]) @ (mu + va) + wv
-                    # neghess_a = mu.T.dot(lam[:, train, newaxis] * mu)
-
-                    if adjust_hessian:
-                        delta_a = solve(neghess_a + diag(sqrt(eps + da_acc[:, obs_dim])), grad_a, sym_pos=True)
-                    else:
-                        try:
-                            delta_a = solve(neghess_a, grad_a, sym_pos=True)
-                        except LinAlgError:
-                            print('singular Hessian a')
-                            delta_a = grad_a
-                else:
-                    delta_a = grad_a
-
-                if options['Adam']:
-                    delta_a = optimizer_a.update(delta_a)
-                new_slice = old_slice + delta_a
-                # if np.allclose(old_slice, new_slice):
-                #     break
-                old_slice = new_slice
-            a[:, obs_dim] = old_slice
-
-            # bias
-            old_slice = b[:, obs_dim].copy()
-            for _ in range(options['inner_niter']):
-                grad_b = h[obs_dim, :].T @ (y[:, obs_dim] - lam[:, obs_dim])
-                db_acc[:, obs_dim] = accumulate(db_acc[:, obs_dim], grad_b, decay)
-
-                if options['hessian']:
-                    neghess_b = h[obs_dim, :].T @ diag(lam[:, obs_dim]) @ h[obs_dim, :]
-                    # TODO: inactive neurons never fire across all trials which may cause zero Hessian
-                    if adjust_hessian:
-                        delta_b = solve(neghess_b + diag(sqrt(eps + db_acc[:, obs_dim])), grad_b, sym_pos=True)
-                    else:
-                        try:
-                            delta_b = solve(neghess_b, grad_b, sym_pos=True)
-                        except LinAlgError:
-                            print('singular Hessian b')
-                            delta_b = grad_b
-                else:
-                    delta_b = grad_b
-
-                if options['Adam']:
-                    delta_b = optimizer_b.update(delta_b)
-                new_slice = old_slice + delta_b
-                # if np.allclose(old_slice, new_slice):
-                #     break
-                old_slice = new_slice
-            b[:, obs_dim] = old_slice
-        elif obs_types[obs_dim] == 'lfp':
-            # a's least squares solution for Gaussian channel
-            # (m'm + diag(j'v))^-1 m'(y - Hb)
-            a[:, obs_dim] = solve(mu.T @ mu + diag(sum(v, axis=0)),
-                                   mu.T @ (y[:, obs_dim] - h[obs_dim, :] @ b[:, obs_dim]), sym_pos=True)
-
-            # b's least squares solution for Gaussian channel
-            # (H'H)^-1 H'(y - ma)
-            b[:, obs_dim] = solve(h[obs_dim, :].T @ h[obs_dim, :],
-                                   h[obs_dim, :].T @ (y[:, obs_dim] - mu @ a[:, obs_dim]), sym_pos=True)
-        else:
-            raise ValueError('Unsupported channel')
-
-    # normalize loading by latent and rescale latent
-    if options['learn_post']:
-        scale = norm(a, ord=inf, axis=1, keepdims=True) + eps
-        a /= scale
-        mu *= scale.squeeze()  # compensate latent
-        model_fit['mu'] = mu.reshape(model_fit['mu'].shape)
-        # SVD is not good as above
-        # noinspection PyTupleAssignmentBalance
-        # U, s, Vh = svd(a, full_matrices=False)
-        # obj['mu'] = np.reshape(mu @ a @ Vh.T, (ntrial, nbin, dyn_ndim))
-        # a[:] = Vh
-
-
 def infer(model_fit, options):
     """
     Inference procedure
@@ -361,6 +126,239 @@ def infer(model_fit, options):
         model fit
     """
 
+    def estep():
+        """Optimize posterior (E step)"""
+        obs_ndim, ntrial, nbin, lag1 = model_fit['h'].shape  # neuron, trial, time, lag
+        dyn_ndim, ntime, rank = model_fit['chol'].shape
+        obs_types = model_fit['channel']
+        chol = model_fit['chol']
+        a = model_fit['a']
+        b = model_fit['b']
+        noise = model_fit['noise']
+
+        spike = obs_types == 'spike'
+        lfp = obs_types == 'lfp'
+
+        eyer = identity(rank)
+        residual = empty((nbin, obs_ndim), dtype=float)
+        U = empty((nbin, obs_ndim), dtype=float)
+
+        for trial in range(ntrial):
+            # trial slices
+            y = model_fit['y'][trial, :]
+            h = model_fit['h'][:, trial, :, :]
+            mu = model_fit['mu'][trial, :]
+            w = model_fit['w'][trial, :]
+            v = model_fit['v'][trial, :]
+
+            hb = einsum('ijk, ki -> ji', h, b)
+            eta = mu @ a + hb
+            frate = sexp(eta + 0.5 * v @ (a ** 2))
+            for dyn_dim in range(dyn_ndim):
+                # lam, eta = firing_rate(mu, v, a, b, h)
+                G = chol[dyn_dim, :, :]
+
+                residual[:, spike] = y[:, spike] - frate[:, spike]  # residuals of Poisson observations
+                residual[:, lfp] = (y[:, lfp] - eta[:, lfp]) / noise[lfp]  # residuals of Gaussian observations
+
+                grad_mu_resid = (y[:, spike] - frate[:, spike]) @ a[dyn_dim, spike] + \
+                                ((y[:, lfp] - eta[:, lfp]) / noise[lfp]) @ a[dyn_dim, lfp]
+                # inner loop
+                optimizer = options['optimizer_mu'][trial, dyn_dim]
+                old_slice = mu[:, dyn_dim].copy()
+                for _ in range(options['inner_niter']):
+                    grad_mu = grad_mu_resid  # - lstsq(G.T, lstsq(G, old_slice)[0])[0]
+                    # grad_mu = grad_mu_resid
+                    dmu_acc[trial, :, dyn_dim] = accumulate(dmu_acc[trial, :, dyn_dim], grad_mu, decay)
+
+                    if adjust_hessian:
+                        wadj = (w[:, [dyn_dim]] + sqrt(eps + dmu_acc[trial, :, [dyn_dim]]))  # adjusted Hessian
+                    else:
+                        wadj = w[:, [dyn_dim]]  # keep dimension
+                    GtWG = G.T @ (wadj * G)
+
+                    u = G @ (G.T @ (residual @ a[dyn_dim, :])) - old_slice
+                    delta_mu = u - G @ ((wadj * G).T @ u) + \
+                               G @ (GtWG @ solve(eyer + GtWG, (wadj * G).T @ u, sym_pos=True))
+
+                    if options['Adam']:
+                        delta_mu = optimizer.update(delta_mu)
+                    new_slice = old_slice + delta_mu
+
+                    # if np.allclose(old_slice, new_slice):
+                    #     break
+                    old_slice = new_slice
+
+                mu[:, dyn_dim] = old_slice
+
+            eta = mu @ a + hb
+            frate = sexp(eta + 0.5 * v @ (a ** 2))
+            U[:, spike] = frate[:, spike]
+            U[:, lfp] = 1 / noise[lfp]
+            w[:] = U @ (a.T ** 2)
+            if options['method'] == 'VB':
+                for dyn_dim in range(dyn_ndim):
+                    G = chol[dyn_dim, :, :]
+                    GtWG = G.T @ (w[:, [dyn_dim]] * G)
+                    v[:, dyn_dim] = (G * (G - G @ GtWG + G @ (GtWG @ solve(eyer + GtWG, GtWG, sym_pos=True)))).sum(
+                        axis=1)
+
+        # center over all trials if not only infer posterior
+        if options['learn_param']:
+            shape = model_fit['mu'].shape
+            mu_over_trials = model_fit['mu'].reshape((-1, dyn_ndim))
+            mean_over_trials = mu_over_trials.mean(axis=0)
+            model_fit['b'][0, :] += mean_over_trials @ model_fit['a']  # compensate bias
+            mu_over_trials -= mean_over_trials
+            model_fit['mu'] = mu_over_trials.reshape(shape)
+
+    def mstep():
+        """Optimize loading and regression (M step)"""
+        # TODO: Update eta and frate neuron-wise
+        obs_ndim, ntrial, nbin, lag1 = model_fit['h'].shape  # neuron, trial, time, lag
+        dyn_ndim, ntime, rank = model_fit['chol'].shape
+        obs_types = model_fit['channel']
+        chol = model_fit['chol']
+        a = model_fit['a']
+        b = model_fit['b']
+        noise = model_fit['noise']
+
+        y = model_fit['y'].reshape((-1, obs_ndim))  # concatenate trials
+        h = model_fit['h'].reshape((obs_ndim, -1, lag1))  # concatenate trials
+
+        mu = model_fit['mu'].reshape((-1, dyn_ndim))
+        v = model_fit['v'].reshape((-1, dyn_ndim))
+
+        eta = mu @ a + einsum('ijk, ki -> ji', h, b)  # (neuron, time, lag) x (lag, neuron) -> (time, neuron)
+        frate = sexp(eta + 0.5 * v @ (a ** 2))
+        model_fit['noise'] = var(y - eta, axis=0, ddof=0)  # MLE
+        for obs_dim in range(obs_ndim):
+            optimizer_a = options['optimizer_a'][obs_dim]
+            optimizer_b = options['optimizer_b'][obs_dim]
+
+            # eta = mu @ a + einsum('ijk, ki -> ji', h, b)
+            # lam = sexp(eta + 0.5 * v @ (a ** 2))
+            if obs_types[obs_dim] == 'spike':
+                # loading
+                va = v * a[:, obs_dim]  # (ntime, dyn_ndim)
+                wv = diag(frate[:, obs_dim] @ v)
+
+                # inner loop
+                old_slice = a[:, obs_dim].copy()
+                for _ in range(options['inner_niter']):
+                    grad_a = mu.T @ y[:, obs_dim] - (mu + va).T @ frate[:, obs_dim]
+                    da_acc[:, obs_dim] = accumulate(da_acc[:, obs_dim], grad_a, decay)
+
+                    if options['hessian']:
+                        neghess_a = (mu + va).T @ diag(frate[:, obs_dim]) @ (mu + va) + wv
+
+                        if adjust_hessian:
+                            delta_a = solve(neghess_a + diag(sqrt(eps + da_acc[:, obs_dim])), grad_a, sym_pos=True)
+                        else:
+                            try:
+                                delta_a = solve(neghess_a, grad_a, sym_pos=True)
+                            except LinAlgError:
+                                print('singular Hessian a')
+                                delta_a = grad_a
+                    else:
+                        delta_a = grad_a
+
+                    if options['Adam']:
+                        delta_a = optimizer_a.update(delta_a)
+                    new_slice = old_slice + delta_a
+                    # if np.allclose(old_slice, new_slice):
+                    #     break
+                    old_slice = new_slice
+                a[:, obs_dim] = old_slice
+
+                # bias
+                old_slice = b[:, obs_dim].copy()
+                for _ in range(options['inner_niter']):
+                    grad_b = h[obs_dim, :].T @ (y[:, obs_dim] - frate[:, obs_dim])
+                    db_acc[:, obs_dim] = accumulate(db_acc[:, obs_dim], grad_b, decay)
+
+                    if options['hessian']:
+                        neghess_b = h[obs_dim, :].T @ diag(frate[:, obs_dim]) @ h[obs_dim, :]
+                        # TODO: inactive neurons never fire across all trials which may cause zero Hessian
+                        if adjust_hessian:
+                            delta_b = solve(neghess_b + diag(sqrt(eps + db_acc[:, obs_dim])), grad_b, sym_pos=True)
+                        else:
+                            try:
+                                delta_b = solve(neghess_b, grad_b, sym_pos=True)
+                            except LinAlgError:
+                                print('singular Hessian b')
+                                delta_b = grad_b
+                    else:
+                        delta_b = grad_b
+
+                    if options['Adam']:
+                        delta_b = optimizer_b.update(delta_b)
+                    new_slice = old_slice + delta_b
+                    # if np.allclose(old_slice, new_slice):
+                    #     break
+                    old_slice = new_slice
+                b[:, obs_dim] = old_slice
+            elif obs_types[obs_dim] == 'lfp':
+                # a's least squares solution for Gaussian channel
+                # (m'm + diag(j'v))^-1 m'(y - Hb)
+                a[:, obs_dim] = solve(mu.T @ mu + diag(sum(v, axis=0)),
+                                      mu.T @ (y[:, obs_dim] - h[obs_dim, :] @ b[:, obs_dim]), sym_pos=True)
+
+                # b's least squares solution for Gaussian channel
+                # (H'H)^-1 H'(y - ma)
+                b[:, obs_dim] = solve(h[obs_dim, :].T @ h[obs_dim, :],
+                                      h[obs_dim, :].T @ (y[:, obs_dim] - mu @ a[:, obs_dim]), sym_pos=True)
+            else:
+                raise ValueError('Unsupported channel')
+
+        # normalize loading by latent and rescale latent
+        if options['learn_post']:
+            scale = norm(a, ord=inf, axis=1, keepdims=True) + eps
+            a /= scale
+            mu *= scale.squeeze()  # compensate latent
+            model_fit['mu'] = mu.reshape(model_fit['mu'].shape)
+            # SVD is not good as above
+            # noinspection PyTupleAssignmentBalance
+            # U, s, Vh = svd(a, full_matrices=False)
+            # obj['mu'] = np.reshape(mu @ a @ Vh.T, (ntrial, nbin, dyn_ndim))
+            # a[:] = Vh
+
+    def hstep():
+        """Optimize hyperparameters"""
+        dyn_ndim, ntime, rank = model_fit['chol'].shape
+        gp = learngp(model_fit, **options)
+        copyto(model_fit['sigma'], gp[0])
+        copyto(model_fit['omega'], gp[1])
+        for dyn_dim in range(dyn_ndim):
+            model_fit['chol'][dyn_dim, :] = ichol_gauss(ntime, model_fit['omega'][dyn_dim], rank) * \
+                                            model_fit['sigma'][dyn_dim]
+        lbhyper, _ = elbo(model_fit)
+        if lbhyper < lb[it]:
+            copyto(model_fit['sigma'], good_sigma)
+            copyto(model_fit['omega'], good_omega)
+            for dyn_dim in range(dyn_ndim):
+                model_fit['chol'][dyn_dim, :] = ichol_gauss(ntime, model_fit['omega'][dyn_dim], rank) * \
+                                                model_fit['sigma'][dyn_dim]
+        else:
+            copyto(good_sigma, model_fit['sigma'])
+            copyto(good_omega, model_fit['omega'])
+
+    #################
+    # function body #
+    #################
+    # truth
+    x = model_fit.get('x')
+    alpha = model_fit.get('alpha')
+    # options
+    eps = options['eps']
+    tol = options['tol']
+    decay = options['decay']
+    adjust_hessian = options['adjhess']
+    dmu_acc = options['dmu_acc']
+    da_acc = options['da_acc']
+    db_acc = options['db_acc']
+
+    ################################
     # old values
     good_mu = model_fit['mu'].copy()
     good_w = model_fit['w'].copy()
@@ -378,10 +376,6 @@ def infer(model_fit, options):
     loading_angle = zeros(options['niter'], dtype=float)
     latent_angle = zeros(options['niter'], dtype=float)
     latent_corr = zeros((options['niter'], model_fit['mu'].shape[-1]), dtype=float)
-    dyn_ndim, ntime, rank = model_fit['chol'].shape
-
-    x = model_fit.get('x')
-    alpha = model_fit.get('alpha')
 
     # iteration 0
     # lb[0], ll[0] = elbo(obj)
@@ -416,7 +410,7 @@ def infer(model_fit, options):
         ##########
         e_tick = timeit.default_timer()
         if options['learn_post']:
-            estep(model_fit, options)
+            estep()
         # elbo(obj)
         e_tock = timeit.default_timer()
         elapsed[it, 0] = e_tock - e_tick
@@ -434,7 +428,7 @@ def infer(model_fit, options):
         ##########
         m_tick = timeit.default_timer()
         if options['learn_param']:
-            mstep(model_fit, options)
+            mstep()
         m_tock = timeit.default_timer()
         elapsed[it, 1] = m_tock - m_tick
 
@@ -447,7 +441,10 @@ def infer(model_fit, options):
         #####################
         lb[it], ll[it] = 0, 0
         decreased = lb[it] < lb[it - 1]
-        converged = np.allclose(model_fit['mu'], good_mu)
+        # converged = np.allclose(model_fit['mu'], good_mu)
+        converged = norm(model_fit['mu'].ravel() - good_mu.ravel()) <= (eps + tol * norm(good_mu.ravel())) and norm(
+            model_fit['a'].ravel() - good_a.ravel()) <= (eps + tol * norm(good_a.ravel())) and norm(
+            model_fit['b'].ravel() - good_b.ravel()) <= (eps + tol * norm(good_b.ravel()))
 
         if decreased:
             # if options['verbose']:
@@ -483,27 +480,14 @@ def infer(model_fit, options):
         # hyperparam step #
         ###################
         if it % options['nhyper'] == 0 and (options['learn_sigma'] or options['learn_omega']):
-            gp = learngp(model_fit, **options)
-            copyto(model_fit['sigma'], gp[0])
-            copyto(model_fit['omega'], gp[1])
-            for dyn_dim in range(dyn_ndim):
-                model_fit['chol'][dyn_dim, :] = ichol_gauss(ntime, model_fit['omega'][dyn_dim], rank) * model_fit['sigma'][dyn_dim]
-            lbhyper, _ = elbo(model_fit)
-            if lbhyper < lb[it]:
-                copyto(model_fit['sigma'], good_sigma)
-                copyto(model_fit['omega'], good_omega)
-                for dyn_dim in range(dyn_ndim):
-                    model_fit['chol'][dyn_dim, :] = ichol_gauss(ntime, model_fit['omega'][dyn_dim], rank) * model_fit['sigma'][dyn_dim]
-            else:
-                copyto(good_sigma, model_fit['sigma'])
-                copyto(good_omega, model_fit['omega'])
-
-        iter_tock = timeit.default_timer()
-        elapsed[it, 2] = iter_tock - iter_tick
+            hstep()
 
         ###################################
         # statistics of current iteration #
         ###################################
+        iter_tock = timeit.default_timer()
+        elapsed[it, 2] = iter_tock - iter_tick
+
         stat[it] = {}
         stat[it]['Elapsed Post'] = elapsed[it, 0]
         stat[it]['Elapsed Param'] = elapsed[it, 1]
@@ -635,7 +619,7 @@ def fit(y, obs_types, sigma, omega, a=None, b=None, mu=None, x=None, alpha=None,
             a = lstsq(mu.reshape((-1, dyn_ndim)), y.reshape((-1, obs_ndim)))[0]
 
     # initialize square root of posterior covariance
-    L = empty((ntrial, dyn_ndim, nbin, rank))
+    post_ichol = empty((ntrial, dyn_ndim, nbin, rank))
 
     # initialize bias and autoregression
     if b is None:
@@ -654,8 +638,8 @@ def fit(y, obs_types, sigma, omega, a=None, b=None, mu=None, x=None, alpha=None,
     else:
         v = 0 * ones((ntrial, nbin, dyn_ndim), dtype=float)
 
-    model_fit = dict(y=y, channel=obs_types, h=h, sigma=sigma, omega=omega, chol=chol, mu=mu, w=w, v=v, L=L, a=a, b=b,
-               noise=noise, x=x, alpha=alpha, beta=beta)
+    model_fit = dict(y=y, channel=obs_types, h=h, sigma=sigma, omega=omega, chol=chol, mu=mu, w=w, v=v, L=post_ichol,
+                     a=a, b=b, noise=noise, x=x, alpha=alpha, beta=beta)
 
     options['dmu_acc'] = zeros_like(mu)
     options['da_acc'] = zeros_like(a)
@@ -710,13 +694,13 @@ def fill_options(options):
     return options
 
 
-def postprocess(obj):
+def postprocess(model_fit):
     """
     Remove intermediate and empty variables, and compute decomposition of posterior covariance.
 
     Parameters
     ----------
-    obj : dict
+    model_fit : dict
         raw fit
 
     Returns
@@ -724,10 +708,10 @@ def postprocess(obj):
     dict
         fit that contains prior, posterior, loading and regression
     """
-    ntrial = obj['mu'].shape[0]
-    chol = obj['chol']
+    ntrial = model_fit['mu'].shape[0]
+    chol = model_fit['chol']
     dyn_ndim, nbin, rank = chol.shape
-    w = obj['w']
+    w = model_fit['w']
     eyer = identity(rank)
     L = empty((ntrial, dyn_ndim, nbin, rank))
     for trial in range(ntrial):
@@ -742,14 +726,14 @@ def postprocess(obj):
             eigval, eigvec = eigh(tmp)
             eigval.clip(0, PINF, out=eigval)  # remove negative eigenvalues
             L[trial, dyn_dim, :] = G @ (eigvec @ diag(sqrt(eigval)))
-    obj['L'] = L
-    keys = list(obj.keys())
+    model_fit['L'] = L
+    keys = list(model_fit.keys())
     for key in keys:
-        if obj.get(key, None) is None:
-            obj.pop(key, None)
-    obj.pop('h', None)
-    obj.pop('stat', None)
-    return obj
+        if model_fit.get(key, None) is None:
+            model_fit.pop(key, None)
+    model_fit.pop('h', None)
+    model_fit.pop('stat', None)
+    return model_fit
 
 
 def predict(y, x, a, b, v=None):
@@ -785,6 +769,6 @@ def predict(y, x, a, b, v=None):
             h = add_constant(lagmat(y[trial, :, obs_dim], lag=lag))
             reg[trial, :, obs_dim] = h @ b[:, obs_dim]
     eta = x.reshape((-1, dyn_ndim)) @ a + reg.reshape((-1, obs_ndim))
-    lam = np.exp(eta + 0.5 * v.reshape((-1, dyn_ndim)) @ (a ** 2)) if v is not None else np.exp(eta)
-    yhat = lam.reshape(y.shape)
+    frate = np.exp(eta + 0.5 * v.reshape((-1, dyn_ndim)) @ (a ** 2)) if v is not None else np.exp(eta)
+    yhat = frate.reshape(y.shape)
     return yhat
