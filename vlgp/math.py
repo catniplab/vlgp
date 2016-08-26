@@ -243,3 +243,8 @@ def ichol_gauss2(n, omega):
 
         i += 1
     return chol[pvec.argsort(), :i]
+
+
+def add_to_diag(m, v):
+    """Add a vector to the diagonal of a matrix"""
+    np.fill_diagonal(m, m.diagonal() + v)
