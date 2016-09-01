@@ -389,7 +389,7 @@ def infer(model_fit, options):
         ##########
         e_tick = timeit.default_timer()
         if options['learn_post']:
-            for _ in options['e_niter']:
+            for _ in range(options['e_niter']):
                 estep()
         # elbo(obj)
         e_tock = timeit.default_timer()
@@ -408,7 +408,7 @@ def infer(model_fit, options):
         ##########
         m_tick = timeit.default_timer()
         if options['learn_param']:
-            for _ in options['m_niter']:
+            for _ in range(options['m_niter']):
                 mstep()
         m_tock = timeit.default_timer()
         elapsed[it, 1] = m_tock - m_tick
