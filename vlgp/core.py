@@ -420,7 +420,8 @@ def infer(model_fit, options):
         #####################
         # convergence check #
         #####################
-        lb[it], ll[it] = 0, 0
+        # lb[it], ll[it] = 0, 0
+        lb[it], ll[it] = elbo(model_fit)
         decreased = lb[it] < lb[it - 1]
         # converged = np.allclose(model_fit['mu'], good_mu)
         converged = norm(model_fit['mu'].ravel() - good_mu.ravel()) <= (eps + tol * norm(good_mu.ravel())) and norm(

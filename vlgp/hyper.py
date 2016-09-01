@@ -1,12 +1,15 @@
 """
 Hyperparameter optimization
 """
+import math
+
+import numpy as np
 from numpy import identity, arange, trace, dstack, diag
 from numpy import exp, log, sqrt
 from numpy.linalg import slogdet
 from numpy.random import choice
 from scipy.linalg import lstsq, solve, toeplitz
-from scipy.optimize import minimize_scalar
+from scipy.optimize import minimize_scalar, minimize
 
 
 def klprime(theta, sigma, n, mu, M, S, eps=1e-6):
@@ -99,9 +102,11 @@ def learngp(obj, latents=None, **kwargs):
     dsq = arange(window) ** 2
     Dsq = toeplitz(dsq)
     for ilatent in latents:
-        C = exp(-omega[ilatent] * Dsq) + eps * identity(window)
-        K = sigma[ilatent] ** 2 * exp(-omega[ilatent] * Dsq) + eps * identity(window)
-        S = dstack([K - K @ solve(diag(1 / (eps + win_w[:, ilatent, iseg])) + K, K, sym_pos=True) for iseg in
+        C = (1 - eps) * exp(-omega[ilatent] * Dsq) + eps * identity(window)
+        # K = sigma[ilatent] ** 2 * exp(-omega[ilatent] * Dsq) + eps * identity(window)
+        # S = dstack([K - K @ solve(diag(1 / (eps + win_w[:, ilatent, iseg])) + K, K, sym_pos=True) for iseg in
+        #             range(nseg)])
+        S = dstack([C - C @ solve(diag(1 / (eps + win_w[:, ilatent, iseg])) + C, C, sym_pos=True) for iseg in
                     range(nseg)])
         if kwargs['learn_sigma']:
             tmp = 0.0
@@ -119,3 +124,21 @@ def learngp(obj, latents=None, **kwargs):
             omega[ilatent] = exp(mini.x)
     return sigma, omega
     # return omega
+
+
+def gridsearch(x, lb=1e-8, ub=1, num=10, eps=1e-8):
+    grid = np.logspace(start=np.log10(lb), stop=np.log10(ub), base=10, num=num)
+    n = x.shape[1]
+    sqaured_distance = arange(n) ** 2
+    D = toeplitz(sqaured_distance)
+    lly = []
+    for omega in grid:
+        Kx = exp(- omega * D)
+        Ky = Kx + eps * np.identity(n)
+        ll = np.sum([-0.5 * np.inner(each_x, solve(Ky, each_x, sym_pos=True)) - 0.5 * slogdet(Ky)[1] - 0.5 * n * log(2 * np.pi) for each_x in x])
+        lly.append(ll)
+    omega = grid[np.argmax(lly)]
+    Kx = exp(- omega * D)
+    Ky = Kx + eps * np.identity(n)
+    sigma2 = np.mean([each_x @ solve(Ky, each_x, sym_pos=True) / n for each_x in x])
+    return sigma2, omega

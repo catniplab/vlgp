@@ -113,8 +113,7 @@ def ichol_gauss(n, omega, r, tol=1e-6):
         diag[i + 1:] = 1 - np.sum((G[i + 1:, :i + 1]) ** 2, axis=1)
 
         i += 1
-    if i == r:
-        warnings.warn('Not enough rank')
+
     return G[pvec.argsort(), :]
 
 
