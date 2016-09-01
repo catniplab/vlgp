@@ -389,7 +389,8 @@ def infer(model_fit, options):
         ##########
         e_tick = timeit.default_timer()
         if options['learn_post']:
-            estep()
+            for _ in options['e_niter']:
+                estep()
         # elbo(obj)
         e_tock = timeit.default_timer()
         elapsed[it, 0] = e_tock - e_tick
@@ -407,7 +408,8 @@ def infer(model_fit, options):
         ##########
         m_tick = timeit.default_timer()
         if options['learn_param']:
-            mstep()
+            for _ in options['m_niter']:
+                mstep()
         m_tock = timeit.default_timer()
         elapsed[it, 1] = m_tock - m_tick
 
@@ -669,7 +671,8 @@ def fill_options(options):
     options['method'] = options.get('method', 'VB')  # method of estimate, 'VB' or 'MAP'
     options['post_prediction'] = options.get('post_prediction', True)  # use posterior variance in predicted firing rate
     options['backtrack'] = options.get('backtrack', True)  # recover from decreased ELBO. TODO: remove
-    options['inner_niter'] = options.get('inner_niter', 1)  # max # of inner loop
+    options['e_niter'] = options.get('e_niter', 1)  # max # of estep loop
+    options['m_niter'] = options.get('m_niter', 1)  # max # of mstep loop
     return options
 
 
