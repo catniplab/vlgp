@@ -2,14 +2,17 @@
 Hyperparameter optimization
 """
 import math
+import warnings
 
 import numpy as np
 from numpy import identity, arange, trace, dstack, diag
 from numpy import exp, log, sqrt
 from numpy.linalg import slogdet
 from numpy.random import choice
-from scipy.linalg import lstsq, solve, toeplitz
+from scipy.linalg import lstsq, solve, toeplitz, cholesky, LinAlgError, cho_solve
+from scipy.optimize import fmin_l_bfgs_b
 from scipy.optimize import minimize_scalar, minimize
+from scipy.spatial.distance import pdist, squareform
 
 
 def klprime(theta, sigma, n, mu, M, S, eps=1e-6):
@@ -126,19 +129,55 @@ def learngp(obj, latents=None, **kwargs):
     # return omega
 
 
-def gridsearch(x, lb=1e-8, ub=1, num=10, eps=1e-8):
-    grid = np.logspace(start=np.log10(lb), stop=np.log10(ub), base=10, num=num)
-    n = x.shape[1]
-    sqaured_distance = arange(n) ** 2
-    D = toeplitz(sqaured_distance)
-    lly = []
-    for omega in grid:
-        Kx = exp(- omega * D)
-        Ky = Kx + eps * np.identity(n)
-        ll = np.sum([-0.5 * np.inner(each_x, solve(Ky, each_x, sym_pos=True)) - 0.5 * slogdet(Ky)[1] - 0.5 * n * log(2 * np.pi) for each_x in x])
-        lly.append(ll)
-    omega = grid[np.argmax(lly)]
-    Kx = exp(- omega * D)
-    Ky = Kx + eps * np.identity(n)
-    sigma2 = np.mean([each_x @ solve(Ky, each_x, sym_pos=True) / n for each_x in x])
-    return sigma2, omega
+def kernel(x, params):
+    """kernel matrix"""
+    sigma2, omega, sigma2n = params
+    dists = pdist(x.reshape(-1, 1), metric='sqeuclidean')
+    K = exp(- omega * dists)
+    K = squareform(K)
+    np.fill_diagonal(K, 1)
+    dK_dsigma2 = K
+    K *= sigma2
+    dK_domega = - K * squareform(dists)
+    K[np.diag_indices_from(K)] += sigma2n
+    dK_dsigma2n = np.eye(K.shape[0])
+    dK = np.dstack([dK_dsigma2, dK_domega, dK_dsigma2n])
+    return K, dK
+
+
+def marginal(theta, x, y):
+    sigma2, omega, sigma2n = theta
+    K, dK = kernel(x, theta)
+    # K[np.diag_indices_from(K)] += sigma2n
+    try:
+        L = cholesky(K, lower=True)
+    except LinAlgError:
+        return -np.inf, np.zeros_like(theta)
+
+    if y.ndim == 1:
+        y = y[:, np.newaxis]
+
+    alpha = cho_solve((L, True), y)
+
+    ll_dims = -0.5 * np.einsum('ik,ik->k', y, alpha)
+    ll_dims -= np.log(np.diag(L)).sum()
+    ll_dims -= K.shape[0] / 2 * np.log(2 * np.pi)
+    ll = ll_dims.sum(-1)
+
+    tmp = np.einsum('ik,jk->ijk', alpha, alpha)
+    tmp -= cho_solve((L, True), np.eye(K.shape[0]))[:, :, np.newaxis]
+    dll_dims = 0.5 * np.einsum('ijl,ijk->kl', tmp, dK)
+    dll = dll_dims.sum(-1)
+
+    return ll, dll
+
+
+def optim_theta(x, y, theta0, bounds):
+    def obj_func(theta):
+        ll, dll = marginal(theta, x, y)
+        return -ll, -dll
+
+    opt, fval, info = fmin_l_bfgs_b(obj_func, theta0, bounds=bounds)
+    if info['warnflag'] != 0:
+        warnings.warn("fmin_l_bfgs_b terminated abnormally with the state: {}".format(info))
+    return opt
