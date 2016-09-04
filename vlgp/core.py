@@ -166,7 +166,7 @@ def infer(model_fit, options):
 
                 optimizer = options['optimizer_mu'][trial, dyn_dim]
 
-                grad_mu = grad_mu_resid - lstsq(G.T, lstsq(G, mu[:, dyn_dim])[0])[0]
+                grad_mu = grad_mu_resid  # - lstsq(G.T, lstsq(G, mu[:, dyn_dim])[0])[0]
                 dmu_acc[trial, :, dyn_dim] = accumulate(dmu_acc[trial, :, dyn_dim], grad_mu, decay)
 
                 if adjust_hessian:
@@ -179,7 +179,7 @@ def infer(model_fit, options):
                 u = G @ (G.T @ (residual @ a[dyn_dim, :])) - mu[:, dyn_dim]
                 delta_mu = u - G @ ((wadj * G).T @ u) + \
                            G @ (GtWG @ solve(eyer + GtWG, (wadj * G).T @ u, sym_pos=True))
-
+                check_update(delta_mu)
                 if options['Adam']:
                     delta_mu = optimizer.update(delta_mu)
                 mu[:, dyn_dim] += delta_mu
@@ -251,12 +251,12 @@ def infer(model_fit, options):
                             delta_a = grad_a
                 else:
                     delta_a = grad_a
-
+                check_update(delta_a)
                 if options['Adam']:
                     delta_a = optimizer_a.update(delta_a)
                 a[:, obs_dim] += delta_a
 
-                # bias
+                # regression
                 grad_b = h[obs_dim, :].T @ (y[:, obs_dim] - frate[:, obs_dim])
                 db_acc[:, obs_dim] = accumulate(db_acc[:, obs_dim], grad_b, decay)
 
@@ -273,10 +273,10 @@ def infer(model_fit, options):
                             delta_b = grad_b
                 else:
                     delta_b = grad_b
-
+                check_update(delta_b)
                 if options['Adam']:
                     delta_b = optimizer_b.update(delta_b)
-                b[:, obs_dim] = delta_b
+                b[:, obs_dim] += delta_b
             elif obs_types[obs_dim] == 'lfp':
                 # a's least squares solution for Gaussian channel
                 # (m'm + diag(j'v))^-1 m'(y - Hb)
@@ -301,6 +301,9 @@ def infer(model_fit, options):
             # U, s, Vh = svd(a, full_matrices=False)
             # obj['mu'] = np.reshape(mu @ a @ Vh.T, (ntrial, nbin, dyn_ndim))
             # a[:] = Vh
+
+    def check_update(delta):
+        np.clip(delta, -options['update_bound'], options['update_bound'], out=delta)
 
     def hstep():
         """Optimize hyperparameters"""
@@ -420,8 +423,7 @@ def infer(model_fit, options):
         #####################
         # convergence check #
         #####################
-        # lb[it], ll[it] = 0, 0
-        lb[it], ll[it] = elbo(model_fit)
+        lb[it], ll[it] = 0, 0
         decreased = lb[it] < lb[it - 1]
         # converged = np.allclose(model_fit['mu'], good_mu)
         converged = norm(model_fit['mu'].ravel() - good_mu.ravel()) <= (eps + tol * norm(good_mu.ravel())) and norm(
@@ -462,6 +464,7 @@ def infer(model_fit, options):
         # hyperparam step #
         ###################
         if it % options['nhyper'] == 0 and (options['learn_sigma'] or options['learn_omega']):
+            lb[it], ll[it] = elbo(model_fit)
             hstep()
 
         ###################################
@@ -491,10 +494,9 @@ def infer(model_fit, options):
 
     if options['verbose']:
         print('\nInference ends')
-        print('{} iterations, ELBO: {:.4f}, elapsed: {:.3f}, converged: {}\n'.format(it - 1,
-                                                                                     lb[it - 1],
-                                                                                     infer_tock - infer_tick,
-                                                                                     converged))
+        print('{} iterations, ELBO: {:.4f}, elapsed: {:.3f}\n'.format(it - 1,
+                                                                      lb[it - 1],
+                                                                      infer_tock - infer_tick))
     model_fit['ELBO'] = lb[:it]
     model_fit['Elapsed'] = elapsed[:it, :]
     model_fit['LoadingAngle'] = loading_angle[:it]
@@ -674,6 +676,7 @@ def fill_options(options):
     options['backtrack'] = options.get('backtrack', True)  # recover from decreased ELBO. TODO: remove
     options['e_niter'] = options.get('e_niter', 1)  # max # of estep loop
     options['m_niter'] = options.get('m_niter', 1)  # max # of mstep loop
+    options['update_bound'] = options.get('update_bound', 1.0)
     return options
 
 
