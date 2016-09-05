@@ -12,6 +12,7 @@ from numpy.linalg import slogdet, LinAlgError
 from scipy.linalg import lstsq, eigh, solve, norm
 from scipy.stats import spearmanr
 
+from vlgp import hyper
 from .hyper import learngp
 from .math import ichol_gauss, subspace, sexp
 from .optimizer import AdamOptimizer
@@ -179,6 +180,7 @@ def infer(model_fit, options):
                 u = G @ (G.T @ (residual @ a[dyn_dim, :])) - mu[:, dyn_dim]
                 delta_mu = u - G @ ((wadj * G).T @ u) + \
                            G @ (GtWG @ solve(eyer + GtWG, (wadj * G).T @ u, sym_pos=True))
+
                 check_update(delta_mu)
                 if options['Adam']:
                     delta_mu = optimizer.update(delta_mu)
@@ -233,24 +235,26 @@ def infer(model_fit, options):
             if obs_types[obs_dim] == 'spike':
                 # loading
                 va = v * a[:, obs_dim]  # (nbin, dyn_ndim)
-                wv = diag(frate[:, obs_dim] @ v)
+                # wv = diag(frate[:, obs_dim] @ v)
+                wv = frate[:, obs_dim] @ v
 
                 grad_a = mu.T @ y[:, obs_dim] - (mu + va).T @ frate[:, obs_dim]
                 da_acc[:, obs_dim] = accumulate(da_acc[:, obs_dim], grad_a, decay)
 
                 if options['hessian']:
-                    neghess_a = (mu + va).T @ (frate[:, [obs_dim]] * (mu + va)) + wv
+                    neghess_a = (mu + va).T @ (frate[:, [obs_dim]] * (mu + va))  # + wv
+                    neghess_a[np.diag_indices_from(neghess_a)] += wv
 
                     if adjust_hessian:
-                        delta_a = solve(neghess_a + diag(eps + sqrt(da_acc[:, obs_dim])), grad_a, sym_pos=True)
-                    else:
-                        try:
-                            delta_a = solve(neghess_a, grad_a, sym_pos=True)
-                        except LinAlgError:
-                            print('singular Hessian a')
-                            delta_a = grad_a
+                        neghess_a[np.diag_indices_from(neghess_a)] += eps + sqrt(da_acc[:, obs_dim])
+                    try:
+                        delta_a = solve(neghess_a, grad_a, sym_pos=True)
+                    except LinAlgError:
+                        print('singular Hessian a')
+                        delta_a = grad_a
                 else:
                     delta_a = grad_a
+
                 check_update(delta_a)
                 if options['Adam']:
                     delta_a = optimizer_a.update(delta_a)
@@ -264,13 +268,12 @@ def infer(model_fit, options):
                     neghess_b = h[obs_dim, :].T @ (frate[:, [obs_dim]] * h[obs_dim, :])
                     # TODO: inactive neurons never fire across all trials which may cause zero Hessian
                     if adjust_hessian:
-                        delta_b = solve(neghess_b + diag(eps + sqrt(db_acc[:, obs_dim])), grad_b, sym_pos=True)
-                    else:
-                        try:
-                            delta_b = solve(neghess_b, grad_b, sym_pos=True)
-                        except LinAlgError:
-                            print('singular Hessian b')
-                            delta_b = grad_b
+                        neghess_b[np.diag_indices_from(neghess_b)] += eps + sqrt(db_acc[:, obs_dim])
+                    try:
+                        delta_b = solve(neghess_b, grad_b, sym_pos=True)
+                    except LinAlgError:
+                        print('singular Hessian b')
+                        delta_b = grad_b
                 else:
                     delta_b = grad_b
                 check_update(delta_b)
@@ -280,8 +283,9 @@ def infer(model_fit, options):
             elif obs_types[obs_dim] == 'lfp':
                 # a's least squares solution for Gaussian channel
                 # (m'm + diag(j'v))^-1 m'(y - Hb)
-                a[:, obs_dim] = solve(mu.T @ mu + diag(sum(v, axis=0)),
-                                      mu.T @ (y[:, obs_dim] - h[obs_dim, :] @ b[:, obs_dim]), sym_pos=True)
+                tmp = mu.T @ mu
+                tmp[np.diag_indices_from(tmp)] += sum(v, axis=0)
+                a[:, obs_dim] = solve(tmp, mu.T @ (y[:, obs_dim] - h[obs_dim, :] @ b[:, obs_dim]), sym_pos=True)
 
                 # b's least squares solution for Gaussian channel
                 # (H'H)^-1 H'(y - ma)
@@ -308,22 +312,44 @@ def infer(model_fit, options):
     def hstep():
         """Optimize hyperparameters"""
         dyn_ndim, nbin, rank = model_fit['chol'].shape
-        gp = learngp(model_fit, **options)
-        copyto(model_fit['sigma'], gp[0])
-        copyto(model_fit['omega'], gp[1])
+        mu = model_fit['mu']
+        subsample_size = options['subsample_size']
+        if subsample_size is None:
+            subsample_size = nbin
+        # gp = learngp(model_fit, **options)
+        # copyto(model_fit['sigma'], gp[0])
+        # copyto(model_fit['omega'], gp[1])
+        # for dyn_dim in range(dyn_ndim):
+        #     model_fit['chol'][dyn_dim, :] = ichol_gauss(nbin, model_fit['omega'][dyn_dim], rank) * \
+        #                                     model_fit['sigma'][dyn_dim]
+        # lbhyper, _ = elbo(model_fit)
+        # if lbhyper < lb[it]:
+        #     copyto(model_fit['sigma'], good_sigma)
+        #     copyto(model_fit['omega'], good_omega)
+        #     for dyn_dim in range(dyn_ndim):
+        #         model_fit['chol'][dyn_dim, :] = ichol_gauss(nbin, model_fit['omega'][dyn_dim], rank) * \
+        #                                         model_fit['sigma'][dyn_dim]
+        # else:
+        #     copyto(good_sigma, model_fit['sigma'])
+        #     copyto(good_omega, model_fit['omega'])
+        sigma = np.zeros(dyn_ndim)
+        omega = np.zeros(dyn_ndim)
+
+        for dyn_dim in range(dyn_ndim):
+            subsample = np.random.choice(nbin, subsample_size, replace=False)
+            sigma2, w, sigma2n = hyper.optim(subsample, mu[:, subsample, dyn_dim].T,
+                                             (sigma[dyn_dim] ** 2, omega[dyn_dim], 1e-6),
+                                             ((1e-6, 1.0), (1e-6, 1), (1e-6, 1e-5)))
+            sigma[dyn_dim] = np.sqrt(sigma2)
+            omega[dyn_dim] = w
+
+        copyto(model_fit['sigma'], sigma)
+        copyto(model_fit['omega'], omega)
+        copyto(good_sigma, model_fit['sigma'])
+        copyto(good_omega, model_fit['omega'])
         for dyn_dim in range(dyn_ndim):
             model_fit['chol'][dyn_dim, :] = ichol_gauss(nbin, model_fit['omega'][dyn_dim], rank) * \
                                             model_fit['sigma'][dyn_dim]
-        lbhyper, _ = elbo(model_fit)
-        if lbhyper < lb[it]:
-            copyto(model_fit['sigma'], good_sigma)
-            copyto(model_fit['omega'], good_omega)
-            for dyn_dim in range(dyn_ndim):
-                model_fit['chol'][dyn_dim, :] = ichol_gauss(nbin, model_fit['omega'][dyn_dim], rank) * \
-                                                model_fit['sigma'][dyn_dim]
-        else:
-            copyto(good_sigma, model_fit['sigma'])
-            copyto(good_omega, model_fit['omega'])
 
     #################
     # function body #
@@ -375,7 +401,6 @@ def infer(model_fit, options):
 
     # iterative algorithm
     it = 1  # iteration counter
-    converged = False
     stop = False
     infer_tick = timeit.default_timer()
 
@@ -677,6 +702,7 @@ def fill_options(options):
     options['e_niter'] = options.get('e_niter', 1)  # max # of estep loop
     options['m_niter'] = options.get('m_niter', 1)  # max # of mstep loop
     options['update_bound'] = options.get('update_bound', 1.0)
+    options['subsample_size'] = options.get('subsample_size', None)
     return options
 
 

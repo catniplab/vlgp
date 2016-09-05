@@ -145,14 +145,13 @@ def kernel(x, params):
     return K, dK
 
 
-def marginal(theta, x, y):
-    sigma2, omega, sigma2n = theta
-    K, dK = kernel(x, theta)
+def marginal(params, x, y):
+    K, dK = kernel(x, params)
     # K[np.diag_indices_from(K)] += sigma2n
     try:
         L = cholesky(K, lower=True)
     except LinAlgError:
-        return -np.inf, np.zeros_like(theta)
+        return -np.inf, np.zeros_like(params)
 
     if y.ndim == 1:
         y = y[:, np.newaxis]
@@ -172,12 +171,16 @@ def marginal(theta, x, y):
     return ll, dll
 
 
-def optim_theta(x, y, theta0, bounds):
-    def obj_func(theta):
-        ll, dll = marginal(theta, x, y)
+def optim(x, y, params0, bounds):
+    def obj_func(params):
+        ll, dll = marginal(params, x, y)
         return -ll, -dll
 
-    opt, fval, info = fmin_l_bfgs_b(obj_func, theta0, bounds=bounds)
+    opt, fval, info = fmin_l_bfgs_b(obj_func, params0, bounds=bounds)
     if info['warnflag'] != 0:
         warnings.warn("fmin_l_bfgs_b terminated abnormally with the state: {}".format(info))
     return opt
+
+
+def subsample(n, size):
+    return np.random.choice(n, size, replace=False)
