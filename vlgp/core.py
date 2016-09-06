@@ -13,7 +13,6 @@ from scipy.linalg import lstsq, eigh, solve, norm
 from scipy.stats import spearmanr
 
 from vlgp import hyper
-from .hyper import learngp
 from .math import ichol_gauss, subspace, sexp
 from .optimizer import AdamOptimizer
 from .util import add_constant, rotate, lagmat
@@ -313,6 +312,7 @@ def infer(model_fit, options):
         """Optimize hyperparameters"""
         dyn_ndim, nbin, rank = model_fit['chol'].shape
         mu = model_fit['mu']
+        w = model_fit['w']
         subsample_size = options['subsample_size']
         if subsample_size is None:
             subsample_size = nbin
@@ -332,21 +332,22 @@ def infer(model_fit, options):
         # else:
         #     copyto(good_sigma, model_fit['sigma'])
         #     copyto(good_omega, model_fit['omega'])
-        sigma = np.zeros(dyn_ndim)
-        omega = np.zeros(dyn_ndim)
+        sigma = model_fit['sigma']
+        omega = model_fit['omega']
 
         for dyn_dim in range(dyn_ndim):
-            subsample = np.random.choice(nbin, subsample_size, replace=False)
-            sigma2, w, sigma2n = hyper.optim(subsample, mu[:, subsample, dyn_dim].T,
-                                             (sigma[dyn_dim] ** 2, omega[dyn_dim], 1e-6),
-                                             ((1e-6, 1.0), (1e-6, 1), (1e-6, 1e-5)))
+            # subsample = np.random.choice(nbin, subsample_size, replace=False)
+            subsample = np.arange(subsample_size) + np.random.randint(nbin - subsample_size)
+            bounds = ((max(1e-6, sigma[dyn_dim] ** 2 / 10), min(10, sigma[dyn_dim] ** 2 * 10)),
+                      (max(1e-6, omega[dyn_dim] / 10), min(1.0, omega[dyn_dim] * 10)))
+            sigma2, omega[dyn_dim] = hyper.optim(subsample, mu[:, subsample, dyn_dim].T, w[:, subsample, dyn_dim].T,
+                                                 (sigma[dyn_dim] ** 2, omega[dyn_dim]),
+                                                 bounds,
+                                                 1e-7)  # noise variance, small value to avoid oversmoothing
             sigma[dyn_dim] = np.sqrt(sigma2)
-            omega[dyn_dim] = w
 
-        copyto(model_fit['sigma'], sigma)
-        copyto(model_fit['omega'], omega)
-        copyto(good_sigma, model_fit['sigma'])
-        copyto(good_omega, model_fit['omega'])
+        copyto(good_sigma, sigma)
+        copyto(good_omega, omega)
         for dyn_dim in range(dyn_ndim):
             model_fit['chol'][dyn_dim, :] = ichol_gauss(nbin, model_fit['omega'][dyn_dim], rank) * \
                                             model_fit['sigma'][dyn_dim]

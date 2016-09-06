@@ -9,7 +9,7 @@ from numpy import identity, arange, trace, dstack, diag
 from numpy import exp, log, sqrt
 from numpy.linalg import slogdet
 from numpy.random import choice
-from scipy.linalg import lstsq, solve, toeplitz, cholesky, LinAlgError, cho_solve
+from scipy.linalg import lstsq, solve, toeplitz, cholesky, LinAlgError, cho_solve, eigvalsh
 from scipy.optimize import fmin_l_bfgs_b
 from scipy.optimize import minimize_scalar, minimize
 from scipy.spatial.distance import pdist, squareform
@@ -129,9 +129,9 @@ def learngp(obj, latents=None, **kwargs):
     # return omega
 
 
-def kernel(x, params):
-    """kernel matrix"""
-    sigma2, omega, sigma2n = params
+def kernel(x, params, noise_var):
+    """kernel matrix and derivatives"""
+    sigma2, omega = params
     dists = pdist(x.reshape(-1, 1), metric='sqeuclidean')
     K = exp(- omega * dists)
     K = squareform(K)
@@ -139,41 +139,66 @@ def kernel(x, params):
     dK_dsigma2 = K
     K *= sigma2
     dK_domega = - K * squareform(dists)
-    K[np.diag_indices_from(K)] += sigma2n
-    dK_dsigma2n = np.eye(K.shape[0])
-    dK = np.dstack([dK_dsigma2, dK_domega, dK_dsigma2n])
+    K[np.diag_indices_from(K)] += noise_var
+    # dK_dsigma2n = np.eye(K.shape[0])
+    # dK = np.dstack([dK_dsigma2, dK_domega, dK_dsigma2n])
+    dK = np.dstack([dK_dsigma2, dK_domega])
     return K, dK
 
 
-def marginal(params, x, y):
-    K, dK = kernel(x, params)
+def marginal(params, noise_var, t, mu, w):
+    K, dK = kernel(t, params, noise_var)
     # K[np.diag_indices_from(K)] += sigma2n
     try:
         L = cholesky(K, lower=True)
     except LinAlgError:
         return -np.inf, np.zeros_like(params)
 
-    if y.ndim == 1:
-        y = y[:, np.newaxis]
+    if mu.ndim == 1:
+        mu = mu[:, np.newaxis]
 
-    alpha = cho_solve((L, True), y)
+    alpha = cho_solve((L, True), mu)
+    ll_dims = -0.5 * np.einsum('ik,ik->k', mu, alpha)
 
-    ll_dims = -0.5 * np.einsum('ik,ik->k', y, alpha)
-    ll_dims -= np.log(np.diag(L)).sum()
-    ll_dims -= K.shape[0] / 2 * np.log(2 * np.pi)
-    ll = ll_dims.sum(-1)
+    if w is not None:
+        if w.ndim == 1:
+            w = w[:, np.newaxis]
+        WK = np.einsum('ik,ij->ijk', w, K)
+        SinvKW = np.zeros_like(WK)
+        for i in range(WK.shape[-1]):
+            SinvK = WK[:, :, i]  # Sigma^-1 K
+            SinvK[np.diag_indices_from(SinvK)] += 1
+            try:
+                SinvKW[:, :, i] = solve(SinvK, np.diag(w[:, i]), sym_pos=True)
+            except LinAlgError:
+                return -np.inf, np.zeros_like(params)
 
-    tmp = np.einsum('ik,jk->ijk', alpha, alpha)
-    tmp -= cho_solve((L, True), np.eye(K.shape[0]))[:, :, np.newaxis]
-    dll_dims = 0.5 * np.einsum('ijl,ijk->kl', tmp, dK)
-    dll = dll_dims.sum(-1)
+            eigval_SinvK = eigvalsh(SinvK)
+            ll_dims[i] -= 0.5 * np.sum(1 / eigval_SinvK)  # trace(K^-1 Sigma)
+            ll_dims[i] -= 0.5 * np.log(eigval_SinvK).sum()
+        ll = ll_dims.sum(-1)
+
+        tmp = np.einsum('ik,jk->ijk', alpha, alpha)
+        tmp += SinvKW
+        dll_dims = 0.5 * np.einsum('ijl,ijk->kl', tmp, dK)
+        dll = dll_dims.sum(-1)
+
+    else:
+        ll_dims -= np.log(np.diag(L)).sum()
+        ll_dims -= K.shape[0] / 2 * np.log(2 * np.pi)
+        ll = ll_dims.sum(-1)
+
+        tmp = np.einsum('ik,jk->ijk', alpha, alpha)
+        tmp -= cho_solve((L, True), np.eye(K.shape[0]))[:, :, np.newaxis]
+        dll_dims = 0.5 * np.einsum('ijl,ijk->kl', tmp, dK)
+        dll = dll_dims.sum(-1)
 
     return ll, dll
 
 
-def optim(x, y, params0, bounds):
+def optim(t, mu, w, params0, bounds, noise_var):
     def obj_func(params):
-        ll, dll = marginal(params, x, y)
+        ll, dll = marginal(params, noise_var, t, mu, w)
         return -ll, -dll
 
     opt, fval, info = fmin_l_bfgs_b(obj_func, params0, bounds=bounds)
