@@ -141,8 +141,7 @@ def leave_one_out(trial, model, **kwargs):
         # kwargs['infer'] = 'posterior'
         kwargs['learn_post'] = True
         kwargs['learn_param'] = False
-        kwargs['learn_sigma'] = False
-        kwargs['learn_omega'] = False
+        kwargs['learn_hyper'] = False
 
         obj = infer(obj, **kwargs)
         eta = obj['mu'].reshape((-1, nlatent)) @ a[:, ichannel] + htest.reshape((ntime * ntrial, -1)) @ b[:, ichannel]
@@ -179,6 +178,7 @@ def cv(y, channel, sigma, omega, a0=None, mu0=None, lag=0, rank=500, **kwargs):
     """
     kwargs = fill_options(**kwargs)
     assert sigma.shape == omega.shape
+    dyn_ndim = sigma.shape[0]
 
     y = asarray(y)
     if y.ndim < 2:
@@ -200,9 +200,9 @@ def cv(y, channel, sigma, omega, a0=None, mu0=None, lag=0, rank=500, **kwargs):
                       'yhat': yhat[itrial, :][newaxis, ...],
                       'mu0': mu0[itrial, :][newaxis, ...] if mu0 is not None else None}
         itrain = arange(ntrial) != itrial
-        model, _ = fit(y[itrain, :], channel, sigma, omega, x=None, a0=a0,
+        model, _ = fit(y[itrain, :], channel, dyn_ndim=dyn_ndim, sigma=sigma, omega=omega, x=None, a0=a0,
                        mu0=mu0[itrain, :] if mu0 is not None else None,
-                       alpha=None, beta=None,
+                       true_a=None, true_b=None,
                        lag=lag, rank=rank, **kwargs)
         kwargs['verbose'] = False
         kwargs['dmu_acc'] = zeros_like(model['mu'])

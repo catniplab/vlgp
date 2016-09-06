@@ -4,7 +4,7 @@ import timeit
 import warnings
 
 import numpy as np
-import sklearn.decomposition.factor_analysis
+from sklearn.decomposition import factor_analysis
 from numpy import identity, einsum, trace, inner, empty, inf, diag, newaxis, var, asarray, zeros, zeros_like, \
     empty_like, sum, copyto, ones
 from numpy.core.umath import sqrt, PINF, log
@@ -312,7 +312,7 @@ def infer(model_fit, options):
         """Optimize hyperparameters"""
         dyn_ndim, nbin, rank = model_fit['chol'].shape
         mu = model_fit['mu']
-        w = model_fit['w']
+        # w = model_fit['w']
         subsample_size = options['subsample_size']
         if subsample_size is None:
             subsample_size = nbin
@@ -334,16 +334,20 @@ def infer(model_fit, options):
         #     copyto(good_omega, model_fit['omega'])
         sigma = model_fit['sigma']
         omega = model_fit['omega']
-
+        multiplier = 2.0
         for dyn_dim in range(dyn_ndim):
             # subsample = np.random.choice(nbin, subsample_size, replace=False)
-            subsample = np.arange(subsample_size) + np.random.randint(nbin - subsample_size)
-            bounds = ((max(1e-6, sigma[dyn_dim] ** 2 / 10), min(10, sigma[dyn_dim] ** 2 * 10)),
-                      (max(1e-6, omega[dyn_dim] / 10), min(1.0, omega[dyn_dim] * 10)))
-            sigma2, omega[dyn_dim] = hyper.optim(subsample, mu[:, subsample, dyn_dim].T, w[:, subsample, dyn_dim].T,
+            subsample = hyper.subsample(nbin, subsample_size)
+            # subsample = np.arange(subsample_size) + np.random.randint(nbin - subsample_size)
+            bounds = ((max(1e-3, sigma[dyn_dim] ** 2 / multiplier), min(10, sigma[dyn_dim] ** 2 * multiplier)),
+                      (max(1e-6, omega[dyn_dim] / multiplier), min(1.0, omega[dyn_dim] * multiplier)))
+            # bounds = ((1e-6, 10), (1e-6, 1))
+            w = model_fit['w'][:, subsample, dyn_dim].T
+            sigma2, omega[dyn_dim] = hyper.optim(options['hyper_obj'], subsample, mu[:, subsample, dyn_dim].T, w,
                                                  (sigma[dyn_dim] ** 2, omega[dyn_dim]),
                                                  bounds,
                                                  1e-7)  # noise variance, small value to avoid oversmoothing
+
             sigma[dyn_dim] = np.sqrt(sigma2)
 
         copyto(good_sigma, sigma)
@@ -450,37 +454,37 @@ def infer(model_fit, options):
         # convergence check #
         #####################
         lb[it], ll[it] = 0, 0
-        decreased = lb[it] < lb[it - 1]
+        # decreased = lb[it] < lb[it - 1]
         # converged = np.allclose(model_fit['mu'], good_mu)
         converged = norm(model_fit['mu'].ravel() - good_mu.ravel()) <= (eps + tol * norm(good_mu.ravel())) and norm(
             model_fit['a'].ravel() - good_a.ravel()) <= (eps + tol * norm(good_a.ravel())) and norm(
             model_fit['b'].ravel() - good_b.ravel()) <= (eps + tol * norm(good_b.ravel()))
 
-        if decreased:
-            # if options['verbose']:
-            #     print('\nELBO decreased.')
-            if options['backtrack']:
-                copyto(model_fit['mu'], good_mu)
-                copyto(model_fit['w'], good_w)
-                copyto(model_fit['v'], good_v)
-                copyto(model_fit['a'], good_a)
-                copyto(model_fit['b'], good_b)
-                copyto(model_fit['noise'], good_noise)
-                lb[it] = lb[it - 1]
-            else:
-                copyto(good_mu, model_fit['mu'])
-                copyto(good_w, model_fit['w'])
-                copyto(good_v, model_fit['v'])
-                copyto(good_a, model_fit['a'])
-                copyto(good_b, model_fit['b'])
-                copyto(good_noise, model_fit['noise'])
-        else:
-            copyto(good_mu, model_fit['mu'])
-            copyto(good_w, model_fit['w'])
-            copyto(good_v, model_fit['v'])
-            copyto(good_a, model_fit['a'])
-            copyto(good_b, model_fit['b'])
-            copyto(good_noise, model_fit['noise'])
+        # if decreased:
+        #     # if options['verbose']:
+        #     #     print('\nELBO decreased.')
+        #     if options['backtrack']:
+        #         copyto(model_fit['mu'], good_mu)
+        #         copyto(model_fit['w'], good_w)
+        #         copyto(model_fit['v'], good_v)
+        #         copyto(model_fit['a'], good_a)
+        #         copyto(model_fit['b'], good_b)
+        #         copyto(model_fit['noise'], good_noise)
+        #         lb[it] = lb[it - 1]
+        #     else:
+        #         copyto(good_mu, model_fit['mu'])
+        #         copyto(good_w, model_fit['w'])
+        #         copyto(good_v, model_fit['v'])
+        #         copyto(good_a, model_fit['a'])
+        #         copyto(good_b, model_fit['b'])
+        #         copyto(good_noise, model_fit['noise'])
+        # else:
+        copyto(good_mu, model_fit['mu'])
+        copyto(good_w, model_fit['w'])
+        copyto(good_v, model_fit['v'])
+        copyto(good_a, model_fit['a'])
+        copyto(good_b, model_fit['b'])
+        copyto(good_noise, model_fit['noise'])
 
         # converged = converged  # or abs(lb[iiter] - lb[iiter - 1]) < options['tol'] * abs(lb[iiter - 1])
         # stop = converged or decreased
@@ -489,8 +493,8 @@ def infer(model_fit, options):
         ###################
         # hyperparam step #
         ###################
-        if it % options['nhyper'] == 0 and (options['learn_sigma'] or options['learn_omega']):
-            lb[it], ll[it] = elbo(model_fit)
+        if it % options['nhyper'] == 0 and options['learn_hyper']:
+            # lb[it], ll[it] = elbo(model_fit)
             hstep()
 
         ###################################
@@ -503,8 +507,8 @@ def infer(model_fit, options):
         stat[it]['Elapsed Post'] = elapsed[it, 0]
         stat[it]['Elapsed Param'] = elapsed[it, 1]
         stat[it]['Elapsed Total'] = elapsed[it, 2]
-        stat[it]['ELBO'] = lb[it]
-        stat[it]['LL'] = ll[it]
+        # stat[it]['ELBO'] = lb[it]
+        # stat[it]['LL'] = ll[it]
         stat[it]['sigma'] = good_sigma
         stat[it]['omega'] = good_omega
 
@@ -518,6 +522,7 @@ def infer(model_fit, options):
         it += 1
     infer_tock = timeit.default_timer()
 
+    lb[it - 1], ll[it - 1] = elbo(model_fit)
     if options['verbose']:
         print('\nInference ends')
         print('{} iterations, ELBO: {:.4f}, elapsed: {:.3f}\n'.format(it - 1,
@@ -533,8 +538,23 @@ def infer(model_fit, options):
     return model_fit
 
 
-def fit(y, obs_types, sigma, omega, a=None, b=None, mu=None, x=None, alpha=None, beta=None, lag=0,
-        rank=500, eps=1e-8, tol=1e-5, **kwargs):
+def fit(y,
+        obs_types,
+        dyn_ndim,
+        a=None,
+        b=None,
+        mu=None,
+        lag=0,
+        x=None,
+        true_a=None,
+        true_b=None,
+        sigma=None,
+        omega=None,
+        rank=None,
+        eps=1e-8,
+        tol=1e-5,
+        gp_noise=1e-3,
+        **kwargs):
     """
     vLGP main function
 
@@ -544,10 +564,8 @@ def fit(y, obs_types, sigma, omega, a=None, b=None, mu=None, x=None, alpha=None,
         obserbation
     obs_types : ndarray
         types of observation dimensions, 'spike' or 'lfp'
-    sigma : ndarray
-        prior variance
-    omega : ndarray
-        1 / prior timescale^2
+    dyn_ndim : int
+        number of latent dimensions
     a : ndarray, optional
         initial value of loading
     b : ndarray, optional
@@ -556,9 +574,9 @@ def fit(y, obs_types, sigma, omega, a=None, b=None, mu=None, x=None, alpha=None,
         initial value of posterior mean
     x : ndarray, optional
         true value of latent
-    alpha : ndarray, optional
+    true_a : ndarray, optional
         true value of loading
-    beta : ndarray, optional
+    true_b : ndarray, optional
         true value of regression
     lag : int, optional
         autoregressive lag
@@ -568,6 +586,8 @@ def fit(y, obs_types, sigma, omega, a=None, b=None, mu=None, x=None, alpha=None,
         a small positive number
     tol : double, optional
         numerical tolerance
+    gp_noise : double optional
+        noise variance in GP kernel
     kwargs : dict, optional
         algorithm options. See fill_options()
 
@@ -576,7 +596,6 @@ def fit(y, obs_types, sigma, omega, a=None, b=None, mu=None, x=None, alpha=None,
     dict
         fit
     """
-    assert sigma.shape == omega.shape
     options = fill_options(kwargs)
     options['eps'] = eps
     options['tol'] = tol
@@ -590,7 +609,6 @@ def fit(y, obs_types, sigma, omega, a=None, b=None, mu=None, x=None, alpha=None,
 
     obs_types = asarray(obs_types)
     ntrial, nbin, obs_ndim = y.shape
-    dyn_ndim = sigma.shape[0]
 
     # make design matrix of regression
     h = empty((obs_ndim, ntrial, nbin, 1 + lag), dtype=float)
@@ -598,16 +616,11 @@ def fit(y, obs_types, sigma, omega, a=None, b=None, mu=None, x=None, alpha=None,
         for itrial in range(ntrial):
             h[ichannel, itrial, :] = add_constant(lagmat(y[itrial, :, ichannel], lag=lag))
 
-    # make Cholesky of prior
-    chol = empty((dyn_ndim, nbin, rank), dtype=float)
-    for dyn_dim in range(dyn_ndim):
-        chol[dyn_dim, :] = ichol_gauss(nbin, omega[dyn_dim], rank) * sigma[dyn_dim]
-
     # Initialize posterior and loading
     # Use factor analysis if both missing initial values
     # Use least squares if missing one of loading and latent
     if a is None and mu is None:
-        fa = sklearn.decomposition.factor_analysis.FactorAnalysis(n_components=dyn_ndim, svd_method='lapack')
+        fa = factor_analysis.FactorAnalysis(n_components=dyn_ndim, svd_method='lapack')
         mu = fa.fit_transform(y.reshape((-1, obs_ndim)))
         a = fa.components_
 
@@ -628,8 +641,40 @@ def fit(y, obs_types, sigma, omega, a=None, b=None, mu=None, x=None, alpha=None,
         elif a is None:
             a = lstsq(mu.reshape((-1, dyn_ndim)), y.reshape((-1, obs_ndim)))[0]
 
-    # initialize square root of posterior covariance
-    post_ichol = empty((ntrial, dyn_ndim, nbin, rank))
+    ####################
+    # initialize prior #
+    ####################
+    if sigma is None or omega is None:
+        if options['subsample_size'] is None:
+            options['subsample_size'] = nbin // 5
+        subsample_size = options['subsample_size']
+        sigma = np.ones(dyn_ndim)
+        omega = np.ones(dyn_ndim)
+        for dyn_dim in range(dyn_ndim):
+            #     subsample = np.random.choice(1000, 200, replace=False)
+            subsample = hyper.subsample(nbin, subsample_size, kwargs['successive'])
+            omega_grid = np.logspace(-6, 0, num=7, base=10)
+            sigma2_opt = np.zeros_like(omega_grid)
+            omega_opt = np.zeros_like(omega_grid)
+            fval_opt = np.zeros_like(omega_grid)
+            for i, o in enumerate(omega_grid):
+                (sigma2_opt[i], omega_opt[i]), fval_opt[i] = hyper.optim('GP', subsample, mu[:, subsample, dyn_dim].T, None,
+                                                                         [0.1, o],
+                                                                         ((1e-8, 10), (1e-6, 1)),
+                                                                         gp_noise,
+                                                                         True)
+        idx = np.argmin(fval_opt)
+        sigma[dyn_dim] = np.sqrt(sigma2_opt[idx])
+        omega[dyn_dim] = omega_opt[idx]
+
+    # make Cholesky of prior
+    if rank is None:
+        rank = nbin
+    chol = empty((dyn_ndim, nbin, rank), dtype=float)
+    for dyn_dim in range(dyn_ndim):
+        chol[dyn_dim, :] = ichol_gauss(nbin, omega[dyn_dim], rank) * sigma[dyn_dim]
+
+    ##############
 
     # initialize bias and autoregression
     if b is None:
@@ -648,8 +693,22 @@ def fit(y, obs_types, sigma, omega, a=None, b=None, mu=None, x=None, alpha=None,
     else:
         v = 0 * ones((ntrial, nbin, dyn_ndim), dtype=float)
 
-    model_fit = dict(y=y, channel=obs_types, h=h, sigma=sigma, omega=omega, chol=chol, mu=mu, w=w, v=v, L=post_ichol,
-                     a=a, b=b, noise=noise, x=x, alpha=alpha, beta=beta)
+    model_fit = dict(y=y,
+                     channel=obs_types,
+                     h=h,
+                     sigma=sigma,
+                     omega=omega,
+                     chol=chol,
+                     mu=mu,
+                     w=w,
+                     v=v,
+                     L=empty((ntrial, dyn_ndim, nbin, rank)),
+                     a=a,
+                     b=b,
+                     noise=noise,
+                     x=x,
+                     alpha=true_a,
+                     beta=true_b)
 
     options['dmu_acc'] = zeros_like(mu)
     options['da_acc'] = zeros_like(a)
@@ -685,25 +744,28 @@ def fill_options(options):
         full options
     """
     options['verbose'] = options.get('verbose', False)  # detailed output
-    options['niter'] = options.get('niter', 2000)  # max # of iteration
+    options['niter'] = options.get('niter', 200)  # max # of iteration
     options['learn_post'] = options.get('learn_post', True)  # optimize posterior
     options['learn_param'] = options.get('learn_param', True)  # optimize loading and regression
-    options['learn_sigma'] = options.get('learn_sigma', False)  # optimize prior variance
-    options['learn_omega'] = options.get('learn_omega', False)  # optimize prior timescale
+    options['learn_sigma'] = options.get('learn_sigma', True)  # optimize prior variance
+    options['learn_omega'] = options.get('learn_omega', True)  # optimize prior timescale
+    options['learn_hyper'] = options.get('learn_hyper', True)
     options['nhyper'] = options.get('nhyper', 5)  # optimize hyperparams every # iterations
     options['decay'] = options.get('decay', 0)  # decay rate of the second moment of gradient. TODO: move to optimizers
-    options['sigma_factor'] = options.get('sigma_factor', 5)  # multiplicative step length for optimizing sigma
-    options['omega_factor'] = options.get('omega_factor', 5)  # multiplicative step length for optimizing omega
-    options['hessian'] = options.get('hessian', False)  # use Hessian in M-step
-    options['adjhess'] = options.get('adjhess', True)  # regular Hessian by gradient
+    options['sigma_factor'] = options.get('sigma_factor', 5)  # multiplicative step length for optimizing sigma. TODO: remove
+    options['omega_factor'] = options.get('omega_factor', 5)  # multiplicative step length for optimizing omega. TODO: remove
+    options['hessian'] = options.get('hessian', True)  # use Hessian in M-step
+    options['adjhess'] = options.get('adjhess', False)  # regular Hessian by gradient
     options['learning_rate'] = options.get('learning_rate', 0.001)  # learning rate
     options['method'] = options.get('method', 'VB')  # method of estimate, 'VB' or 'MAP'
     options['post_prediction'] = options.get('post_prediction', True)  # use posterior variance in predicted firing rate
-    options['backtrack'] = options.get('backtrack', True)  # recover from decreased ELBO. TODO: remove
+    options['backtrack'] = options.get('backtrack', False)  # recover from decreased ELBO. TODO: remove
     options['e_niter'] = options.get('e_niter', 1)  # max # of estep loop
     options['m_niter'] = options.get('m_niter', 1)  # max # of mstep loop
     options['update_bound'] = options.get('update_bound', 1.0)
     options['subsample_size'] = options.get('subsample_size', None)
+    options['hyper_obj'] = options.get('hyper_obj', 'ELBO')
+    options['Adam'] = options.get('Adam', 'False')
     return options
 
 

@@ -146,7 +146,7 @@ def kernel(x, params, noise_var):
     return K, dK
 
 
-def marginal(params, noise_var, t, mu, w):
+def marginal(params, noise_var, t, mu, w=None):
     K, dK = kernel(t, params, noise_var)
     # K[np.diag_indices_from(K)] += sigma2n
     try:
@@ -159,53 +159,97 @@ def marginal(params, noise_var, t, mu, w):
 
     alpha = cho_solve((L, True), mu)
     ll_dims = -0.5 * np.einsum('ik,ik->k', mu, alpha)
+    ll_dims -= np.log(np.diag(L)).sum()
+    ll_dims -= K.shape[0] / 2 * np.log(2 * np.pi)
+    ll = ll_dims.sum(-1)
 
-    if w is not None:
-        if w.ndim == 1:
-            w = w[:, np.newaxis]
-        WK = np.einsum('ik,ij->ijk', w, K)
-        SinvKW = np.zeros_like(WK)
-        for i in range(WK.shape[-1]):
-            SinvK = WK[:, :, i]  # Sigma^-1 K
-            SinvK[np.diag_indices_from(SinvK)] += 1
-            try:
-                SinvKW[:, :, i] = solve(SinvK, np.diag(w[:, i]), sym_pos=True)
-            except LinAlgError:
-                return -np.inf, np.zeros_like(params)
-
-            eigval_SinvK = eigvalsh(SinvK)
-            ll_dims[i] -= 0.5 * np.sum(1 / eigval_SinvK)  # trace(K^-1 Sigma)
-            ll_dims[i] -= 0.5 * np.log(eigval_SinvK).sum()
-        ll = ll_dims.sum(-1)
-
-        tmp = np.einsum('ik,jk->ijk', alpha, alpha)
-        tmp += SinvKW
-        dll_dims = 0.5 * np.einsum('ijl,ijk->kl', tmp, dK)
-        dll = dll_dims.sum(-1)
-
-    else:
-        ll_dims -= np.log(np.diag(L)).sum()
-        ll_dims -= K.shape[0] / 2 * np.log(2 * np.pi)
-        ll = ll_dims.sum(-1)
-
-        tmp = np.einsum('ik,jk->ijk', alpha, alpha)
-        tmp -= cho_solve((L, True), np.eye(K.shape[0]))[:, :, np.newaxis]
-        dll_dims = 0.5 * np.einsum('ijl,ijk->kl', tmp, dK)
-        dll = dll_dims.sum(-1)
+    tmp = np.einsum('ik,jk->ijk', alpha, alpha)
+    tmp -= cho_solve((L, True), np.eye(K.shape[0]))[:, :, np.newaxis]
+    dll_dims = 0.5 * np.einsum('ijl,ijk->kl', tmp, dK)
+    dll = dll_dims.sum(-1)
 
     return ll, dll
 
 
-def optim(t, mu, w, params0, bounds, noise_var):
+def elbo(params, noise_var, t, mu, Sigma):
+    while True:
+        K, dK = kernel(t, params, noise_var)
+        try:
+            L = cholesky(K, lower=True)
+            break
+        except LinAlgError:
+            # return -np.inf, np.zeros_like(params)
+            noise_var *= 10
+
+    Kinv = cho_solve((L, True), np.eye(K.shape[0]))  # K inverse
+
+    if mu.ndim == 1:
+        mu = mu[:, np.newaxis]
+
+    alpha = cho_solve((L, True), mu)
+    ll_dims = -0.5 * np.einsum('ik,ik->k', mu, alpha)
+    tmp = np.einsum('ik,jk->ijk', alpha, alpha)
+    tmp -= Kinv[:, :, np.newaxis]
+
+    for i in range(Sigma.shape[-1]):
+        KinvSigma = cho_solve((L, True), Sigma[:, :, i])
+        ll_dims[i] -= 0.5 * trace(KinvSigma)
+        tmp[:, :, i] += KinvSigma @ Kinv
+
+    ll_dims -= np.log(np.diag(L)).sum()
+    ll = ll_dims.sum(-1)
+
+    dll_dims = 0.5 * np.einsum('ijl,ijk->kl', tmp, dK)
+    dll = dll_dims.sum(-1)
+
+    return ll, dll
+
+
+def construct_posterior_cov(t, mu, w, hparams, noise_var):
+    while True:
+        K, dK = kernel(t, hparams, noise_var)
+        try:
+            L = cholesky(K, lower=True)
+            break
+        except LinAlgError:
+            # return -np.inf, np.zeros_like(params)
+            noise_var *= 10
+
+    Kinv = cho_solve((L, True), np.eye(K.shape[0]))  # K inverse
+
+    if w.ndim == 1:
+        w = w[:, np.newaxis]
+
+    Sigma = np.zeros((K.shape[0], K.shape[0], w.shape[-1]))
+    for i in range(w.shape[-1]):
+        L_Sigmainv = cholesky(Kinv + np.diag(w[:, i]), lower=True)
+        Sigma[:, :, i] = cho_solve((L_Sigmainv, True), np.eye(K.shape[0]))
+
+    return Sigma
+
+
+def optim(obj, t, mu, w, params0, bounds, noise_var, return_f=False):
     def obj_func(params):
-        ll, dll = marginal(params, noise_var, t, mu, w)
+        if obj == 'ELBO':
+            Sigma = construct_posterior_cov(t, mu, w, params0, noise_var)
+            ll, dll = elbo(params, noise_var, t, mu, Sigma)
+        elif obj == 'GP':
+            ll, dll = marginal(params, noise_var, t, mu)
+        else:
+            raise NotImplementedError('not supported objective function')
         return -ll, -dll
 
     opt, fval, info = fmin_l_bfgs_b(obj_func, params0, bounds=bounds)
-    if info['warnflag'] != 0:
-        warnings.warn("fmin_l_bfgs_b terminated abnormally with the state: {}".format(info))
+    # if info['warnflag'] != 0:
+    #     warnings.warn("fmin_l_bfgs_b terminated abnormally with the state: {}".format(info))
+
+    if return_f:
+        return opt, fval
+
     return opt
 
 
-def subsample(n, size):
+def subsample(n, size, successive=False):
+    if successive:
+        return np.arange(size) + np.random.randint(n - size)
     return np.random.choice(n, size, replace=False)
