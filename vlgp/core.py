@@ -161,13 +161,13 @@ def infer(model_fit, options):
                 residual[:, spike] = y[:, spike] - frate[:, spike]  # residuals of Poisson observations
                 residual[:, lfp] = (y[:, lfp] - eta[:, lfp]) / noise[lfp]  # residuals of Gaussian observations
 
-                grad_mu_resid = (y[:, spike] - frate[:, spike]) @ a[dyn_dim, spike] + \
-                                ((y[:, lfp] - eta[:, lfp]) / noise[lfp]) @ a[dyn_dim, lfp]
+                # grad_mu_resid = (y[:, spike] - frate[:, spike]) @ a[dyn_dim, spike] + \
+                #                 ((y[:, lfp] - eta[:, lfp]) / noise[lfp]) @ a[dyn_dim, lfp]
 
                 optimizer = options['optimizer_mu'][trial, dyn_dim]
 
-                grad_mu = grad_mu_resid  # - lstsq(G.T, lstsq(G, mu[:, dyn_dim])[0])[0]
-                dmu_acc[trial, :, dyn_dim] = accumulate(dmu_acc[trial, :, dyn_dim], grad_mu, decay)
+                # grad_mu = grad_mu_resid  # - lstsq(G.T, lstsq(G, mu[:, dyn_dim])[0])[0]
+                # dmu_acc[trial, :, dyn_dim] = accumulate(dmu_acc[trial, :, dyn_dim], grad_mu, decay)
 
                 if adjust_hessian:
                     wadj = w[:, dyn_dim] + eps + sqrt(dmu_acc[trial, :, dyn_dim])  # adjusted Hessian
@@ -275,7 +275,7 @@ def infer(model_fit, options):
                         delta_b = grad_b
                 else:
                     delta_b = grad_b
-                check_update(delta_b)
+                # check_update(delta_b)
                 if options['Adam']:
                     delta_b = optimizer_b.update(delta_b)
                 b[:, obs_dim] += delta_b
@@ -334,7 +334,7 @@ def infer(model_fit, options):
         #     copyto(good_omega, model_fit['omega'])
         sigma = model_fit['sigma']
         omega = model_fit['omega']
-        multiplier = 2.0
+        multiplier = 10.0
         for dyn_dim in range(dyn_ndim):
             # subsample = np.random.choice(nbin, subsample_size, replace=False)
             subsample = hyper.subsample(nbin, subsample_size)
@@ -651,16 +651,18 @@ def fit(y,
         sigma = np.ones(dyn_ndim)
         omega = np.ones(dyn_ndim)
         for dyn_dim in range(dyn_ndim):
-            #     subsample = np.random.choice(1000, 200, replace=False)
             subsample = hyper.subsample(nbin, subsample_size, kwargs['successive'])
             omega_grid = np.logspace(-6, 0, num=7, base=10)
             sigma2_opt = np.zeros_like(omega_grid)
             omega_opt = np.zeros_like(omega_grid)
             fval_opt = np.zeros_like(omega_grid)
             for i, o in enumerate(omega_grid):
-                (sigma2_opt[i], omega_opt[i]), fval_opt[i] = hyper.optim('GP', subsample, mu[:, subsample, dyn_dim].T, None,
+                (sigma2_opt[i], omega_opt[i]), fval_opt[i] = hyper.optim('GP',
+                                                                         subsample,  # time
+                                                                         mu[:, subsample, dyn_dim].T,
+                                                                         None,  # Sigma
                                                                          [0.1, o],
-                                                                         ((1e-8, 10), (1e-6, 1)),
+                                                                         ((1e-3, 1), (1e-6, 1)),
                                                                          gp_noise,
                                                                          True)
         idx = np.argmin(fval_opt)
