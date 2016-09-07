@@ -14,6 +14,8 @@ from scipy.optimize import fmin_l_bfgs_b
 from scipy.optimize import minimize_scalar, minimize
 from scipy.spatial.distance import pdist, squareform
 
+from .math import sexp
+
 
 def klprime(theta, sigma, n, mu, M, S, eps=1e-6):
     """Derivative of kl part of ELBO w.r.t. hyperparameter
@@ -207,7 +209,7 @@ def elbo(params, noise_var, t, mu, Sigma):
     return ll, dll
 
 
-def construct_posterior_cov(t, mu, w, hparams, noise_var):
+def construct_posterior_cov(t, w, hparams, noise_var):
     while True:
         K, dK = kernel(t, hparams, noise_var)
         try:
@@ -233,7 +235,7 @@ def construct_posterior_cov(t, mu, w, hparams, noise_var):
 def optim(obj, t, mu, w, params0, bounds, noise_var, return_f=False):
     def obj_func(params):
         if obj == 'ELBO':
-            Sigma = construct_posterior_cov(t, mu, w, params0, noise_var)
+            Sigma = construct_posterior_cov(t, w, params0, noise_var)
             ll, dll = elbo(params, noise_var, t, mu, Sigma)
         elif obj == 'GP':
             ll, dll = gpr_marginal(params, noise_var, t, mu)
@@ -255,3 +257,10 @@ def subsample(n, size, successive=False):
     if successive:
         return np.arange(size) + np.random.randint(n - size)
     return np.random.choice(n, size, replace=False)
+
+
+def fixed_point(y, mu, K, hb, a):
+    mu = mu.copy()
+    for _ in range(20):
+        mu = K @ (y - sexp(hb + mu @ a))
+    return mu

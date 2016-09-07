@@ -161,15 +161,11 @@ def infer(model_fit, options):
                 residual[:, spike] = y[:, spike] - rate[:, spike]  # residuals of Poisson observations
                 residual[:, lfp] = (y[:, lfp] - eta[:, lfp]) / noise[lfp]  # residuals of Gaussian observations
 
-                # grad_mu_resid = (y[:, spike] - frate[:, spike]) @ a[dyn_dim, spike] + \
-                #                 ((y[:, lfp] - eta[:, lfp]) / noise[lfp]) @ a[dyn_dim, lfp]
-
-                optimizer = options['optimizer_mu'][trial, dyn_dim]
-
-                # grad_mu = grad_mu_resid  # - lstsq(G.T, lstsq(G, mu[:, dyn_dim])[0])[0]
-                # dmu_acc[trial, :, dyn_dim] = accumulate(dmu_acc[trial, :, dyn_dim], grad_mu, decay)
-
                 if adjust_hessian:
+                    grad_mu_resid = (y[:, spike] - rate[:, spike]) @ a[dyn_dim, spike] + \
+                                    ((y[:, lfp] - eta[:, lfp]) / noise[lfp]) @ a[dyn_dim, lfp]
+                    grad_mu = grad_mu_resid - lstsq(G.T, lstsq(G, mu[:, dyn_dim])[0])[0]
+                    dmu_acc[trial, :, dyn_dim] = accumulate(dmu_acc[trial, :, dyn_dim], grad_mu, decay)
                     wadj = w[:, dyn_dim] + eps + sqrt(dmu_acc[trial, :, dyn_dim])  # adjusted Hessian
                 else:
                     wadj = w[:, dyn_dim]  # keep dimension
@@ -182,6 +178,7 @@ def infer(model_fit, options):
 
                 check_update(delta_mu)
                 if options['Adam']:
+                    optimizer = options['optimizer_mu'][trial, dyn_dim]
                     delta_mu = optimizer.update(delta_mu)
                 mu[:, dyn_dim] += delta_mu
 
@@ -226,9 +223,6 @@ def infer(model_fit, options):
         model_fit['noise'] = var(y - eta, axis=0, ddof=0)  # MLE
 
         for obs_dim in range(obs_ndim):
-            optimizer_a = options['optimizer_a'][obs_dim]
-            optimizer_b = options['optimizer_b'][obs_dim]
-
             # eta = mu @ a + einsum('ijk, ki -> ji', h, b)
             # lam = sexp(eta + 0.5 * v @ (a ** 2))
             if obs_types[obs_dim] == 'spike':
@@ -239,13 +233,13 @@ def infer(model_fit, options):
                 # wv = rate[:, obs_dim] @ v
 
                 grad_a = mu.T @ y[:, obs_dim] - mu_plus_v_times_a.T @ rate[:, obs_dim]
-                da_acc[:, obs_dim] = accumulate(da_acc[:, obs_dim], grad_a, decay)
 
                 if options['hessian']:
                     neghess_a = mu_plus_v_times_a.T @ (rate[:, [obs_dim]] * mu_plus_v_times_a)  # + wv
                     neghess_a[np.diag_indices_from(neghess_a)] += rate[:, obs_dim] @ v
 
                     if adjust_hessian:
+                        da_acc[:, obs_dim] = accumulate(da_acc[:, obs_dim], grad_a, decay)
                         neghess_a[np.diag_indices_from(neghess_a)] += eps + sqrt(da_acc[:, obs_dim])
                     try:
                         delta_a = solve(neghess_a, grad_a, sym_pos=True)
@@ -257,17 +251,18 @@ def infer(model_fit, options):
 
                 check_update(delta_a)
                 if options['Adam']:
+                    optimizer_a = options['optimizer_a'][obs_dim]
                     delta_a = optimizer_a.update(delta_a)
                 a[:, obs_dim] += delta_a
 
                 # regression
                 grad_b = h[obs_dim, :].T @ (y[:, obs_dim] - rate[:, obs_dim])
-                db_acc[:, obs_dim] = accumulate(db_acc[:, obs_dim], grad_b, decay)
 
                 if options['hessian']:
                     neghess_b = h[obs_dim, :].T @ (rate[:, [obs_dim]] * h[obs_dim, :])
                     # TODO: inactive neurons never fire across all trials which may cause zero Hessian
                     if adjust_hessian:
+                        db_acc[:, obs_dim] = accumulate(db_acc[:, obs_dim], grad_b, decay)
                         neghess_b[np.diag_indices_from(neghess_b)] += eps + sqrt(db_acc[:, obs_dim])
                     try:
                         delta_b = solve(neghess_b, grad_b, sym_pos=True)
@@ -278,6 +273,7 @@ def infer(model_fit, options):
                     delta_b = grad_b
                 # check_update(delta_b)
                 if options['Adam']:
+                    optimizer_b = options['optimizer_b'][obs_dim]
                     delta_b = optimizer_b.update(delta_b)
                 b[:, obs_dim] += delta_b
             elif obs_types[obs_dim] == 'lfp':
@@ -703,16 +699,17 @@ def fit(y,
     options['da_acc'] = zeros_like(a)
     options['db_acc'] = zeros_like(b)
 
-    options['optimizer_mu'] = empty((ntrial, dyn_ndim), dtype=object)
-    options['optimizer_a'] = empty(obs_ndim, dtype=object)
-    options['optimizer_b'] = empty(obs_ndim, dtype=object)
+    if options['Adam']:
+        options['optimizer_mu'] = empty((ntrial, dyn_ndim), dtype=object)
+        options['optimizer_a'] = empty(obs_ndim, dtype=object)
+        options['optimizer_b'] = empty(obs_ndim, dtype=object)
 
-    for each in np.nditer(options['optimizer_mu'], flags=['refs_ok'], op_flags=['readwrite']):
-        each[...] = AdamOptimizer(nbin, options['learning_rate'])
-    for each in np.nditer(options['optimizer_a'], flags=['refs_ok'], op_flags=['readwrite']):
-        each[...] = AdamOptimizer(dyn_ndim, options['learning_rate'])
-    for each in np.nditer(options['optimizer_b'], flags=['refs_ok'], op_flags=['readwrite']):
-        each[...] = AdamOptimizer(b.shape[0], options['learning_rate'])
+        for each in np.nditer(options['optimizer_mu'], flags=['refs_ok'], op_flags=['readwrite']):
+            each[...] = AdamOptimizer(nbin, options['learning_rate'])
+        for each in np.nditer(options['optimizer_a'], flags=['refs_ok'], op_flags=['readwrite']):
+            each[...] = AdamOptimizer(dyn_ndim, options['learning_rate'])
+        for each in np.nditer(options['optimizer_b'], flags=['refs_ok'], op_flags=['readwrite']):
+            each[...] = AdamOptimizer(b.shape[0], options['learning_rate'])
 
     for k, v in options.items():
         print(k, v)
@@ -757,7 +754,7 @@ def fill_options(options):
     options['update_bound'] = options.get('update_bound', 1.0)
     options['subsample_size'] = options.get('subsample_size', None)
     options['hyper_obj'] = options.get('hyper_obj', 'ELBO')
-    options['Adam'] = options.get('Adam', 'False')
+    options['Adam'] = options.get('Adam', False)
     return options
 
 
