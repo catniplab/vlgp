@@ -153,12 +153,12 @@ def infer(model_fit, options):
 
             hb = einsum('ijk, ki -> ji', h, b)
             eta = mu @ a + hb
-            frate = sexp(eta + 0.5 * v @ (a ** 2))
+            rate = sexp(eta + 0.5 * v @ (a ** 2))
             for dyn_dim in range(dyn_ndim):
                 # lam, eta = firing_rate(mu, v, a, b, h)
                 G = chol[dyn_dim, :, :]
 
-                residual[:, spike] = y[:, spike] - frate[:, spike]  # residuals of Poisson observations
+                residual[:, spike] = y[:, spike] - rate[:, spike]  # residuals of Poisson observations
                 residual[:, lfp] = (y[:, lfp] - eta[:, lfp]) / noise[lfp]  # residuals of Gaussian observations
 
                 # grad_mu_resid = (y[:, spike] - frate[:, spike]) @ a[dyn_dim, spike] + \
@@ -186,8 +186,8 @@ def infer(model_fit, options):
                 mu[:, dyn_dim] += delta_mu
 
             eta = mu @ a + hb
-            frate = sexp(eta + 0.5 * v @ (a ** 2))
-            U[:, spike] = frate[:, spike]
+            rate = sexp(eta + 0.5 * v @ (a ** 2))
+            U[:, spike] = rate[:, spike]
             U[:, lfp] = 1 / noise[lfp]
             copyto(w, U @ (a.T ** 2))
             if options['method'] == 'VB':
@@ -222,7 +222,7 @@ def infer(model_fit, options):
         v = model_fit['v'].reshape((-1, dyn_ndim))
 
         eta = mu @ a + einsum('ijk, ki -> ji', h, b)  # (neuron, time, lag) x (lag, neuron) -> (time, neuron)
-        frate = sexp(eta + 0.5 * v @ (a ** 2))
+        rate = sexp(eta + 0.5 * v @ (a ** 2))
         model_fit['noise'] = var(y - eta, axis=0, ddof=0)  # MLE
 
         for obs_dim in range(obs_ndim):
@@ -233,16 +233,17 @@ def infer(model_fit, options):
             # lam = sexp(eta + 0.5 * v @ (a ** 2))
             if obs_types[obs_dim] == 'spike':
                 # loading
-                va = v * a[:, obs_dim]  # (nbin, dyn_ndim)
+                # va = v * a[:, obs_dim]  # (nbin, dyn_ndim)
+                mu_plus_v_times_a = mu + v * a[:, obs_dim]
                 # wv = diag(frate[:, obs_dim] @ v)
-                wv = frate[:, obs_dim] @ v
+                # wv = rate[:, obs_dim] @ v
 
-                grad_a = mu.T @ y[:, obs_dim] - (mu + va).T @ frate[:, obs_dim]
+                grad_a = mu.T @ y[:, obs_dim] - mu_plus_v_times_a.T @ rate[:, obs_dim]
                 da_acc[:, obs_dim] = accumulate(da_acc[:, obs_dim], grad_a, decay)
 
                 if options['hessian']:
-                    neghess_a = (mu + va).T @ (frate[:, [obs_dim]] * (mu + va))  # + wv
-                    neghess_a[np.diag_indices_from(neghess_a)] += wv
+                    neghess_a = mu_plus_v_times_a.T @ (rate[:, [obs_dim]] * mu_plus_v_times_a)  # + wv
+                    neghess_a[np.diag_indices_from(neghess_a)] += rate[:, obs_dim] @ v
 
                     if adjust_hessian:
                         neghess_a[np.diag_indices_from(neghess_a)] += eps + sqrt(da_acc[:, obs_dim])
@@ -260,11 +261,11 @@ def infer(model_fit, options):
                 a[:, obs_dim] += delta_a
 
                 # regression
-                grad_b = h[obs_dim, :].T @ (y[:, obs_dim] - frate[:, obs_dim])
+                grad_b = h[obs_dim, :].T @ (y[:, obs_dim] - rate[:, obs_dim])
                 db_acc[:, obs_dim] = accumulate(db_acc[:, obs_dim], grad_b, decay)
 
                 if options['hessian']:
-                    neghess_b = h[obs_dim, :].T @ (frate[:, [obs_dim]] * h[obs_dim, :])
+                    neghess_b = h[obs_dim, :].T @ (rate[:, [obs_dim]] * h[obs_dim, :])
                     # TODO: inactive neurons never fire across all trials which may cause zero Hessian
                     if adjust_hessian:
                         neghess_b[np.diag_indices_from(neghess_b)] += eps + sqrt(db_acc[:, obs_dim])
@@ -307,31 +308,17 @@ def infer(model_fit, options):
 
     def check_update(delta):
         np.clip(delta, -options['update_bound'], options['update_bound'], out=delta)
+        if np.any(delta < -options['update_bound']) or np.any(delta > options['update_bound']):
+            warnings('update overflow')
 
     def hstep():
         """Optimize hyperparameters"""
         dyn_ndim, nbin, rank = model_fit['chol'].shape
         mu = model_fit['mu']
-        # w = model_fit['w']
+        w = model_fit['w']
         subsample_size = options['subsample_size']
         if subsample_size is None:
-            subsample_size = nbin
-        # gp = learngp(model_fit, **options)
-        # copyto(model_fit['sigma'], gp[0])
-        # copyto(model_fit['omega'], gp[1])
-        # for dyn_dim in range(dyn_ndim):
-        #     model_fit['chol'][dyn_dim, :] = ichol_gauss(nbin, model_fit['omega'][dyn_dim], rank) * \
-        #                                     model_fit['sigma'][dyn_dim]
-        # lbhyper, _ = elbo(model_fit)
-        # if lbhyper < lb[it]:
-        #     copyto(model_fit['sigma'], good_sigma)
-        #     copyto(model_fit['omega'], good_omega)
-        #     for dyn_dim in range(dyn_ndim):
-        #         model_fit['chol'][dyn_dim, :] = ichol_gauss(nbin, model_fit['omega'][dyn_dim], rank) * \
-        #                                         model_fit['sigma'][dyn_dim]
-        # else:
-        #     copyto(good_sigma, model_fit['sigma'])
-        #     copyto(good_omega, model_fit['omega'])
+            subsample_size = nbin // 2
         sigma = model_fit['sigma']
         omega = model_fit['omega']
         multiplier = 10.0
@@ -342,8 +329,8 @@ def infer(model_fit, options):
             bounds = ((max(1e-3, sigma[dyn_dim] ** 2 / multiplier), min(10, sigma[dyn_dim] ** 2 * multiplier)),
                       (max(1e-6, omega[dyn_dim] / multiplier), min(1.0, omega[dyn_dim] * multiplier)))
             # bounds = ((1e-6, 10), (1e-6, 1))
-            w = model_fit['w'][:, subsample, dyn_dim].T
-            sigma2, omega[dyn_dim] = hyper.optim(options['hyper_obj'], subsample, mu[:, subsample, dyn_dim].T, w,
+            sigma2, omega[dyn_dim] = hyper.optim(options['hyper_obj'], subsample, mu[:, subsample, dyn_dim].T,
+                                                 w[:, subsample, dyn_dim].T,
                                                  (sigma[dyn_dim] ** 2, omega[dyn_dim]),
                                                  bounds,
                                                  1e-7)  # noise variance, small value to avoid oversmoothing
@@ -366,7 +353,7 @@ def infer(model_fit, options):
     eps = options['eps']
     tol = options['tol']
     decay = options['decay']
-    adjust_hessian = options['adjhess']
+    adjust_hessian = options['adjust_hessian']
     dmu_acc = options['dmu_acc']
     da_acc = options['da_acc']
     db_acc = options['db_acc']
@@ -546,8 +533,8 @@ def fit(y,
         mu=None,
         lag=0,
         x=None,
-        true_a=None,
-        true_b=None,
+        alpha=None,
+        beta=None,
         sigma=None,
         omega=None,
         rank=None,
@@ -574,9 +561,9 @@ def fit(y,
         initial value of posterior mean
     x : ndarray, optional
         true value of latent
-    true_a : ndarray, optional
+    alpha : ndarray, optional
         true value of loading
-    true_b : ndarray, optional
+    beta : ndarray, optional
         true value of regression
     lag : int, optional
         autoregressive lag
@@ -709,8 +696,8 @@ def fit(y,
                      b=b,
                      noise=noise,
                      x=x,
-                     alpha=true_a,
-                     beta=true_b)
+                     alpha=alpha,
+                     beta=beta)
 
     options['dmu_acc'] = zeros_like(mu)
     options['da_acc'] = zeros_like(a)
@@ -726,6 +713,9 @@ def fit(y,
         each[...] = AdamOptimizer(dyn_ndim, options['learning_rate'])
     for each in np.nditer(options['optimizer_b'], flags=['refs_ok'], op_flags=['readwrite']):
         each[...] = AdamOptimizer(b.shape[0], options['learning_rate'])
+
+    for k, v in options.items():
+        print(k, v)
 
     inference = postprocess(infer(model_fit, options))
     return inference, options
@@ -749,15 +739,15 @@ def fill_options(options):
     options['niter'] = options.get('niter', 200)  # max # of iteration
     options['learn_post'] = options.get('learn_post', True)  # optimize posterior
     options['learn_param'] = options.get('learn_param', True)  # optimize loading and regression
-    options['learn_sigma'] = options.get('learn_sigma', True)  # optimize prior variance
-    options['learn_omega'] = options.get('learn_omega', True)  # optimize prior timescale
     options['learn_hyper'] = options.get('learn_hyper', True)
     options['nhyper'] = options.get('nhyper', 5)  # optimize hyperparams every # iterations
     options['decay'] = options.get('decay', 0)  # decay rate of the second moment of gradient. TODO: move to optimizers
-    options['sigma_factor'] = options.get('sigma_factor', 5)  # multiplicative step length for optimizing sigma. TODO: remove
-    options['omega_factor'] = options.get('omega_factor', 5)  # multiplicative step length for optimizing omega. TODO: remove
+    # options['sigma_factor'] = options.get('sigma_factor',
+    #                                       5)  # multiplicative step length for optimizing sigma. TODO: remove
+    # options['omega_factor'] = options.get('omega_factor',
+    #                                       5)  # multiplicative step length for optimizing omega. TODO: remove
     options['hessian'] = options.get('hessian', True)  # use Hessian in M-step
-    options['adjhess'] = options.get('adjhess', False)  # regular Hessian by gradient
+    options['adjust_hessian'] = options.get('adjust_hessian', False)  # regular Hessian by gradient
     options['learning_rate'] = options.get('learning_rate', 0.001)  # learning rate
     options['method'] = options.get('method', 'VB')  # method of estimate, 'VB' or 'MAP'
     options['post_prediction'] = options.get('post_prediction', True)  # use posterior variance in predicted firing rate

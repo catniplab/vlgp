@@ -146,7 +146,7 @@ def kernel(x, params, noise_var):
     return K, dK
 
 
-def marginal(params, noise_var, t, mu, w=None):
+def gpr_marginal(params, noise_var, t, mu, w=None):
     while True:
         K, dK = kernel(t, params, noise_var)
         try:
@@ -236,7 +236,7 @@ def optim(obj, t, mu, w, params0, bounds, noise_var, return_f=False):
             Sigma = construct_posterior_cov(t, mu, w, params0, noise_var)
             ll, dll = elbo(params, noise_var, t, mu, Sigma)
         elif obj == 'GP':
-            ll, dll = marginal(params, noise_var, t, mu)
+            ll, dll = gpr_marginal(params, noise_var, t, mu)
         else:
             raise NotImplementedError('not supported objective function')
         return -ll, -dll

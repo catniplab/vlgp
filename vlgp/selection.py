@@ -202,7 +202,7 @@ def cv(y, channel, sigma, omega, a0=None, mu0=None, lag=0, rank=500, **kwargs):
         itrain = arange(ntrial) != itrial
         model, _ = fit(y[itrain, :], channel, dyn_ndim=dyn_ndim, sigma=sigma, omega=omega, x=None, a0=a0,
                        mu0=mu0[itrain, :] if mu0 is not None else None,
-                       true_a=None, true_b=None,
+                       alpha=None, beta=None,
                        lag=lag, rank=rank, **kwargs)
         kwargs['verbose'] = False
         kwargs['dmu_acc'] = zeros_like(model['mu'])
