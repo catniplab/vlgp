@@ -665,9 +665,9 @@ def fit(y,
                                                                          ((1e-3, 1), (1e-6, 1)),
                                                                          gp_noise,
                                                                          True)
-        idx = np.argmin(fval_opt)
-        sigma[dyn_dim] = np.sqrt(sigma2_opt[idx])
-        omega[dyn_dim] = omega_opt[idx]
+            idx = np.argmin(fval_opt)
+            sigma[dyn_dim] = np.sqrt(sigma2_opt[idx])
+            omega[dyn_dim] = omega_opt[idx]
 
     # make Cholesky of prior
     if rank is None:

@@ -147,12 +147,14 @@ def kernel(x, params, noise_var):
 
 
 def marginal(params, noise_var, t, mu, w=None):
-    K, dK = kernel(t, params, noise_var)
-    # K[np.diag_indices_from(K)] += sigma2n
-    try:
-        L = cholesky(K, lower=True)
-    except LinAlgError:
-        return -np.inf, np.zeros_like(params)
+    while True:
+        K, dK = kernel(t, params, noise_var)
+        try:
+            L = cholesky(K, lower=True)
+            break
+        except LinAlgError:
+            # return -np.inf, np.zeros_like(params)
+            noise_var *= 10
 
     if mu.ndim == 1:
         mu = mu[:, np.newaxis]
