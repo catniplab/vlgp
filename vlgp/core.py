@@ -191,8 +191,11 @@ def infer(model_fit, options):
                 for dyn_dim in range(dyn_ndim):
                     G = chol[dyn_dim, :, :]
                     GtWG = G.T @ (w[:, [dyn_dim]] * G)
-                    v[:, dyn_dim] = (G * (G - G @ GtWG + G @ (GtWG @ solve(eyer + GtWG, GtWG, sym_pos=True)))).sum(
-                        axis=1)
+                    try:
+                        v[:, dyn_dim] = (G * (G - G @ GtWG + G @ (GtWG @ solve(eyer + GtWG, GtWG, sym_pos=True)))).sum(
+                            axis=1)
+                    except LinAlgError:
+                        warnings.warn("singular I + G'WG")
 
         # center over all trials if not only infer posterior
         if options['learn_param']:
@@ -315,25 +318,28 @@ def infer(model_fit, options):
         subsample_size = options['subsample_size']
         if subsample_size is None:
             subsample_size = nbin // 2
-        sigma = model_fit['sigma']
         omega = model_fit['omega']
         multiplier = 10.0
         for dyn_dim in range(dyn_ndim):
             # subsample = np.random.choice(nbin, subsample_size, replace=False)
             subsample = hyper.subsample(nbin, subsample_size)
             # subsample = np.arange(subsample_size) + np.random.randint(nbin - subsample_size)
-            bounds = ((max(1e-3, sigma[dyn_dim] ** 2 / multiplier), min(10, sigma[dyn_dim] ** 2 * multiplier)),
-                      (max(1e-6, omega[dyn_dim] / multiplier), min(1.0, omega[dyn_dim] * multiplier)))
+            init_p = (omega[dyn_dim], 1e-3)
+            bounds = ((max(1e-6, omega[dyn_dim] / multiplier), min(1.0, omega[dyn_dim] * multiplier)),
+                      (1e-4, 1e-2))
+            mask = np.array([1, 0])
             # bounds = ((1e-6, 10), (1e-6, 1))
-            sigma2, omega[dyn_dim] = hyper.optim(options['hyper_obj'], subsample, mu[:, subsample, dyn_dim].T,
-                                                 w[:, subsample, dyn_dim].T,
-                                                 (sigma[dyn_dim] ** 2, omega[dyn_dim]),
-                                                 bounds,
-                                                 1e-7)  # noise variance, small value to avoid oversmoothing
+            omega[dyn_dim], _ = hyper.optim(options['hyper_obj'],
+                                            subsample,
+                                            mu[:, subsample, dyn_dim].T,
+                                            w[:, subsample, dyn_dim].T,
+                                            init_p,
+                                            bounds,
+                                            mask=mask,
+                                            return_f=False)  # noise variance, small value to avoid oversmoothing
 
-            sigma[dyn_dim] = np.sqrt(sigma2)
-
-        copyto(good_sigma, sigma)
+        # copyto(good_sigma, sigma)
+        # print('update omega: {}'.format(model_fit['omega']))
         copyto(good_omega, omega)
         for dyn_dim in range(dyn_ndim):
             model_fit['chol'][dyn_dim, :] = ichol_gauss(nbin, model_fit['omega'][dyn_dim], rank) * \
@@ -492,7 +498,7 @@ def infer(model_fit, options):
         stat[it]['Elapsed Total'] = elapsed[it, 2]
         # stat[it]['ELBO'] = lb[it]
         # stat[it]['LL'] = ll[it]
-        stat[it]['sigma'] = good_sigma
+        # stat[it]['sigma'] = good_sigma
         stat[it]['omega'] = good_omega
 
         # TODO: change stat to OrderedDict
@@ -536,7 +542,6 @@ def fit(y,
         rank=None,
         eps=1e-8,
         tol=1e-5,
-        gp_noise=1e-3,
         **kwargs):
     """
     vLGP main function
@@ -627,29 +632,34 @@ def fit(y,
     ####################
     # initialize prior #
     ####################
-    if sigma is None or omega is None:
+    if sigma is None:
+        sigma = np.ones(dyn_ndim) * (1 - options['gp_noise'])
+
+    if omega is None:
         if options['subsample_size'] is None:
             options['subsample_size'] = nbin // 5
         subsample_size = options['subsample_size']
-        sigma = np.ones(dyn_ndim)
         omega = np.ones(dyn_ndim)
         for dyn_dim in range(dyn_ndim):
             subsample = hyper.subsample(nbin, subsample_size, kwargs['successive'])
             omega_grid = np.logspace(-6, 0, num=7, base=10)
-            sigma2_opt = np.zeros_like(omega_grid)
             omega_opt = np.zeros_like(omega_grid)
             fval_opt = np.zeros_like(omega_grid)
+
+            bounds = ((1e-6, 1),
+                      (1e-4, 1e-2))
+            mask = np.array([1, 0])
             for i, o in enumerate(omega_grid):
-                (sigma2_opt[i], omega_opt[i]), fval_opt[i] = hyper.optim('GP',
-                                                                         subsample,  # time
-                                                                         mu[:, subsample, dyn_dim].T,
-                                                                         None,  # Sigma
-                                                                         [0.1, o],
-                                                                         ((1e-3, 1), (1e-6, 1)),
-                                                                         gp_noise,
-                                                                         True)
+                init_p = (o, options['gp_noise'])
+                (omega_opt[i], _), fval_opt[i] = hyper.optim('GP',
+                                                             subsample,  # time
+                                                             mu[:, subsample, dyn_dim].T,
+                                                             None,  # Sigma
+                                                             init_p,
+                                                             bounds=bounds,
+                                                             mask=mask,
+                                                             return_f=True)
             idx = np.argmin(fval_opt)
-            sigma[dyn_dim] = np.sqrt(sigma2_opt[idx])
             omega[dyn_dim] = omega_opt[idx]
 
     # make Cholesky of prior
@@ -711,8 +721,9 @@ def fit(y,
         for each in np.nditer(options['optimizer_b'], flags=['refs_ok'], op_flags=['readwrite']):
             each[...] = AdamOptimizer(b.shape[0], options['learning_rate'])
 
-    for k, v in options.items():
-        print(k, v)
+    # print all options
+    # for k, v in options.items():
+    #     print(k, v)
 
     inference = postprocess(infer(model_fit, options))
     return inference, options
@@ -755,6 +766,7 @@ def fill_options(options):
     options['subsample_size'] = options.get('subsample_size', None)
     options['hyper_obj'] = options.get('hyper_obj', 'ELBO')
     options['Adam'] = options.get('Adam', False)
+    options['gp_noise'] = options.get('gp_noise', 1e-3)
     return options
 
 

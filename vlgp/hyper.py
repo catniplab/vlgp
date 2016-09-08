@@ -131,32 +131,31 @@ def learngp(obj, latents=None, **kwargs):
     # return omega
 
 
-def kernel(x, params, noise_var):
+def se_kernel(x, params):
     """kernel matrix and derivatives"""
-    sigma2, omega = params
-    dists = pdist(x.reshape(-1, 1), metric='sqeuclidean')
-    K = exp(- omega * dists)
-    K = squareform(K)
-    np.fill_diagonal(K, 1)
-    dK_dsigma2 = K
-    K *= sigma2
-    dK_domega = - K * squareform(dists)
-    K[np.diag_indices_from(K)] += noise_var
-    # dK_dsigma2n = np.eye(K.shape[0])
-    # dK = np.dstack([dK_dsigma2, dK_domega, dK_dsigma2n])
-    dK = np.dstack([dK_dsigma2, dK_domega])
+    omega, eps = np.exp(params)  # input parameters are logged for unconstrained optimization
+
+    dists = pdist(x.reshape(-1, 1), metric='sqeuclidean')  # vector of pairwise squared distance
+    Dsq = squareform(dists)  # distance matrix
+    K = exp(- omega * Dsq)  # kernel matrix
+    # dK_dsigma2 = K
+    K *= 1.0 - eps  # fix variance = 1 - eps (noise variance)
+    dK_dlnomega = - K * Dsq * omega
+    K[np.diag_indices_from(K)] += eps
+    dK_deps = np.eye(K.shape[0]) * eps
+    dK = np.dstack([dK_dlnomega, dK_deps])
+    # dK = np.dstack([dK_dsigma2, dK_domega])
     return K, dK
 
 
-def gpr_marginal(params, noise_var, t, mu, w=None):
-    while True:
-        K, dK = kernel(t, params, noise_var)
-        try:
-            L = cholesky(K, lower=True)
-            break
-        except LinAlgError:
-            # return -np.inf, np.zeros_like(params)
-            noise_var *= 10
+def gpr_marginal(params, mask, *args):
+    t, mu, *_ = args
+    K, dK = se_kernel(t, params)
+    dK *= mask[np.newaxis, np.newaxis, :]
+    try:
+        L = cholesky(K, lower=True)
+    except LinAlgError:
+        return -np.inf, np.zeros_like(params)
 
     if mu.ndim == 1:
         mu = mu[:, np.newaxis]
@@ -175,15 +174,14 @@ def gpr_marginal(params, noise_var, t, mu, w=None):
     return ll, dll
 
 
-def elbo(params, noise_var, t, mu, Sigma):
-    while True:
-        K, dK = kernel(t, params, noise_var)
-        try:
-            L = cholesky(K, lower=True)
-            break
-        except LinAlgError:
-            # return -np.inf, np.zeros_like(params)
-            noise_var *= 10
+def elbo(params, mask, *args):
+    t, mu, Sigma = args
+    K, dK = se_kernel(t, params)
+    dK *= mask[np.newaxis, np.newaxis, :]
+    try:
+        L = cholesky(K, lower=True)
+    except LinAlgError:
+        return -np.inf, np.zeros_like(params)
 
     Kinv = cho_solve((L, True), np.eye(K.shape[0]))  # K inverse
 
@@ -209,15 +207,15 @@ def elbo(params, noise_var, t, mu, Sigma):
     return ll, dll
 
 
-def construct_posterior_cov(t, w, hparams, noise_var):
+def construct_posterior_cov(t, w, hparams):
     while True:
-        K, dK = kernel(t, hparams, noise_var)
+        K, dK = se_kernel(t, hparams)
         try:
             L = cholesky(K, lower=True)
             break
         except LinAlgError:
             # return -np.inf, np.zeros_like(params)
-            noise_var *= 10
+            hparams[1] += log(10)
 
     Kinv = cho_solve((L, True), np.eye(K.shape[0]))  # K inverse
 
@@ -232,21 +230,24 @@ def construct_posterior_cov(t, w, hparams, noise_var):
     return Sigma
 
 
-def optim(obj, t, mu, w, params0, bounds, noise_var, return_f=False):
+def optim(obj, t, mu, w, params0, bounds, mask, return_f=False):
+    log_param0 = np.log(params0)
+    log_bounds = np.log(bounds)
+
     def obj_func(params):
         if obj == 'ELBO':
-            Sigma = construct_posterior_cov(t, w, params0, noise_var)
-            ll, dll = elbo(params, noise_var, t, mu, Sigma)
+            Sigma = construct_posterior_cov(t, w, log_param0)
+            ll, dll = elbo(params, mask, t, mu, Sigma)
         elif obj == 'GP':
-            ll, dll = gpr_marginal(params, noise_var, t, mu)
+            ll, dll = gpr_marginal(params, mask, t, mu, None)
         else:
             raise NotImplementedError('not supported objective function')
         return -ll, -dll
 
-    opt, fval, info = fmin_l_bfgs_b(obj_func, params0, bounds=bounds)
-    # if info['warnflag'] != 0:
-    #     warnings.warn("fmin_l_bfgs_b terminated abnormally with the state: {}".format(info))
-
+    opt, fval, info = fmin_l_bfgs_b(obj_func, log_param0, bounds=log_bounds)
+    if info['warnflag'] != 0:
+        warnings.warn("fmin_l_bfgs_b terminated abnormally with the state: {}".format(info))
+    opt = np.exp(opt)
     if return_f:
         return opt, fval
 
@@ -258,9 +259,3 @@ def subsample(n, size, successive=False):
         return np.arange(size) + np.random.randint(n - size)
     return np.random.choice(n, size, replace=False)
 
-
-def fixed_point(y, mu, K, hb, a):
-    mu = mu.copy()
-    for _ in range(20):
-        mu = K @ (y - sexp(hb + mu @ a))
-    return mu
