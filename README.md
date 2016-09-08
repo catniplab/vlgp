@@ -17,7 +17,7 @@ You may skip the code in tutorial and load them directly to save time.
 The default options controlling algorithm are recommended for the purpose of stability but not necessarily the optimal.
 If you encounter any numerical error (most likely singular matrix errors), try to change the prior and enable the Hessian adjustment.
 
-This package heavily depends on NumPy arrays. All nonscalar data are expected to be in ndarray-compatible type. 
+This package heavily depends on NumPy. All nonscalar data are expected to be in ndarray-compatible type. 
 
 The data for training models are expected to be spike trains (LFP channels will be supported in future). 
 The spike trains should be binned and shaped into array as (trial, bin, neuron) before passing to the functions.
@@ -27,8 +27,9 @@ Each element of array is the spike count in that time bin of certain neuron and 
 
 | module     | function                                                                                      |
 |:-----------|-----------------------------------------------------------------------------------------------|
-| core       | model fitting, prediction and validation                                                      |
-| hyper      | hyperparameter optimization                                                                   |
+| core       | model fitting, prediction                                                                     |
+| selection  | model selection, CV, leave-one-out                                                            |
+| hyper      | hyperparameter optimization, kernel                                                           |
 | math       | link functions, incomplelte Cholesky decompostion, angle between subspaces, orthogonalization |
 | plot       | raster and dynamics                                                                           |
 | simulation | simulation of Gaussian process, Lorenz dynamics and spike trains                              |

@@ -37,7 +37,6 @@ def sexp(x, lbound=MIN_EXP, ubound=MAX_EXP):
     ndarray
         exp(max(x, lbound) and min(x, ubound))
     """
-    # TODO: This still takes 10% time.
     return np.exp(np.clip(x, lbound, ubound))
 
 
