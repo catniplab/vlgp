@@ -205,7 +205,7 @@ def infer(model_fit, options):
                 delta_mu = u - G @ ((wadj * G).T @ u) + \
                            G @ (GtWG @ solve(eyer + GtWG, (wadj * G).T @ u, sym_pos=True))
 
-                check_update(delta_mu)
+                check_update(delta_mu, options['dmu_bound'])
                 if options['Adam']:
                     optimizer = options['optimizer_mu'][trial, dyn_dim]
                     delta_mu = optimizer.update(delta_mu)
@@ -281,7 +281,7 @@ def infer(model_fit, options):
                 else:
                     delta_a = grad_a
 
-                check_update(delta_a)
+                check_update(delta_a, options['da_bound'])
                 if options['Adam']:
                     optimizer_a = options['optimizer_a'][obs_dim]
                     delta_a = optimizer_a.update(delta_a)
@@ -303,7 +303,7 @@ def infer(model_fit, options):
                         delta_b = grad_b
                 else:
                     delta_b = grad_b
-                check_update(delta_b)
+                check_update(delta_b, options['db_bound'])
                 if options['Adam']:
                     optimizer_b = options['optimizer_b'][obs_dim]
                     delta_b = optimizer_b.update(delta_b)
@@ -334,10 +334,9 @@ def infer(model_fit, options):
             # obj['mu'] = np.reshape(mu @ a @ Vh.T, (ntrial, nbin, dyn_ndim))
             # a[:] = Vh
 
-    def check_update(delta):
-        np.clip(delta, -options['update_bound'], options['update_bound'], out=delta)
-        if np.any(delta < -options['update_bound']) or np.any(delta > options['update_bound']):
-            warnings('update overflow')
+    def check_update(delta, bound):
+        assert(bound > 0)
+        np.clip(delta, -bound, bound, out=delta)
 
     def hstep():
         """Optimize hyperparameters"""
@@ -770,6 +769,7 @@ def check_options(**kwargs):
     """
     options = dict(kwargs)
     for k, v in default_options.items():
+        # If key is in the dictionary, return its value. If not, insert key with a value of default and return default.
         options.setdefault(k, v)
     return options
 
