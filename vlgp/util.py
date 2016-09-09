@@ -171,15 +171,18 @@ def lagmat(x, lag):
     return mat[startrow:stoprow, ncol:]
 
 
-def save(obj, fname):
+def save(obj, fname, warning=False):
     """
     Save inference object in HDF5
-    Args:
-        obj: inference
-        fname: absolute path and filename
 
-    Returns:
-
+    Parameters
+    ----------
+    obj: dict
+        inference
+    fname: string
+        absolute path and filename
+    warning: bool
+        print warning if any field in obj is not supported by HDF5
     """
     with h5py.File(fname, 'w') as hf:
         for k, v in obj.items():
@@ -187,7 +190,8 @@ def save(obj, fname):
                 hf.create_dataset(k, data=v, compression="gzip")
             except TypeError:
                 msg = 'Discard unsupported type ({})'.format(k)
-                warnings.warn(msg)
+                if warning:
+                    warnings.warn(msg)
 
 
 def load(fname):
