@@ -6,7 +6,7 @@ from numpy.core.umath import exp
 from scipy import stats
 from scipy.linalg import norm, lstsq
 
-from vlgp import fill_options, add_constant, lagmat, ichol_gauss, postprocess, infer, fit
+from vlgp import check_options, add_constant, lagmat, ichol_gauss, postprocess, infer, fit
 
 
 def seqfit(y, channel, sigma, omega, lag=0, rank=500, copy=False, **kwargs):
@@ -25,7 +25,7 @@ def seqfit(y, channel, sigma, omega, lag=0, rank=500, copy=False, **kwargs):
         list of inference objects
     """
     assert sigma.shape == omega.shape
-    kwargs = fill_options(**kwargs)
+    kwargs = check_options(**kwargs)
 
     y = asarray(y)
     if y.ndim < 2:
@@ -101,7 +101,7 @@ def leave_one_out(trial, model, **kwargs):
     Returns:
         trial with prediction
     """
-    kwargs = fill_options(**kwargs)
+    kwargs = check_options(**kwargs)
     y = trial['y']
     h = trial['h']
     channel = model['channel']
@@ -176,7 +176,7 @@ def cv(y, channel, sigma, omega, a0=None, mu0=None, lag=0, rank=500, **kwargs):
     Returns:
         prediction of all neurons
     """
-    kwargs = fill_options(**kwargs)
+    kwargs = check_options(**kwargs)
     assert sigma.shape == omega.shape
     dyn_ndim = sigma.shape[0]
 

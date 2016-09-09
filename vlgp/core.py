@@ -2,6 +2,7 @@
 # TODO: Find a way to replace diagonal matrix construction (np.diag) in loop.
 import timeit
 import warnings
+from collections import defaultdict
 
 import numpy as np
 from sklearn.decomposition import factor_analysis
@@ -16,6 +17,34 @@ from vlgp import hyper
 from .math import ichol_gauss, subspace, sexp
 from .optimizer import AdamOptimizer
 from .util import add_constant, rotate, lagmat
+
+
+# __all__ = ['fit', 'predict']
+default_options = dict(verbose=False,
+                       niter=200,
+                       learn_post=True,
+                       learn_param=True,
+                       learn_hyper=True,
+                       nhyper=5,
+                       e_niter=5,
+                       m_niter=5,
+                       decay=1,
+                       hessian=True,
+                       adjust_hessian=False,
+                       learning_rate=0.01,
+                       method='VB',
+                       post_prediction=True,
+                       update_bound=1.0,
+                       backtrack=False,
+                       subsample_size=None,
+                       hyper_obj='ELBO',
+                       Adam=False,
+                       gp_noise=1e-3,
+                       constrain_mu=True,
+                       constrain_a=True,
+                       dmu_bound=1.0,
+                       da_bound=1.0,
+                       db_bound=5.0)
 
 
 def elbo(model_fit):
@@ -198,7 +227,7 @@ def infer(model_fit, options):
                         warnings.warn("singular I + G'WG")
 
         # center over all trials if not only infer posterior
-        if options['learn_param']:
+        if options['constrain_mu']:
             shape = model_fit['mu'].shape
             mu_over_trials = model_fit['mu'].reshape((-1, dyn_ndim))
             mean_over_trials = mu_over_trials.mean(axis=0)
@@ -274,7 +303,7 @@ def infer(model_fit, options):
                         delta_b = grad_b
                 else:
                     delta_b = grad_b
-                # check_update(delta_b)
+                check_update(delta_b)
                 if options['Adam']:
                     optimizer_b = options['optimizer_b'][obs_dim]
                     delta_b = optimizer_b.update(delta_b)
@@ -294,7 +323,7 @@ def infer(model_fit, options):
                 raise ValueError('Unsupported channel')
 
         # normalize loading by latent and rescale latent
-        if options['learn_post']:
+        if options['constrain_a']:
             scale = norm(a, ord=inf, axis=1, keepdims=True) + eps
             a /= scale
             mu *= scale.squeeze()  # compensate latent
@@ -584,7 +613,7 @@ def fit(y,
     dict
         fit
     """
-    options = fill_options(kwargs)
+    options = check_options(**kwargs)
     options['eps'] = eps
     options['tol'] = tol
 
@@ -721,15 +750,11 @@ def fit(y,
         for each in np.nditer(options['optimizer_b'], flags=['refs_ok'], op_flags=['readwrite']):
             each[...] = AdamOptimizer(b.shape[0], options['learning_rate'])
 
-    # print all options
-    # for k, v in options.items():
-    #     print(k, v)
-
     inference = postprocess(infer(model_fit, options))
     return inference, options
 
 
-def fill_options(options):
+def check_options(**kwargs):
     """
     Fill missing options with default values
 
@@ -743,30 +768,9 @@ def fill_options(options):
     dict
         full options
     """
-    options['verbose'] = options.get('verbose', False)  # detailed output
-    options['niter'] = options.get('niter', 200)  # max # of iteration
-    options['learn_post'] = options.get('learn_post', True)  # optimize posterior
-    options['learn_param'] = options.get('learn_param', True)  # optimize loading and regression
-    options['learn_hyper'] = options.get('learn_hyper', True)
-    options['nhyper'] = options.get('nhyper', 5)  # optimize hyperparams every # iterations
-    options['decay'] = options.get('decay', 0)  # decay rate of the second moment of gradient. TODO: move to optimizers
-    # options['sigma_factor'] = options.get('sigma_factor',
-    #                                       5)  # multiplicative step length for optimizing sigma. TODO: remove
-    # options['omega_factor'] = options.get('omega_factor',
-    #                                       5)  # multiplicative step length for optimizing omega. TODO: remove
-    options['hessian'] = options.get('hessian', True)  # use Hessian in M-step
-    options['adjust_hessian'] = options.get('adjust_hessian', False)  # regular Hessian by gradient
-    options['learning_rate'] = options.get('learning_rate', 0.001)  # learning rate
-    options['method'] = options.get('method', 'VB')  # method of estimate, 'VB' or 'MAP'
-    options['post_prediction'] = options.get('post_prediction', True)  # use posterior variance in predicted firing rate
-    options['backtrack'] = options.get('backtrack', False)  # recover from decreased ELBO. TODO: remove
-    options['e_niter'] = options.get('e_niter', 1)  # max # of estep loop
-    options['m_niter'] = options.get('m_niter', 1)  # max # of mstep loop
-    options['update_bound'] = options.get('update_bound', 1.0)
-    options['subsample_size'] = options.get('subsample_size', None)
-    options['hyper_obj'] = options.get('hyper_obj', 'ELBO')
-    options['Adam'] = options.get('Adam', False)
-    options['gp_noise'] = options.get('gp_noise', 1e-3)
+    options = dict(kwargs)
+    for k, v in default_options.items():
+        options.setdefault(k, v)
     return options
 
 
