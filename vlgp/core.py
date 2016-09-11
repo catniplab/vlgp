@@ -2,7 +2,6 @@
 # TODO: Find a way to replace diagonal matrix construction (np.diag) in loop.
 import timeit
 import warnings
-from collections import defaultdict
 
 import numpy as np
 from sklearn.decomposition import factor_analysis
@@ -10,10 +9,11 @@ from numpy import identity, einsum, trace, inner, empty, inf, diag, newaxis, var
     empty_like, sum, copyto, ones
 from numpy.core.umath import sqrt, PINF, log
 from numpy.linalg import slogdet, LinAlgError
-from scipy.linalg import lstsq, eigh, solve, norm
+from scipy.linalg import lstsq, eigh, solve, norm, svd
 from scipy.stats import spearmanr
 
 from vlgp import hyper
+from .constant import *
 from .math import ichol_gauss, subspace, sexp
 from .optimizer import AdamOptimizer
 from .util import add_constant, rotate, lagmat
@@ -41,7 +41,7 @@ default_options = dict(verbose=False,
                        Adam=False,
                        gp_noise=1e-3,
                        constrain_mu=True,
-                       constrain_a=True,
+                       constrain_a=inf,
                        dmu_bound=1.0,
                        da_bound=1.0,
                        db_bound=5.0)
@@ -80,16 +80,16 @@ def elbo(model_fit):
     b = model_fit['b']
     noise = model_fit['noise']
 
-    spike = obs_types == 'spike'
-    lfp = obs_types == 'lfp'
+    spike_dims = obs_types == SPIKE
+    lfp_dims = obs_types == LFP
 
     eta = mu @ a + einsum('ijk, ki -> ji', h.reshape((obs_ndim, nbin * ntrial, lag1)), b)
-    frate = sexp(eta + 0.5 * v @ (a ** 2))
+    r = sexp(eta + 0.5 * v @ (a ** 2))
 
-    llspike = sum(y[:, spike] * eta[:, spike] - frate[:, spike])  # verified by predict()
+    llspike = sum(y[:, spike_dims] * eta[:, spike_dims] - r[:, spike_dims])  # verified by predict()
 
     # noinspection PyTypeChecker
-    lllfp = - 0.5 * sum(((y[:, lfp] - eta[:, lfp]) ** 2 + v @ (a[:, lfp] ** 2)) / noise[lfp] + log(noise[lfp]))
+    lllfp = - 0.5 * sum(((y[:, lfp_dims] - eta[:, lfp_dims]) ** 2 + v @ (a[:, lfp_dims] ** 2)) / noise[lfp_dims] + log(noise[lfp_dims]))
 
     ll = llspike + lllfp
 
@@ -159,14 +159,10 @@ def infer(model_fit, options):
         """Optimize posterior (E step)"""
         obs_ndim, ntrial, nbin, lag1 = model_fit['h'].shape  # neuron, trial, time, lag
         dyn_ndim, nbin, rank = model_fit['chol'].shape
-        obs_types = model_fit['channel']
         chol = model_fit['chol']
         a = model_fit['a']
         b = model_fit['b']
         noise = model_fit['noise']
-
-        spike = obs_types == 'spike'
-        lfp = obs_types == 'lfp'
 
         eyer = identity(rank)
         residual = empty((nbin, obs_ndim), dtype=float)
@@ -182,17 +178,16 @@ def infer(model_fit, options):
 
             hb = einsum('ijk, ki -> ji', h, b)
             eta = mu @ a + hb
-            rate = sexp(eta + 0.5 * v @ (a ** 2))
+            r = sexp(eta + 0.5 * v @ (a ** 2))
             for dyn_dim in range(dyn_ndim):
-                # lam, eta = firing_rate(mu, v, a, b, h)
                 G = chol[dyn_dim, :, :]
 
-                residual[:, spike] = y[:, spike] - rate[:, spike]  # residuals of Poisson observations
-                residual[:, lfp] = (y[:, lfp] - eta[:, lfp]) / noise[lfp]  # residuals of Gaussian observations
+                residual[:, spike_dims] = y[:, spike_dims] - r[:, spike_dims]  # residuals of Poisson observations
+                residual[:, lfp_dims] = (y[:, lfp_dims] - eta[:, lfp_dims]) / noise[lfp_dims]  # residuals of Gaussian observations
 
                 if adjust_hessian:
-                    grad_mu_resid = (y[:, spike] - rate[:, spike]) @ a[dyn_dim, spike] + \
-                                    ((y[:, lfp] - eta[:, lfp]) / noise[lfp]) @ a[dyn_dim, lfp]
+                    grad_mu_resid = (y[:, spike_dims] - r[:, spike_dims]) @ a[dyn_dim, spike_dims] + \
+                                    ((y[:, lfp_dims] - eta[:, lfp_dims]) / noise[lfp_dims]) @ a[dyn_dim, lfp_dims]
                     grad_mu = grad_mu_resid - lstsq(G.T, lstsq(G, mu[:, dyn_dim])[0])[0]
                     dmu_acc[trial, :, dyn_dim] = accumulate(dmu_acc[trial, :, dyn_dim], grad_mu, decay)
                     wadj = w[:, dyn_dim] + eps + sqrt(dmu_acc[trial, :, dyn_dim])  # adjusted Hessian
@@ -205,16 +200,16 @@ def infer(model_fit, options):
                 delta_mu = u - G @ ((wadj * G).T @ u) + \
                            G @ (GtWG @ solve(eyer + GtWG, (wadj * G).T @ u, sym_pos=True))
 
-                check_update(delta_mu, options['dmu_bound'])
+                clip(delta_mu, options['dmu_bound'])
                 if options['Adam']:
                     optimizer = options['optimizer_mu'][trial, dyn_dim]
                     delta_mu = optimizer.update(delta_mu)
                 mu[:, dyn_dim] += delta_mu
 
             eta = mu @ a + hb
-            rate = sexp(eta + 0.5 * v @ (a ** 2))
-            U[:, spike] = rate[:, spike]
-            U[:, lfp] = 1 / noise[lfp]
+            r = sexp(eta + 0.5 * v @ (a ** 2))
+            U[:, spike_dims] = r[:, spike_dims]
+            U[:, lfp_dims] = 1 / noise[lfp_dims]
             copyto(w, U @ (a.T ** 2))
             if options['method'] == 'VB':
                 for dyn_dim in range(dyn_ndim):
@@ -237,7 +232,7 @@ def infer(model_fit, options):
 
     def mstep():
         """Optimize loading and regression (M step)"""
-        # TODO: Update eta and frate neuron-wise
+        # TODO: Update eta and r neuron-wise
         obs_ndim, ntrial, nbin, lag1 = model_fit['h'].shape  # neuron, trial, time, lag
         dyn_ndim, nbin, rank = model_fit['chol'].shape
         obs_types = model_fit['channel']
@@ -251,24 +246,22 @@ def infer(model_fit, options):
         v = model_fit['v'].reshape((-1, dyn_ndim))
 
         eta = mu @ a + einsum('ijk, ki -> ji', h, b)  # (neuron, time, lag) x (lag, neuron) -> (time, neuron)
-        rate = sexp(eta + 0.5 * v @ (a ** 2))
+        r = sexp(eta + 0.5 * v @ (a ** 2))
         model_fit['noise'] = var(y - eta, axis=0, ddof=0)  # MLE
 
         for obs_dim in range(obs_ndim):
             # eta = mu @ a + einsum('ijk, ki -> ji', h, b)
             # lam = sexp(eta + 0.5 * v @ (a ** 2))
-            if obs_types[obs_dim] == 'spike':
+            if obs_types[obs_dim] == SPIKE:
                 # loading
-                # va = v * a[:, obs_dim]  # (nbin, dyn_ndim)
                 mu_plus_v_times_a = mu + v * a[:, obs_dim]
-                # wv = diag(frate[:, obs_dim] @ v)
-                # wv = rate[:, obs_dim] @ v
 
-                grad_a = mu.T @ y[:, obs_dim] - mu_plus_v_times_a.T @ rate[:, obs_dim]
+
+                grad_a = mu.T @ y[:, obs_dim] - mu_plus_v_times_a.T @ r[:, obs_dim]
 
                 if options['hessian']:
-                    neghess_a = mu_plus_v_times_a.T @ (rate[:, [obs_dim]] * mu_plus_v_times_a)  # + wv
-                    neghess_a[np.diag_indices_from(neghess_a)] += rate[:, obs_dim] @ v
+                    neghess_a = mu_plus_v_times_a.T @ (r[:, [obs_dim]] * mu_plus_v_times_a)  # + wv
+                    neghess_a[np.diag_indices_from(neghess_a)] += r[:, obs_dim] @ v
 
                     if adjust_hessian:
                         da_acc[:, obs_dim] = accumulate(da_acc[:, obs_dim], grad_a, decay)
@@ -276,22 +269,22 @@ def infer(model_fit, options):
                     try:
                         delta_a = solve(neghess_a, grad_a, sym_pos=True)
                     except LinAlgError:
-                        print('singular Hessian a')
+                        # print('singular Hessian a')
                         delta_a = grad_a
                 else:
                     delta_a = grad_a
 
-                check_update(delta_a, options['da_bound'])
+                clip(delta_a, options['da_bound'])
                 if options['Adam']:
                     optimizer_a = options['optimizer_a'][obs_dim]
                     delta_a = optimizer_a.update(delta_a)
                 a[:, obs_dim] += delta_a
 
                 # regression
-                grad_b = h[obs_dim, :].T @ (y[:, obs_dim] - rate[:, obs_dim])
+                grad_b = h[obs_dim, :].T @ (y[:, obs_dim] - r[:, obs_dim])
 
                 if options['hessian']:
-                    neghess_b = h[obs_dim, :].T @ (rate[:, [obs_dim]] * h[obs_dim, :])
+                    neghess_b = h[obs_dim, :].T @ (r[:, [obs_dim]] * h[obs_dim, :])
                     # TODO: inactive neurons never fire across all trials which may cause zero Hessian
                     if adjust_hessian:
                         db_acc[:, obs_dim] = accumulate(db_acc[:, obs_dim], grad_b, decay)
@@ -299,16 +292,16 @@ def infer(model_fit, options):
                     try:
                         delta_b = solve(neghess_b, grad_b, sym_pos=True)
                     except LinAlgError:
-                        print('singular Hessian b')
+                        # print('singular Hessian b')
                         delta_b = grad_b
                 else:
                     delta_b = grad_b
-                check_update(delta_b, options['db_bound'])
+                clip(delta_b, options['db_bound'])
                 if options['Adam']:
                     optimizer_b = options['optimizer_b'][obs_dim]
                     delta_b = optimizer_b.update(delta_b)
                 b[:, obs_dim] += delta_b
-            elif obs_types[obs_dim] == 'lfp':
+            elif obs_types[obs_dim] == LFP:
                 # a's least squares solution for Gaussian channel
                 # (m'm + diag(j'v))^-1 m'(y - Hb)
                 tmp = mu.T @ mu
@@ -320,23 +313,10 @@ def infer(model_fit, options):
                 b[:, obs_dim] = solve(h[obs_dim, :].T @ h[obs_dim, :],
                                       h[obs_dim, :].T @ (y[:, obs_dim] - mu @ a[:, obs_dim]), sym_pos=True)
             else:
-                raise ValueError('Unsupported channel')
+                pass
 
         # normalize loading by latent and rescale latent
-        if options['constrain_a']:
-            scale = norm(a, ord=inf, axis=1, keepdims=True) + eps
-            a /= scale
-            mu *= scale.squeeze()  # compensate latent
-            model_fit['mu'] = mu.reshape(model_fit['mu'].shape)
-            # SVD is not good as above
-            # noinspection PyTupleAssignmentBalance
-            # U, s, Vh = svd(a, full_matrices=False)
-            # obj['mu'] = np.reshape(mu @ a @ Vh.T, (ntrial, nbin, dyn_ndim))
-            # a[:] = Vh
-
-    def check_update(delta, bound):
-        assert(bound > 0)
-        np.clip(delta, -bound, bound, out=delta)
+        constrain_loading(model_fit, method=options['constrain_a'], eps=options['eps'])
 
     def hstep():
         """Optimize hyperparameters"""
@@ -379,6 +359,7 @@ def infer(model_fit, options):
     # truth
     x = model_fit.get('x')
     alpha = model_fit.get('alpha')
+
     # options
     eps = options['eps']
     tol = options['tol']
@@ -387,6 +368,9 @@ def infer(model_fit, options):
     dmu_acc = options['dmu_acc']
     da_acc = options['da_acc']
     db_acc = options['db_acc']
+
+    spike_dims = model_fit['channel'] == SPIKE
+    lfp_dims = model_fit['channel'] == LFP
 
     ################################
     # old values
@@ -477,25 +461,6 @@ def infer(model_fit, options):
             model_fit['a'].ravel() - good_a.ravel()) <= (eps + tol * norm(good_a.ravel())) and norm(
             model_fit['b'].ravel() - good_b.ravel()) <= (eps + tol * norm(good_b.ravel()))
 
-        # if decreased:
-        #     # if options['verbose']:
-        #     #     print('\nELBO decreased.')
-        #     if options['backtrack']:
-        #         copyto(model_fit['mu'], good_mu)
-        #         copyto(model_fit['w'], good_w)
-        #         copyto(model_fit['v'], good_v)
-        #         copyto(model_fit['a'], good_a)
-        #         copyto(model_fit['b'], good_b)
-        #         copyto(model_fit['noise'], good_noise)
-        #         lb[it] = lb[it - 1]
-        #     else:
-        #         copyto(good_mu, model_fit['mu'])
-        #         copyto(good_w, model_fit['w'])
-        #         copyto(good_v, model_fit['v'])
-        #         copyto(good_a, model_fit['a'])
-        #         copyto(good_b, model_fit['b'])
-        #         copyto(good_noise, model_fit['noise'])
-        # else:
         copyto(good_mu, model_fit['mu'])
         copyto(good_w, model_fit['w'])
         copyto(good_v, model_fit['v'])
@@ -553,6 +518,19 @@ def infer(model_fit, options):
     model_fit['LL'] = ll[:it]
     model_fit['stat'] = stat
     return model_fit
+
+
+def check_obs_type(types):
+    types = asarray(types)
+    coded_types = np.empty_like(types, dtype=int)
+    for i, type in enumerate(types):
+        if type == 'spike':
+            coded_types[i] = SPIKE
+        elif type == 'lfp':
+            coded_types[i] = LFP
+        else:
+            coded_types[i] = UNUSED
+    return coded_types
 
 
 def fit(y,
@@ -623,14 +601,15 @@ def fit(y,
     if y.ndim < 3:
         y = y[newaxis, ...]
 
-    obs_types = asarray(obs_types)
+    obs_types = check_obs_type(obs_types)
+
     ntrial, nbin, obs_ndim = y.shape
 
     # make design matrix of regression
     h = empty((obs_ndim, ntrial, nbin, 1 + lag), dtype=float)
-    for ichannel in range(obs_ndim):
-        for itrial in range(ntrial):
-            h[ichannel, itrial, :] = add_constant(lagmat(y[itrial, :, ichannel], lag=lag))
+    for obs_dim in range(obs_ndim):
+        for trial in range(ntrial):
+            h[obs_dim, trial, :] = add_constant(lagmat(y[trial, :, obs_dim], lag=lag))
 
     # Initialize posterior and loading
     # Use factor analysis if both missing initial values
@@ -641,10 +620,10 @@ def fit(y,
         a = fa.components_
 
         # constrain loading and center latent
-        mu -= mu.mean(axis=0)
         scale = norm(a, ord=inf, axis=1, keepdims=True) + eps
         a /= scale
         mu *= scale.squeeze()  # compensate latent
+        mu -= mu.mean(axis=0)
         mu = mu.reshape((ntrial, nbin, dyn_ndim))
 
         # noinspection PyTupleAssignmentBalance
@@ -676,7 +655,7 @@ def fit(y,
 
             bounds = ((1e-6, 1),
                       (1e-4, 1e-2))
-            mask = np.array([1, 0])
+            mask = np.array([1, 0])  # only optimize omega
             for i, o in enumerate(omega_grid):
                 init_p = (o, options['gp_noise'])
                 (omega_opt[i], _), fval_opt[i] = hyper.optim('GP',
@@ -687,8 +666,7 @@ def fit(y,
                                                              bounds=bounds,
                                                              mask=mask,
                                                              return_f=True)
-            idx = np.argmin(fval_opt)
-            omega[dyn_dim] = omega_opt[idx]
+            omega[dyn_dim] = omega_opt[np.argmin(fval_opt)]
 
     # make Cholesky of prior
     if rank is None:
@@ -702,9 +680,9 @@ def fit(y,
     # initialize bias and autoregression
     if b is None:
         b = empty((1 + lag, obs_ndim), dtype=float)
-        for ichannel in range(obs_ndim):
-            b[:, ichannel] = \
-                lstsq(h.reshape((obs_ndim, -1, 1 + lag))[ichannel, :], y.reshape((-1, obs_ndim))[:, ichannel])[0]
+        for obs_dim in range(obs_ndim):
+            b[:, obs_dim] = \
+                lstsq(h.reshape((obs_ndim, -1, 1 + lag))[obs_dim, :], y.reshape((-1, obs_ndim))[:, obs_dim])[0]
 
     # initialize noises of guassian channels
     noise = var(y.reshape((-1, obs_ndim)), axis=0, ddof=0)
@@ -849,6 +827,36 @@ def predict(y, x, a, b, v=None):
             h = add_constant(lagmat(y[trial, :, obs_dim], lag=lag))
             reg[trial, :, obs_dim] = h @ b[:, obs_dim]
     eta = x.reshape((-1, dyn_ndim)) @ a + reg.reshape((-1, obs_ndim))
-    frate = np.exp(eta + 0.5 * v.reshape((-1, dyn_ndim)) @ (a ** 2)) if v is not None else np.exp(eta)
-    yhat = frate.reshape(y.shape)
+    r = np.exp(eta + 0.5 * v.reshape((-1, dyn_ndim)) @ (a ** 2)) if v is not None else np.exp(eta)
+    yhat = r.reshape(y.shape)
     return yhat
+
+
+def clip(delta, lbound, ubound=None):
+    if ubound is None:
+        assert (lbound > 0)
+        ubound = lbound
+        lbound = -lbound
+    else:
+        assert ubound > lbound
+    np.clip(delta, lbound, ubound, out=delta)
+
+
+def constrain_loading(model_fit, method=inf, eps=1e-8):
+    mu = model_fit['mu']
+    shape_mu = mu.shape
+    mu = mu.reshape((-1, mu.shape[-1]))
+    a = model_fit['a']
+    if method == 'none':
+        return
+    if method == 'svd':
+        # SVD is not good as above
+        # noinspection PyTupleAssignmentBalance
+        U, s, Vh = svd(a, full_matrices=False)
+        model_fit['mu'] = np.reshape(mu @ a @ Vh.T, shape_mu)
+        model_fit['a'] = Vh
+    else:
+        s = norm(a, ord=method, axis=1, keepdims=True) + eps
+        a /= s
+        mu *= s.squeeze()  # compensate latent
+        model_fit['mu'] = mu.reshape(shape_mu)
