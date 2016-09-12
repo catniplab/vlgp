@@ -2,6 +2,7 @@
 # TODO: Find a way to replace diagonal matrix construction (np.diag) in loop.
 import timeit
 import warnings
+from collections import OrderedDict
 
 import numpy as np
 from sklearn.decomposition import factor_analysis
@@ -13,6 +14,7 @@ from scipy.linalg import lstsq, eigh, solve, norm, svd
 from scipy.stats import spearmanr
 
 from vlgp import hyper
+from .profile import timer
 from .constant import *
 from .math import ichol_gauss, subspace, sexp
 from .optimizer import AdamOptimizer
@@ -408,108 +410,102 @@ def infer(model_fit, options):
     # iterative algorithm
     it = 1  # iteration counter
     stop = False
-    infer_tick = timeit.default_timer()
 
     logging_counter = 0
 
     if options['verbose']:
         print('\nstarting')
 
-    while not stop and it < options['niter']:
-        iter_tick = timeit.default_timer()
+    #######################
+    # iterative algorithm #
+    #######################
+    with timer() as algo_elapsed:
+        while not stop and it < options['niter']:
+            with timer() as iter_elapsed:
+                ##########
+                # E step #
+                ##########
+                with timer() as estep_elapsed:
+                    if options['learn_post']:
+                        for _ in range(options['e_niter']):
+                            estep()
 
-        ##########
-        # E step #
-        ##########
-        e_tick = timeit.default_timer()
-        if options['learn_post']:
-            for _ in range(options['e_niter']):
-                estep()
-        # elbo(obj)
-        e_tock = timeit.default_timer()
-        elapsed[it, 0] = e_tock - e_tick
+                ##########
+                # M step #
+                ##########
+                with timer() as mstep_elapsed:
+                    if options['learn_param']:
+                        for _ in range(options['m_niter']):
+                            mstep()
 
-        # Calculate angle between latent subspace if true latent is given.
-        if x is not None:
-            for itrial in range(x.shape[0]):
-                rotated[itrial, :] = rotate(add_constant(model_fit['mu'][itrial, :]), x[itrial, :])
-            latent_angle[it] = subspace(rotated.reshape((-1, x.shape[-1])), x.reshape((-1, x.shape[-1])))
-            rho, _ = spearmanr(rotated.reshape((-1, x.shape[-1])), x.reshape((-1, x.shape[-1])))
-            latent_corr[it] = rho[np.arange(x.shape[-1]), np.arange(x.shape[-1]) + x.shape[-1]]
+                ###################
+                # hyperparam step #
+                ###################
+                with timer() as hstep_elapsed:
+                    if it % options['nhyper'] == 0 and options['learn_hyper']:
+                        hstep()
 
-        ##########
-        # M step #
-        ##########
-        m_tick = timeit.default_timer()
-        if options['learn_param']:
-            for _ in range(options['m_niter']):
-                mstep()
-        m_tock = timeit.default_timer()
-        elapsed[it, 1] = m_tock - m_tick
+            # Calculate angle between latent subspace if true latent is given.
+            if x is not None:
+                for itrial in range(x.shape[0]):
+                    rotated[itrial, :] = rotate(add_constant(model_fit['mu'][itrial, :]), x[itrial, :])
+                latent_angle[it] = subspace(rotated.reshape((-1, x.shape[-1])), x.reshape((-1, x.shape[-1])))
+                rho, _ = spearmanr(rotated.reshape((-1, x.shape[-1])), x.reshape((-1, x.shape[-1])))
+                latent_corr[it] = rho[np.arange(x.shape[-1]), np.arange(x.shape[-1]) + x.shape[-1]]
 
-        # Calculate angle between loading subspace if true loading is given.
-        if alpha is not None:
-            loading_angle[it] = subspace(alpha.T, model_fit['a'].T)
+            # Calculate angle between loading subspace if true loading is given.
+            if alpha is not None:
+                loading_angle[it] = subspace(alpha.T, model_fit['a'].T)
 
-        #####################
-        # convergence check #
-        #####################
-        lb[it], ll[it] = 0, 0
-        # decreased = lb[it] < lb[it - 1]
-        # converged = np.allclose(model_fit['mu'], good_mu)
-        converged = norm(model_fit['mu'].ravel() - good_mu.ravel()) <= (eps + tol * norm(good_mu.ravel())) and norm(
-            model_fit['a'].ravel() - good_a.ravel()) <= (eps + tol * norm(good_a.ravel())) and norm(
-            model_fit['b'].ravel() - good_b.ravel()) <= (eps + tol * norm(good_b.ravel()))
+            #####################
+            # convergence check #
+            #####################
+            lb[it], ll[it] = 0, 0
+            converged = norm(model_fit['mu'].ravel() - good_mu.ravel()) <= (eps + tol * norm(good_mu.ravel())) and norm(
+                model_fit['a'].ravel() - good_a.ravel()) <= (eps + tol * norm(good_a.ravel())) and norm(
+                model_fit['b'].ravel() - good_b.ravel()) <= (eps + tol * norm(good_b.ravel()))
 
-        copyto(good_mu, model_fit['mu'])
-        copyto(good_w, model_fit['w'])
-        copyto(good_v, model_fit['v'])
-        copyto(good_a, model_fit['a'])
-        copyto(good_b, model_fit['b'])
-        copyto(good_noise, model_fit['noise'])
+            copyto(good_mu, model_fit['mu'])
+            copyto(good_w, model_fit['w'])
+            copyto(good_v, model_fit['v'])
+            copyto(good_a, model_fit['a'])
+            copyto(good_b, model_fit['b'])
+            copyto(good_noise, model_fit['noise'])
 
-        # converged = converged  # or abs(lb[iiter] - lb[iiter - 1]) < options['tol'] * abs(lb[iiter - 1])
-        # stop = converged or decreased
-        stop = converged
+            stop = converged
 
-        ###################
-        # hyperparam step #
-        ###################
-        if it % options['nhyper'] == 0 and options['learn_hyper']:
-            # lb[it], ll[it] = elbo(model_fit)
-            hstep()
+            elapsed[it, 0] = estep_elapsed()
+            elapsed[it, 1] = mstep_elapsed()
+            elapsed[it, 2] = iter_elapsed()
+            ###################################
+            # statistics of current iteration #
+            ###################################
 
-        ###################################
-        # statistics of current iteration #
-        ###################################
-        iter_tock = timeit.default_timer()
-        elapsed[it, 2] = iter_tock - iter_tick
+            stat[it] = OrderedDict()
+            stat[it]['E-step elapsed'] = elapsed[it, 0]
+            stat[it]['M-step elapsed'] = elapsed[it, 1]
+            stat[it]['H-step elapsed'] = hstep_elapsed()
+            stat[it]['Total elapsed'] = elapsed[it, 2]
+            # stat[it]['ELBO'] = lb[it]
+            # stat[it]['LL'] = ll[it]
+            stat[it]['sigma'] = good_sigma
+            stat[it]['omega'] = good_omega
 
-        stat[it] = {}
-        stat[it]['Elapsed Post'] = elapsed[it, 0]
-        stat[it]['Elapsed Param'] = elapsed[it, 1]
-        stat[it]['Elapsed Total'] = elapsed[it, 2]
-        # stat[it]['ELBO'] = lb[it]
-        # stat[it]['LL'] = ll[it]
-        # stat[it]['sigma'] = good_sigma
-        stat[it]['omega'] = good_omega
+            # TODO: change stat to OrderedDict
+            if options['verbose'] and it == 2 ** logging_counter:
+                print('\n[{}]'.format(it))
+                for k in sorted(stat[it]):
+                    print('{}: {}'.format(k, stat[it][k]))
+                logging_counter += 1
 
-        # TODO: change stat to OrderedDict
-        if options['verbose'] and it == 2 ** logging_counter:
-            print('\n[{}]'.format(it))
-            for k in sorted(stat[it]):
-                print('{}: {}'.format(k, stat[it][k]))
-            logging_counter += 1
-
-        it += 1
-    infer_tock = timeit.default_timer()
+            it += 1
+    # end of alogrithm
 
     lb[it - 1], ll[it - 1] = elbo(model_fit)
     if options['verbose']:
         print('\nInference ends')
-        print('{} iterations, ELBO: {:.4f}, elapsed: {:.3f}\n'.format(it - 1,
-                                                                      lb[it - 1],
-                                                                      infer_tock - infer_tick))
+        print('{} iterations, ELBO: {:.4f}, elapsed: {:.3f}s\n'.format(it - 1, lb[it - 1], algo_elapsed()))
+
     model_fit['ELBO'] = lb[:it]
     model_fit['Elapsed'] = elapsed[:it, :]
     model_fit['LoadingAngle'] = loading_angle[:it]
@@ -593,6 +589,7 @@ def fit(y,
     options = check_options(**kwargs)
     options['eps'] = eps
     options['tol'] = tol
+    options['niter'] += 1
 
     y = asarray(y)
     y = y.astype(float)

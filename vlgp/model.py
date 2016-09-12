@@ -14,7 +14,7 @@ from .hyper import kl
 from .initializer import FAInitializer
 from .math import sexp, ichol_gauss
 from .optimizer import AdamOptimizer
-from .profiler import DefaultProfiler
+from .profile import DefaultProfiler
 from .util import add_constant, lagmat
 
 

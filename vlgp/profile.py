@@ -1,10 +1,13 @@
 from abc import ABCMeta, abstractmethod
+from contextlib import contextmanager
 
 import numpy as np
+import time
 from numpy import empty_like
 from scipy.stats import spearmanr
 
-from vlgp import subspace, rotate, add_constant
+from .math import subspace
+from .util import rotate, add_constant
 
 
 class Profiler(metaclass=ABCMeta):
@@ -40,3 +43,10 @@ class DefaultProfiler(Profiler):
             statistics['rankcorr_dyn'] = rankcorr_dyn
 
         return statistics
+
+
+@contextmanager
+def timer():
+    tick = time.perf_counter()
+    yield lambda : tock - tick
+    tock = time.perf_counter()
