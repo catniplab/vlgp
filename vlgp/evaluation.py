@@ -10,39 +10,49 @@ from .math import subspace
 from .util import rotate, add_constant
 
 
-class Profiler(metaclass=ABCMeta):
+class Evaluator(metaclass=ABCMeta):
     @abstractmethod
-    def profile(self, fit):
+    def evaluate(self, fit):
+        """
+        Measure current fit
+
+        Parameters
+        ----------
+        fit : dict
+            current fit
+
+        Returns
+        -------
+        list
+            list of tuple (label, evaluation)
+        """
         pass
 
 
-class DefaultProfiler(Profiler):
+class DefaultEvaluator(Evaluator):
     def __init__(self, x=None, a=None, b=None):
         self._x = x
         self._a = a
         self._b = b
 
-    def profile(self, fit):
-        statistics = {}
+    def evaluate(self, fit):
         a_true = self._a
         x_true = self._x
+        loading_angle = latent_angle = spearman = None
 
         if a_true is not None:
-            subspace_loading = subspace(a_true.T, fit.a.T)
-            statistics['subspace_loading'] = subspace_loading
+            loading_angle = subspace(a_true.T, fit.a.T)
         if x_true is not None:
             ntrial, _, dyn_ndim = x_true.shape
             rotated = empty_like(x_true, dtype=float)
             for trial in range(ntrial):
                 rotated[trial, ...] = rotate(add_constant(fit['mu'][trial, :]), x_true[trial, :])
-            subspace_dyn = subspace(rotated.reshape((-1, dyn_ndim)), x_true.reshape((-1, dyn_ndim)))
-            statistics['subspace_dyn'] = subspace_dyn
+            latent_angle = subspace(rotated.reshape((-1, dyn_ndim)), x_true.reshape((-1, dyn_ndim)))
 
             rho, _ = spearmanr(rotated.reshape((-1, dyn_ndim)), x_true.reshape((-1, dyn_ndim)))
-            rankcorr_dyn = rho[np.arange(dyn_ndim), np.arange(dyn_ndim) + dyn_ndim]
-            statistics['rankcorr_dyn'] = rankcorr_dyn
-
-        return statistics
+            spearman = rho[np.arange(dyn_ndim), np.arange(dyn_ndim) + dyn_ndim]
+        evaluation = [('latent_angle', latent_angle), ('loading_angle', loading_angle), ('spearman', spearman)]
+        return evaluation
 
 
 @contextmanager

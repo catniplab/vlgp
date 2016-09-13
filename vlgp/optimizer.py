@@ -5,11 +5,37 @@ import numpy as np
 
 class Optimizer(metaclass=ABCMeta):
     @abstractmethod
-    def update(self, grad):
+    def next_update(self, step):
+        """
+        Parameters
+        ----------
+        step : ndarray
+            raw gradient or Hessian step
+        Returns
+        -------
+        ndarray
+            modified step by optimizer
+        """
         pass
 
 
+class PlainOptimizer(Optimizer):
+    """Simply return gradient or Hessian step times learning rate"""
+    def __init__(self, learning_rate=1.0):
+        """
+        Parameters
+        ----------
+        learning_rate : double
+            it is what it is
+        """
+        self._learning_rate = learning_rate
+
+    def next_update(self, step):
+        return self._learning_rate * step
+
+
 class AdamOptimizer(Optimizer):
+    """Adam method on gradient or Hessian step"""
     def __init__(self, ndim, learning_rate=0.001, b1=0.9, b2=0.999, eps=1e-8):
         """
 
@@ -34,10 +60,10 @@ class AdamOptimizer(Optimizer):
         self._m = [np.zeros(ndim)]  # first moment
         self._v = [np.zeros(ndim)]  # second moment
 
-    def update(self, grad):
+    def next_update(self, step):
         self._counter += 1
-        current_m = self._b1 * self._m[self._counter - 1] + (1 - self._b1) * grad
-        current_v = self._b2 * self._v[self._counter - 1] + (1 - self._b2) * grad ** 2
+        current_m = self._b1 * self._m[self._counter - 1] + (1 - self._b1) * step
+        current_v = self._b2 * self._v[self._counter - 1] + (1 - self._b2) * step ** 2
         self._m.append(current_m)
         self._v.append(current_v)
         m_hat = current_m / (1 - self._b1 ** self._counter)
@@ -46,9 +72,9 @@ class AdamOptimizer(Optimizer):
 
 
 class AdagradOptimizer(Optimizer):
+    """Adagrad"""
     def __init__(self, ndim, learning_rate=0.001, b=0.999, eps=1e-8):
         """
-
         Parameters
         ----------
         ndim : int
@@ -66,8 +92,8 @@ class AdagradOptimizer(Optimizer):
         self._counter = 0
         self._v = [np.zeros(ndim)]  # second moment
 
-    def update(self, grad):
+    def next_update(self, step):
         self._counter += 1
-        current_v = self._b * self._v[self._counter - 1] + (1 - self._b) * grad ** 2
+        current_v = self._b * self._v[self._counter - 1] + (1 - self._b) * step ** 2
         self._v.append(current_v)
-        return self._learning_rate * grad / (np.sqrt(current_v) + self._eps)
+        return self._learning_rate * step / (np.sqrt(current_v) + self._eps)

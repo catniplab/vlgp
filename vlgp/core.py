@@ -14,7 +14,7 @@ from scipy.linalg import lstsq, eigh, solve, norm, svd
 from scipy.stats import spearmanr
 
 from vlgp import hyper
-from .profile import timer
+from .evaluation import timer
 from .constant import *
 from .math import ichol_gauss, subspace, sexp
 from .optimizer import AdamOptimizer
@@ -205,7 +205,7 @@ def infer(model_fit, options):
                 clip(delta_mu, options['dmu_bound'])
                 if options['Adam']:
                     optimizer = options['optimizer_mu'][trial, dyn_dim]
-                    delta_mu = optimizer.update(delta_mu)
+                    delta_mu = optimizer.next_update(delta_mu)
                 mu[:, dyn_dim] += delta_mu
 
             eta = mu @ a + hb
@@ -279,7 +279,7 @@ def infer(model_fit, options):
                 clip(delta_a, options['da_bound'])
                 if options['Adam']:
                     optimizer_a = options['optimizer_a'][obs_dim]
-                    delta_a = optimizer_a.update(delta_a)
+                    delta_a = optimizer_a.next_update(delta_a)
                 a[:, obs_dim] += delta_a
 
                 # regression
@@ -301,7 +301,7 @@ def infer(model_fit, options):
                 clip(delta_b, options['db_bound'])
                 if options['Adam']:
                     optimizer_b = options['optimizer_b'][obs_dim]
-                    delta_b = optimizer_b.update(delta_b)
+                    delta_b = optimizer_b.next_update(delta_b)
                 b[:, obs_dim] += delta_b
             elif obs_types[obs_dim] == LFP:
                 # a's least squares solution for Gaussian channel
@@ -544,6 +544,7 @@ def fit(y,
         rank=None,
         eps=1e-8,
         tol=1e-5,
+        evaluators=[],
         **kwargs):
     """
     vLGP main function
@@ -578,6 +579,8 @@ def fit(y,
         numerical tolerance
     gp_noise : double optional
         noise variance in GP kernel
+    evaluators : list optional
+        list of evaluators
     kwargs : dict, optional
         algorithm options. See fill_options()
 
