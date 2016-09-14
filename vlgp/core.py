@@ -64,7 +64,9 @@ def elbo(model_fit):
         log likelihood
     """
     obs_ndim, ntrial, nbin, lag1 = model_fit['h'].shape  # neuron, trial, time, lag1
-    dyn_ndim, _, rank = model_fit['chol'].shape  # latent, time, rank
+    dyn_ndim = model_fit['mu'].shape[-1]
+    prior = model_fit['chol']
+    rank = prior[0].shape[-1]
 
     eye_rank = identity(rank)
 
@@ -72,7 +74,7 @@ def elbo(model_fit):
     h = model_fit['h'].reshape((obs_ndim, -1, lag1))  # concatenate trials
     obs_types = model_fit['channel']
 
-    chol = model_fit['chol']
+    prior = model_fit['chol']
 
     mu = model_fit['mu'].reshape((-1, dyn_ndim))
     v = model_fit['v'].reshape((-1, dyn_ndim))
@@ -100,7 +102,7 @@ def elbo(model_fit):
         mu = model_fit['mu'][trial, :]
         w = model_fit['w'][trial, :]
         for dyn_dim in range(dyn_ndim):
-            G = chol[dyn_dim, :]
+            G = prior[dyn_dim]
             GtWG = G.T @ (w[:, [dyn_dim]] * G)
             tmp = GtWG @ solve(eye_rank + GtWG, GtWG, sym_pos=True)  # expected to be nonsingular
             # TODO: Need a better approximate of mu^T K^{-1} mu than least squares.
@@ -158,9 +160,10 @@ def infer(model_fit, options):
 
     def estep():
         """Optimize posterior (E step)"""
-        obs_ndim, ntrial, nbin, lag1 = model_fit['h'].shape  # neuron, trial, time, lag
-        dyn_ndim, nbin, rank = model_fit['chol'].shape
-        chol = model_fit['chol']
+        obs_ndim = model_fit['y'].shape[-1]
+        ntrial, nbin, dyn_ndim = model_fit['mu'].shape
+        prior = model_fit['chol']
+        rank = prior[0].shape[-1]
         a = model_fit['a']
         b = model_fit['b']
         noise = model_fit['noise']
@@ -181,7 +184,7 @@ def infer(model_fit, options):
             eta = mu @ a + hb
             r = sexp(eta + 0.5 * v @ (a ** 2))
             for dyn_dim in range(dyn_ndim):
-                G = chol[dyn_dim, :, :]
+                G = prior[dyn_dim]
 
                 residual[:, spike_dims] = y[:, spike_dims] - r[:, spike_dims]  # residuals of Poisson observations
                 residual[:, lfp_dims] = (y[:, lfp_dims] - eta[:, lfp_dims]) / noise[lfp_dims]  # residuals of Gaussian observations
@@ -214,7 +217,7 @@ def infer(model_fit, options):
             copyto(w, U @ (a.T ** 2))
             if options['method'] == 'VB':
                 for dyn_dim in range(dyn_ndim):
-                    G = chol[dyn_dim, :, :]
+                    G = prior[dyn_dim]
                     GtWG = G.T @ (w[:, [dyn_dim]] * G)
                     try:
                         v[:, dyn_dim] = (G * (G - G @ GtWG + G @ (GtWG @ solve(eyer + GtWG, GtWG, sym_pos=True)))).sum(
@@ -234,7 +237,7 @@ def infer(model_fit, options):
     def mstep():
         """Optimize loading and regression (M step)"""
         obs_ndim, ntrial, nbin, lag1 = model_fit['h'].shape  # neuron, trial, time, lag
-        dyn_ndim, nbin, rank = model_fit['chol'].shape
+        ntrial, nbin, dyn_ndim = model_fit['mu'].shape
         obs_types = model_fit['channel']
         a = model_fit['a']
         b = model_fit['b']
@@ -316,12 +319,15 @@ def infer(model_fit, options):
 
     def hstep():
         """Optimize hyperparameters"""
-        dyn_ndim, nbin, rank = model_fit['chol'].shape
+        ntrial, nbin, dyn_ndim = model_fit['mu'].shape
+        prior = model_fit['chol']
+        rank = prior[0].shape[-1]
         mu = model_fit['mu']
         w = model_fit['w']
         subsample_size = options['subsample_size']
         if subsample_size is None:
             subsample_size = nbin // 2
+        sigma = model_fit['sigma']
         omega = model_fit['omega']
         multiplier = 10.0
         for dyn_dim in range(dyn_ndim):
@@ -345,9 +351,7 @@ def infer(model_fit, options):
         # copyto(good_sigma, sigma)
         # print('update omega: {}'.format(model_fit['omega']))
         copyto(good_omega, omega)
-        for dyn_dim in range(dyn_ndim):
-            model_fit['chol'][dyn_dim, :] = ichol_gauss(nbin, model_fit['omega'][dyn_dim], rank) * \
-                                            model_fit['sigma'][dyn_dim]
+        model_fit['chol'] = np.array([ichol_gauss(nbin, omega[dyn_dim], rank) * sigma[dyn_dim] for dyn_dim in range(dyn_ndim)])
 
     #################
     # function body #
@@ -669,9 +673,12 @@ def fit(y,
     # make Cholesky of prior
     if rank is None:
         rank = nbin
-    chol = empty((dyn_ndim, nbin, rank), dtype=float)
-    for dyn_dim in range(dyn_ndim):
-        chol[dyn_dim, :] = ichol_gauss(nbin, omega[dyn_dim], rank) * sigma[dyn_dim]
+
+    # prior = empty(dyn_ndim, dtype=np.ndarray)
+    prior = np.array([ichol_gauss(nbin, omega[dyn_dim], rank) * sigma[dyn_dim] for dyn_dim in range(dyn_ndim)])
+    # chol = empty((dyn_ndim, nbin, rank), dtype=float)
+    # for dyn_dim in range(dyn_ndim):
+    #     chol[dyn_dim, :] = ichol_gauss(nbin, omega[dyn_dim], rank) * sigma[dyn_dim]
 
     ##############
 
@@ -697,7 +704,7 @@ def fit(y,
                      h=h,
                      sigma=sigma,
                      omega=omega,
-                     chol=chol,
+                     chol=prior,
                      mu=mu,
                      w=w,
                      v=v,
@@ -764,15 +771,15 @@ def postprocess(model_fit):
     dict
         fit that contains prior, posterior, loading and regression
     """
-    ntrial = model_fit['mu'].shape[0]
-    chol = model_fit['chol']
-    dyn_ndim, nbin, rank = chol.shape
+    ntrial, nbin, dyn_ndim = model_fit['mu'].shape
+    prior = model_fit['chol']
+    rank = prior[0].shape[-1]
     w = model_fit['w']
     eyer = identity(rank)
     L = empty((ntrial, dyn_ndim, nbin, rank))
     for trial in range(ntrial):
         for dyn_dim in range(dyn_ndim):
-            G = chol[dyn_dim, :, :]
+            G = prior[dyn_dim]
             GtWG = G.T @ (w[trial, :, [dyn_dim]].T * G)
             try:
                 tmp = eyer - GtWG + GtWG @ solve(eyer + GtWG, GtWG, sym_pos=True)  # A should be PD but numerically not
