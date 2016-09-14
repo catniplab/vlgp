@@ -1,7 +1,6 @@
 """Module that does inference"""
-# TODO: Find a way to replace diagonal matrix construction (np.diag) in loop.
-import timeit
 import warnings
+import gc
 from collections import OrderedDict
 
 import numpy as np
@@ -234,7 +233,6 @@ def infer(model_fit, options):
 
     def mstep():
         """Optimize loading and regression (M step)"""
-        # TODO: Update eta and r neuron-wise
         obs_ndim, ntrial, nbin, lag1 = model_fit['h'].shape  # neuron, trial, time, lag
         dyn_ndim, nbin, rank = model_fit['chol'].shape
         obs_types = model_fit['channel']
@@ -252,13 +250,9 @@ def infer(model_fit, options):
         model_fit['noise'] = var(y - eta, axis=0, ddof=0)  # MLE
 
         for obs_dim in range(obs_ndim):
-            # eta = mu @ a + einsum('ijk, ki -> ji', h, b)
-            # lam = sexp(eta + 0.5 * v @ (a ** 2))
             if obs_types[obs_dim] == SPIKE:
                 # loading
                 mu_plus_v_times_a = mu + v * a[:, obs_dim]
-
-
                 grad_a = mu.T @ y[:, obs_dim] - mu_plus_v_times_a.T @ r[:, obs_dim]
 
                 if options['hessian']:
@@ -419,6 +413,7 @@ def infer(model_fit, options):
     #######################
     # iterative algorithm #
     #######################
+    gc.disable()  # disable gabbage collection during the iterative procedure
     with timer() as algo_elapsed:
         while not stop and it < options['niter']:
             with timer() as iter_elapsed:
@@ -499,7 +494,10 @@ def infer(model_fit, options):
                 logging_counter += 1
 
             it += 1
-    # end of alogrithm
+    ##############################
+    # end of iterative procedure #
+    ##############################
+    gc.enable()  # enable gabbage collection
 
     lb[it - 1], ll[it - 1] = elbo(model_fit)
     if options['verbose']:
