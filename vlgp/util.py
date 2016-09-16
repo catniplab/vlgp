@@ -73,7 +73,7 @@ def varimax(x, gamma=1.0, q=20, tol=1e-5):
         d = sum(s)
         if d_old != 0 and d / d_old < 1 + tol:
             break
-    return dot(x, rotation)
+    return x @ rotation, rotation
 
 
 def history(obs, lag):
