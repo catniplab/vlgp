@@ -7,7 +7,7 @@ import h5py
 import numpy as np
 from numpy import exp, column_stack, roll, sum, dot
 from numpy import zeros, ones, diag, arange, eye, asarray, atleast_3d, rollaxis
-from scipy.linalg import svd, lstsq, toeplitz
+from scipy.linalg import svd, lstsq, toeplitz, solve
 
 
 def makeregressor(obs, p):
@@ -48,32 +48,98 @@ def sqexpcov(n, w, var=1.0):
     return var * exp(-w * toeplitz(arange(n)))
 
 
-def varimax(x, gamma=1.0, q=20, tol=1e-5):
-    """Varimax rotation
-
-    Args:
-        x: original matrix
-        gamma:
-        q:
-        tol:
-
-    Returns:
-        rotated matrix
+def varimax(x, normalize=True, tol=1e-5, niter=1000):
     """
+    Varimax rotation stolen from R
 
-    p, k = x.shape
-    rotation = eye(k)
+    function (x, normalize = TRUE, eps = 1e-05)
+    {
+        nc <- ncol(x)
+        if (nc < 2)
+            return(x)
+        if (normalize) {
+            sc <- sqrt(drop(apply(x, 1L, function(x) sum(x^2))))
+            x <- x/sc
+        }
+        p <- nrow(x)
+        TT <- diag(nc)
+        d <- 0
+        for (i in 1L:1000L) {
+            z <- x %*% TT
+            B <- t(x) %*% (z^3 - z %*% diag(drop(rep(1, p) %*% z^2))/p)
+            sB <- La.svd(B)
+            TT <- sB$u %*% sB$vt
+            dpast <- d
+            d <- sum(sB$d)
+            if (d < dpast * (1 + eps))
+                break
+        }
+        z <- x %*% TT
+        if (normalize)
+            z <- z * sc
+        dimnames(z) <- dimnames(x)
+        class(z) <- "loadings"
+        list(loadings = z, rotmat = TT)
+    }
+    """
+    x = x.copy()
+    p, nc = x.shape
+
+    if nc < 2:
+        return x
+
+    if normalize:
+        sc = np.sqrt(np.sum(x ** 2, axis=1, keepdims=True))  # ???
+        x /= sc
+
+    TT = eye(nc)
     d = 0
-    for i in range(q):
-        d_old = d
-        rotated = dot(x, rotation)
-        u, s, vh = svd(
-            dot(x.T, asarray(rotated) ** 3 - (gamma / p) * dot(rotated, diag(diag(dot(rotated.T, rotated))))))
-        rotation = dot(u, vh)
-        d = sum(s)
-        if d_old != 0 and d / d_old < 1 + tol:
+    for i in range(niter):
+        z = x @ TT
+        B = x.T @ (z ** 3 - z @ np.diag(np.sum(z ** 2, axis=0)) / p)
+        U, s, Vh = svd(B, full_matrices=False)
+        TT = U @ Vh
+        dpast = d
+        d = np.sum(s)
+        if d < dpast * (1 + tol):
             break
-    return x @ rotation, rotation
+
+    z = x @ TT
+    if normalize:
+        z *= sc
+    return z, TT
+
+
+def promax(x, m=4):
+    """
+    function (x, m = 4)
+    {
+        if (ncol(x) < 2)
+            return(x)
+        dn <- dimnames(x)
+        xx <- varimax(x)
+        x <- xx$loadings
+        Q <- x * abs(x)^(m - 1)
+        U <- lm.fit(x, Q)$coefficients
+        d <- diag(solve(t(U) %*% U))
+        U <- U %*% diag(sqrt(d))
+        dimnames(U) <- NULL
+        z <- x %*% U
+        U <- xx$rotmat %*% U
+        dimnames(z) <- dn
+        class(z) <- "loadings"
+        list(loadings = z, rotmat = U)
+    }
+    """
+    if x.shape[1] < 2:
+        return x
+    xT, TT = varimax(x)
+    Q = xT * np.abs(xT) * (m - 1)
+    U = lstsq(xT, Q)[0]
+    d = diag(solve(np.inner(U, U), eye(U.shape[1])))
+    U = U @ diag(np.sqrt(d))
+    z = xT @ U
+    return z, U
 
 
 def history(obs, lag):
