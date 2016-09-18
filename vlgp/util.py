@@ -5,7 +5,7 @@ import warnings
 
 import h5py
 import numpy as np
-from numpy import exp, column_stack, roll, sum, dot
+from numpy import exp, column_stack, roll
 from numpy import zeros, ones, diag, arange, eye, asarray, atleast_3d, rollaxis
 from scipy.linalg import svd, lstsq, toeplitz, solve
 
@@ -46,68 +46,6 @@ def sqexpcov(n, w, var=1.0):
     # i, j = meshgrid(arange(n), arange(n))
     # return var * exp(- w * (i - j) ** 2)
     return var * exp(-w * toeplitz(arange(n)))
-
-
-def varimax(x, normalize=True, tol=1e-5, niter=1000):
-    """
-    Varimax rotation stolen from R
-
-    function (x, normalize = TRUE, eps = 1e-05)
-    {
-        nc <- ncol(x)
-        if (nc < 2)
-            return(x)
-        if (normalize) {
-            sc <- sqrt(drop(apply(x, 1L, function(x) sum(x^2))))
-            x <- x/sc
-        }
-        p <- nrow(x)
-        TT <- diag(nc)
-        d <- 0
-        for (i in 1L:1000L) {
-            z <- x %*% TT
-            B <- t(x) %*% (z^3 - z %*% diag(drop(rep(1, p) %*% z^2))/p)
-            sB <- La.svd(B)
-            TT <- sB$u %*% sB$vt
-            dpast <- d
-            d <- sum(sB$d)
-            if (d < dpast * (1 + eps))
-                break
-        }
-        z <- x %*% TT
-        if (normalize)
-            z <- z * sc
-        dimnames(z) <- dimnames(x)
-        class(z) <- "loadings"
-        list(loadings = z, rotmat = TT)
-    }
-    """
-    x = x.copy()
-    p, nc = x.shape
-
-    if nc < 2:
-        return x
-
-    if normalize:
-        sc = np.sqrt(np.sum(x ** 2, axis=1, keepdims=True))  # ???
-        x /= sc
-
-    TT = eye(nc)
-    d = 0
-    for i in range(niter):
-        z = x @ TT
-        B = x.T @ (z ** 3 - z @ np.diag(np.sum(z ** 2, axis=0)) / p)
-        U, s, Vh = svd(B, full_matrices=False)
-        TT = U @ Vh
-        dpast = d
-        d = np.sum(s)
-        if d < dpast * (1 + tol):
-            break
-
-    z = x @ TT
-    if normalize:
-        z *= sc
-    return z, TT
 
 
 def promax(x, m=4):
@@ -264,3 +202,108 @@ def load(fname):
     with h5py.File(fname, 'r') as hf:
         obj = {k: np.array(v) for k, v in hf.items()}
     return obj
+
+
+def orthomax(A, gamma=1.0, normalize=True, rtol=1e-8, maxit=250):
+    """Orthogonal rotation of FA or PCA loadings"""
+    from scipy.linalg import svd, norm, qr
+    from numpy import sum, eye, sqrt
+    from numpy.random import randn
+
+    A = A.copy()
+    n, m = A.shape
+    if normalize:
+        h = sqrt(np.sum(A ** 2, axis=1, keepdims=True))
+        A /= h
+
+    T = eye(m)
+    B = A @ T
+
+    converged = False
+    if 0 <= gamma <= 1:
+        L, _, M = svd(A.T @ (n * B ** 3 - gamma * B @ diag(sum(B ** 2, axis=0))),
+                      full_matrices=False)  # the sum of each column
+        T = L @ M
+        if norm(T - eye(m)) < rtol:
+            T, _ = qr(randn(m, m));
+            B = A @ T
+        s = 0
+        for k in range(maxit):
+            s_old = s
+            L, s, M = svd(A.T @ (n * B ** 3 - gamma * B @ diag(sum(B ** 2, axis=0))), full_matrices=False)
+            T = L @ M
+            s = sum(s)
+            B = A @ T
+            if (s - s_old) < rtol * s:
+                converged = True
+                break
+
+    if not converged:
+        warnings.warn('iteration limit')
+
+    if normalize:
+        B *= h
+
+    return B, T
+
+
+def varimax(x, normalize=True, tol=1e-5, niter=1000):
+    """
+    Varimax rotation stolen from R
+
+    function (x, normalize = TRUE, eps = 1e-05)
+    {
+        nc <- ncol(x)
+        if (nc < 2)
+            return(x)
+        if (normalize) {
+            sc <- sqrt(drop(apply(x, 1L, function(x) sum(x^2))))
+            x <- x/sc
+        }
+        p <- nrow(x)
+        TT <- diag(nc)
+        d <- 0
+        for (i in 1L:1000L) {
+            z <- x %*% TT
+            B <- t(x) %*% (z^3 - z %*% diag(drop(rep(1, p) %*% z^2))/p)
+            sB <- La.svd(B)
+            TT <- sB$u %*% sB$vt
+            dpast <- d
+            d <- sum(sB$d)
+            if (d < dpast * (1 + eps))
+                break
+        }
+        z <- x %*% TT
+        if (normalize)
+            z <- z * sc
+        dimnames(z) <- dimnames(x)
+        class(z) <- "loadings"
+        list(loadings = z, rotmat = TT)
+    }
+    """
+    x = x.copy()
+    p, nc = x.shape
+
+    if nc < 2:
+        return x
+
+    if normalize:
+        sc = np.sqrt(np.sum(x ** 2, axis=1, keepdims=True))  # ???
+        x /= sc
+
+    TT = eye(nc)
+    d = 0
+    for i in range(niter):
+        z = x @ TT
+        B = x.T @ (z ** 3 - z @ np.diag(np.sum(z ** 2, axis=0)) / p)
+        U, s, Vh = svd(B, full_matrices=False)
+        TT = U @ Vh
+        dpast = d
+        d = np.sum(s)
+        if d < dpast * (1 + tol):
+            break
+
+    z = x @ TT
+    if normalize:
+        z *= sc
+    return z, TT
