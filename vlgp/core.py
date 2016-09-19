@@ -1,7 +1,7 @@
 """Module that does inference"""
 import warnings
 import gc
-from collections import OrderedDict
+from pprint import pprint
 
 import numpy as np
 from sklearn.decomposition import factor_analysis
@@ -480,7 +480,7 @@ def infer(model_fit, options):
             # statistics of current iteration #
             ###################################
 
-            stat[it] = OrderedDict()
+            stat[it] = dict()
             stat[it]['E-step elapsed'] = elapsed[it, 0]
             stat[it]['M-step elapsed'] = elapsed[it, 1]
             stat[it]['H-step elapsed'] = hstep_elapsed()
@@ -493,8 +493,9 @@ def infer(model_fit, options):
             # TODO: change stat to OrderedDict
             if options['verbose'] and it == 2 ** logging_counter:
                 print('\n[{}]'.format(it))
-                for k in sorted(stat[it]):
-                    print('{}: {}'.format(k, stat[it][k]))
+                pprint(stat[it])
+                # for k in sorted(stat[it]):
+                #     pp.print('{}: {}'.format(k, stat[it][k]))
                 logging_counter += 1
 
             it += 1
