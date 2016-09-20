@@ -19,7 +19,6 @@ from .math import ichol_gauss, subspace, sexp
 from .optimizer import AdamOptimizer
 from .util import add_constant, rotate, lagmat
 
-# __all__ = ['fit', 'predict']
 default_options = dict(verbose=False,
                        niter=200,
                        learn_post=True,
@@ -98,6 +97,8 @@ def elbo(model_fit):
 
     lb = ll
 
+    eps = 1e-3
+
     for trial in range(ntrial):
         mu = model_fit['mu'][trial, :]
         w = model_fit['w'][trial, :]
@@ -106,8 +107,12 @@ def elbo(model_fit):
             GtWG = G.T @ (w[:, [dyn_dim]] * G)
             tmp = GtWG @ solve(eye_rank + GtWG, GtWG, sym_pos=True)  # expected to be nonsingular
             # TODO: Need a better approximate of mu^T K^{-1} mu than least squares.
-            G_mldiv_mu = lstsq(G, mu[:, dyn_dim])[0]
-            mu_Kinv_mu = inner(G_mldiv_mu, G_mldiv_mu)
+            # G_mldiv_mu = lstsq(G, mu[:, dyn_dim])[0]
+            # mu_Kinv_mu = inner(G_mldiv_mu, G_mldiv_mu)
+
+            # mu^T (K + eI)^-1 mu
+            mu_Kinv_mu = mu[:, dyn_dim] @ (
+            mu[:, dyn_dim] - G @ solve(eps * eye_rank + G.T @ G, G.T @ mu[:, dyn_dim], sym_pos=True)) / eps
             # K = G @ G.T
             # mu_Kinv_mu = mu[:, l] @ spilu(csc_matrix(K)).solve(mu[:, l])
             tr = nbin - trace(GtWG) + trace(tmp)
@@ -491,7 +496,6 @@ def infer(model_fit, options):
             stat[it]['sigma'] = good_sigma
             stat[it]['omega'] = good_omega
 
-            # TODO: change stat to OrderedDict
             if options['verbose'] and it == 2 ** logging_counter:
                 print('\n[{}]'.format(it))
                 pprint(stat[it])
@@ -581,8 +585,6 @@ def fit(y,
         a small positive number
     tol : double, optional
         numerical tolerance
-    gp_noise : double optional
-        noise variance in GP kernel
     evaluators : list optional
         list of evaluators
     kwargs : dict, optional
@@ -640,14 +642,14 @@ def fit(y,
         elif a is None:
             a = lstsq(mu.reshape((-1, dyn_ndim)), y.reshape((-1, obs_ndim)))[0]
 
-        # initialize bias and autoregression
+    # initialize regression
     if b is None:
         b = empty((1 + lag, obs_ndim), dtype=float)
         for obs_dim in range(obs_ndim):
             b[:, obs_dim] = \
                 lstsq(h.reshape((obs_ndim, -1, 1 + lag))[obs_dim, :], y.reshape((-1, obs_ndim))[:, obs_dim])[0]
 
-    # initialize noises of guassian channels
+    # initialize noises of LFP
     noise = var(y.reshape((-1, obs_ndim)), axis=0, ddof=0)
 
     ####################
@@ -743,7 +745,7 @@ def check_options(**kwargs):
 
     Parameters
     ----------
-    options : dict
+    kwargs : dict
         options with missing values
 
     Returns
