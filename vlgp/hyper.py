@@ -13,17 +13,18 @@ from scipy.spatial.distance import pdist, squareform
 
 def se_kernel(x, params):
     """kernel matrix and derivatives"""
-    omega, eps = np.exp(params)  # input parameters are logged for unconstrained optimization
+    sigma2, omega, eps = np.exp(params)  # input parameters are logged for unconstrained optimization
 
     dists = pdist(x.reshape(-1, 1), metric='sqeuclidean')  # vector of pairwise squared distance
     Dsq = squareform(dists)  # distance matrix
     K = exp(- omega * Dsq)  # kernel matrix
-    # dK_dsigma2 = K
-    K *= 1.0 - eps  # fix variance = 1 - eps (noise variance)
+    dK_dsigma2 = K
+    # K *= 1.0 - eps  # fix variance = 1 - eps (noise variance)
+    K *= sigma2
     dK_dlnomega = - K * Dsq * omega
     K[np.diag_indices_from(K)] += eps
     dK_deps = np.eye(K.shape[0]) * eps
-    dK = np.dstack([dK_dlnomega, dK_deps])
+    dK = np.dstack([dK_dsigma2, dK_dlnomega, dK_deps])
     # dK = np.dstack([dK_dsigma2, dK_domega])
     return K, dK
 

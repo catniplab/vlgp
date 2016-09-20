@@ -19,7 +19,6 @@ from .math import ichol_gauss, subspace, sexp
 from .optimizer import AdamOptimizer
 from .util import add_constant, rotate, lagmat
 
-
 # __all__ = ['fit', 'predict']
 default_options = dict(verbose=False,
                        niter=200,
@@ -92,7 +91,8 @@ def elbo(model_fit):
     llspike = sum(y[:, spike_dims] * eta[:, spike_dims] - r[:, spike_dims])  # verified by predict()
 
     # noinspection PyTypeChecker
-    lllfp = - 0.5 * sum(((y[:, lfp_dims] - eta[:, lfp_dims]) ** 2 + v @ (a[:, lfp_dims] ** 2)) / noise[lfp_dims] + log(noise[lfp_dims]))
+    lllfp = - 0.5 * sum(
+        ((y[:, lfp_dims] - eta[:, lfp_dims]) ** 2 + v @ (a[:, lfp_dims] ** 2)) / noise[lfp_dims] + log(noise[lfp_dims]))
 
     ll = llspike + lllfp
 
@@ -187,7 +187,8 @@ def infer(model_fit, options):
                 G = prior[dyn_dim]
 
                 residual[:, spike_dims] = y[:, spike_dims] - r[:, spike_dims]  # residuals of Poisson observations
-                residual[:, lfp_dims] = (y[:, lfp_dims] - eta[:, lfp_dims]) / noise[lfp_dims]  # residuals of Gaussian observations
+                residual[:, lfp_dims] = (y[:, lfp_dims] - eta[:, lfp_dims]) / noise[
+                    lfp_dims]  # residuals of Gaussian observations
 
                 if adjust_hessian:
                     grad_mu_resid = (y[:, spike_dims] - r[:, spike_dims]) @ a[dyn_dim, spike_dims] + \
@@ -334,24 +335,24 @@ def infer(model_fit, options):
             # subsample = np.random.choice(nbin, subsample_size, replace=False)
             subsample = hyper.subsample(nbin, subsample_size)
             # subsample = np.arange(subsample_size) + np.random.randint(nbin - subsample_size)
-            init_p = (omega[dyn_dim], 1e-3)
-            bounds = ((max(1e-6, omega[dyn_dim] / multiplier), min(1.0, omega[dyn_dim] * multiplier)),
+            init_p = (sigma[dyn_dim] ** 2, omega[dyn_dim], 1e-3)
+            bounds = ((1e-3, 1),
+                      (max(1e-6, omega[dyn_dim] / multiplier), min(1.0, omega[dyn_dim] * multiplier)),
                       (1e-4, 1e-2))
-            mask = np.array([1, 0])
-            # bounds = ((1e-6, 10), (1e-6, 1))
-            omega[dyn_dim], _ = hyper.optim(options['hyper_obj'],
-                                            subsample,
-                                            mu[:, subsample, dyn_dim].T,
-                                            w[:, subsample, dyn_dim].T,
-                                            init_p,
-                                            bounds,
-                                            mask=mask,
-                                            return_f=False)  # noise variance, small value to avoid oversmoothing
-
-        # copyto(good_sigma, sigma)
-        # print('update omega: {}'.format(model_fit['omega']))
+            mask = np.array([0, 1, 0])
+            sigma2, omega[dyn_dim], _ = hyper.optim(options['hyper_obj'],
+                                                    subsample,
+                                                    mu[:, subsample, dyn_dim].T,
+                                                    w[:, subsample, dyn_dim].T,
+                                                    init_p,
+                                                    bounds,
+                                                    mask=mask,
+                                                    return_f=False)  # noise variance, small value to avoid oversmoothing
+            sigma[dyn_dim] = sqrt(sigma2)
+        copyto(good_sigma, sigma)
         copyto(good_omega, omega)
-        model_fit['chol'] = np.array([ichol_gauss(nbin, omega[dyn_dim], rank) * sigma[dyn_dim] for dyn_dim in range(dyn_ndim)])
+        model_fit['chol'] = np.array(
+            [ichol_gauss(nbin, omega[dyn_dim], rank) * sigma[dyn_dim] for dyn_dim in range(dyn_ndim)])
 
     #################
     # function body #
@@ -653,23 +654,27 @@ def fit(y,
         for dyn_dim in range(dyn_ndim):
             subsample = hyper.subsample(nbin, subsample_size, kwargs['successive'])
             omega_grid = np.logspace(-6, 0, num=7, base=10)
+            sigma2_opt = np.zeros_like(omega_grid)
             omega_opt = np.zeros_like(omega_grid)
             fval_opt = np.zeros_like(omega_grid)
 
-            bounds = ((1e-6, 1),
+            bounds = ((1e-3, 1.0),
+                      (1e-6, 1),
                       (1e-4, 1e-2))
-            mask = np.array([1, 0])  # only optimize omega
+            mask = np.array([0, 1, 0])  # only optimize omega
             for i, o in enumerate(omega_grid):
-                init_p = (o, options['gp_noise'])
-                (omega_opt[i], _), fval_opt[i] = hyper.optim('GP',
-                                                             subsample,  # time
-                                                             mu[:, subsample, dyn_dim].T,
-                                                             None,  # Sigma
-                                                             init_p,
-                                                             bounds=bounds,
-                                                             mask=mask,
-                                                             return_f=True)
-            omega[dyn_dim] = omega_opt[np.argmin(fval_opt)]
+                init_p = (1 - options['gp_noise'], o, options['gp_noise'])
+                (sigma2_opt[i], omega_opt[i], _), fval_opt[i] = hyper.optim('GP',
+                                                                            subsample,  # time
+                                                                            mu[:, subsample, dyn_dim].T,
+                                                                            None,  # Sigma
+                                                                            init_p,
+                                                                            bounds=bounds,
+                                                                            mask=mask,
+                                                                            return_f=True)
+            best = np.argmin(fval_opt)
+            sigma[dyn_dim] = sqrt(sigma2_opt[best])
+            omega[dyn_dim] = omega_opt[best]
 
     # make Cholesky of prior
     if rank is None:
