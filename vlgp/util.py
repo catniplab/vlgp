@@ -307,3 +307,14 @@ def varimax(x, normalize=True, tol=1e-5, niter=1000):
     if normalize:
         z *= sc
     return z, TT
+
+
+def trial_slices(trial_lengths: list):
+    from numpy import cumsum, s_
+    ntrial = len(trial_lengths)
+    endpoints = [0] + trial_lengths
+    endpoints = cumsum(endpoints)
+    slices = []
+    for i in range(ntrial):
+        slices.append(s_[endpoints[i]:endpoints[i+1]])
+    return slices
