@@ -641,14 +641,14 @@ def fit(y,
             a = lstsq(mu.reshape((-1, dyn_ndim)), y.reshape((-1, obs_ndim)))[0]
 
         # initialize bias and autoregression
-        if b is None:
-            b = empty((1 + lag, obs_ndim), dtype=float)
-            for obs_dim in range(obs_ndim):
-                b[:, obs_dim] = \
-                    lstsq(h.reshape((obs_ndim, -1, 1 + lag))[obs_dim, :], y.reshape((-1, obs_ndim))[:, obs_dim])[0]
+    if b is None:
+        b = empty((1 + lag, obs_ndim), dtype=float)
+        for obs_dim in range(obs_ndim):
+            b[:, obs_dim] = \
+                lstsq(h.reshape((obs_ndim, -1, 1 + lag))[obs_dim, :], y.reshape((-1, obs_ndim))[:, obs_dim])[0]
 
-        # initialize noises of guassian channels
-        noise = var(y.reshape((-1, obs_ndim)), axis=0, ddof=0)
+    # initialize noises of guassian channels
+    noise = var(y.reshape((-1, obs_ndim)), axis=0, ddof=0)
 
     ####################
     # initialize prior #
@@ -897,9 +897,10 @@ def update_v(model_fit):
     ntrial, nbin, dyn_ndim = model_fit['mu'].shape
 
     for trial in range(ntrial):
+        w = model_fit['w'][trial, :]
         for dyn_dim in range(dyn_ndim):
             G = prior[dyn_dim]
-            GtWG = G.T @ (model_fit['w'][trial, :, [dyn_dim]] * G)
+            GtWG = G.T @ (w[:, [dyn_dim]] * G)
             try:
                 model_fit['v'][trial, :, dyn_dim] = (
                     G * (G - G @ GtWG + G @ (GtWG @ solve(eyer + GtWG, GtWG, sym_pos=True)))).sum(axis=1)
