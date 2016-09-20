@@ -6,7 +6,7 @@ from pprint import pprint
 import numpy as np
 from sklearn.decomposition import factor_analysis
 from numpy import identity, einsum, trace, inner, empty, inf, diag, newaxis, var, asarray, zeros, zeros_like, \
-    empty_like, sum, copyto, ones
+    empty_like, sum, copyto, ones, reshape
 from numpy.core.umath import sqrt, PINF, log
 from numpy.linalg import slogdet, LinAlgError
 from scipy.linalg import lstsq, eigh, solve, norm, svd
@@ -640,6 +640,16 @@ def fit(y,
         elif a is None:
             a = lstsq(mu.reshape((-1, dyn_ndim)), y.reshape((-1, obs_ndim)))[0]
 
+        # initialize bias and autoregression
+        if b is None:
+            b = empty((1 + lag, obs_ndim), dtype=float)
+            for obs_dim in range(obs_ndim):
+                b[:, obs_dim] = \
+                    lstsq(h.reshape((obs_ndim, -1, 1 + lag))[obs_dim, :], y.reshape((-1, obs_ndim))[:, obs_dim])[0]
+
+        # initialize noises of guassian channels
+        noise = var(y.reshape((-1, obs_ndim)), axis=0, ddof=0)
+
     ####################
     # initialize prior #
     ####################
@@ -680,30 +690,11 @@ def fit(y,
     if rank is None:
         rank = nbin
 
-    # prior = empty(dyn_ndim, dtype=np.ndarray)
     prior = np.array([ichol_gauss(nbin, omega[dyn_dim], rank) * sigma[dyn_dim] for dyn_dim in range(dyn_ndim)])
-    # chol = empty((dyn_ndim, nbin, rank), dtype=float)
-    # for dyn_dim in range(dyn_ndim):
-    #     chol[dyn_dim, :] = ichol_gauss(nbin, omega[dyn_dim], rank) * sigma[dyn_dim]
-
-    ##############
-
-    # initialize bias and autoregression
-    if b is None:
-        b = empty((1 + lag, obs_ndim), dtype=float)
-        for obs_dim in range(obs_ndim):
-            b[:, obs_dim] = \
-                lstsq(h.reshape((obs_ndim, -1, 1 + lag))[obs_dim, :], y.reshape((-1, obs_ndim))[:, obs_dim])[0]
-
-    # initialize noises of guassian channels
-    noise = var(y.reshape((-1, obs_ndim)), axis=0, ddof=0)
 
     # w and v
-    w = 0 * ones((ntrial, nbin, dyn_ndim), dtype=float)
-    if options['method'] == 'VB':
-        v = np.repeat(sigma[newaxis, ...], ntrial * nbin, axis=1).reshape((ntrial, nbin, dyn_ndim))
-    else:
-        v = 0 * ones((ntrial, nbin, dyn_ndim), dtype=float)
+    w = zeros_like(mu, dtype=float)
+    v = zeros_like(mu, dtype=float)
 
     model_fit = dict(y=y,
                      channel=obs_types,
@@ -721,6 +712,10 @@ def fit(y,
                      x=x,
                      alpha=alpha,
                      beta=beta)
+
+    update_w(model_fit)
+    if options['method'] == 'VB':
+        update_v(model_fit)
 
     options['dmu_acc'] = zeros_like(mu)
     options['da_acc'] = zeros_like(a)
@@ -871,3 +866,42 @@ def constrain_loading(model_fit, method=inf, eps=1e-8):
         a /= s
         mu *= s.squeeze()  # compensate latent
         model_fit['mu'] = mu.reshape(shape_mu)
+
+
+def update_w(model_fit):
+    obs_ndim, ntrial, nbin, lag1 = model_fit['h'].shape
+    dyn_ndim = model_fit['mu'].shape[-1]
+
+    spike_dims = model_fit['channel'] == SPIKE
+    lfp_dims = model_fit['channel'] == LFP
+
+    flat_mu = model_fit['mu'].reshape((-1, dyn_ndim))
+    flat_h = model_fit['h'].reshape((obs_ndim, -1, lag1))  # concatenate trials
+    flat_v = model_fit['v'].reshape((-1, dyn_ndim))
+    shape_w = model_fit['w'].shape
+
+    eta = flat_mu @ model_fit['a'] + einsum('ijk, ki -> ji', flat_h,
+                                            model_fit['b'])  # (neuron, time, lag) x (lag, neuron) -> (time, neuron)
+    r = sexp(eta + 0.5 * flat_v @ (model_fit['a'] ** 2))
+    U = empty_like(r)
+
+    U[:, spike_dims] = r[:, spike_dims]
+    U[:, lfp_dims] = 1 / model_fit['noise'][lfp_dims]
+    model_fit['w'] = reshape(U @ (model_fit['a'].T ** 2), shape_w)
+
+
+def update_v(model_fit):
+    prior = model_fit['chol']
+    rank = prior[0].shape[-1]
+    eyer = identity(rank)
+    ntrial, nbin, dyn_ndim = model_fit['mu'].shape
+
+    for trial in range(ntrial):
+        for dyn_dim in range(dyn_ndim):
+            G = prior[dyn_dim]
+            GtWG = G.T @ (model_fit['w'][trial, :, [dyn_dim]] * G)
+            try:
+                model_fit['v'][trial, :, dyn_dim] = (
+                    G * (G - G @ GtWG + G @ (GtWG @ solve(eyer + GtWG, GtWG, sym_pos=True)))).sum(axis=1)
+            except LinAlgError:
+                warnings.warn("singular I + G'WG")
