@@ -30,7 +30,7 @@ default_options = dict(verbose=False,
                        decay=1,
                        hessian=True,
                        adjust_hessian=False,
-                       learning_rate=0.01,
+                       learning_rate=1.0,
                        method='VB',
                        post_prediction=True,
                        update_bound=1.0,
@@ -214,7 +214,7 @@ def infer(model_fit, options):
                 if options['Adam']:
                     optimizer = options['optimizer_mu'][trial, dyn_dim]
                     delta_mu = optimizer.next_update(delta_mu)
-                mu[:, dyn_dim] += delta_mu
+                mu[:, dyn_dim] += options['learning_rate'] * delta_mu
 
             eta = mu @ a + hb
             r = sexp(eta + 0.5 * v @ (a ** 2))
@@ -283,7 +283,7 @@ def infer(model_fit, options):
                 if options['Adam']:
                     optimizer_a = options['optimizer_a'][obs_dim]
                     delta_a = optimizer_a.next_update(delta_a)
-                a[:, obs_dim] += delta_a
+                a[:, obs_dim] += options['learning_rate'] * delta_a
 
                 # regression
                 grad_b = h[obs_dim, :].T @ (y[:, obs_dim] - r[:, obs_dim])
@@ -301,11 +301,12 @@ def infer(model_fit, options):
                         delta_b = grad_b
                 else:
                     delta_b = grad_b
+
                 clip(delta_b, options['db_bound'])
                 if options['Adam']:
                     optimizer_b = options['optimizer_b'][obs_dim]
                     delta_b = optimizer_b.next_update(delta_b)
-                b[:, obs_dim] += delta_b
+                b[:, obs_dim] += options['learning_rate'] * delta_b
             elif obs_types[obs_dim] == LFP:
                 # a's least squares solution for Gaussian channel
                 # (m'm + diag(j'v))^-1 m'(y - Hb)
@@ -449,6 +450,9 @@ def infer(model_fit, options):
                 with timer() as hstep_elapsed:
                     if it % options['nhyper'] == 0 and options['learn_hyper']:
                         hstep()
+
+            # anneal learning rate
+            options['learning_rate'] = 1/(1 + it / options['niter'])
 
             # Calculate angle between latent subspace if true latent is given.
             if x is not None:
