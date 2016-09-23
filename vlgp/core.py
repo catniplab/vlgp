@@ -41,7 +41,7 @@ def elbo(model_fit):
     prior = model_fit['chol']
     rank = prior[0].shape[-1]
 
-    eye_rank = identity(rank)
+    Ir = identity(rank)
 
     y = model_fit['y'].reshape((-1, obs_ndim))  # concatenate trials
     h = model_fit['h'].reshape((obs_ndim, -1, lag1))  # concatenate trials
@@ -61,6 +61,9 @@ def elbo(model_fit):
 
     eta = mu @ a + einsum('ijk, ki -> ji', h.reshape((obs_ndim, nbin * ntrial, lag1)), b)
     r = sexp(eta + 0.5 * v @ (a ** 2))
+    # possible useless calculation here and for noise when spike and LFP mixed.
+    # LFP (Gaussian) has no firing rate and spike (Poisson) has no 'noise'.
+    # useless dims could be removed to save computational time and space.
 
     llspike = sum(y[:, spike_dims] * eta[:, spike_dims] - r[:, spike_dims])  # verified by predict()
 
@@ -77,20 +80,20 @@ def elbo(model_fit):
     for trial in range(ntrial):
         mu = model_fit['mu'][trial, :]
         w = model_fit['w'][trial, :]
-        for dyn_dim in range(dyn_ndim):
-            G = prior[dyn_dim]
-            GtWG = G.T @ (w[:, [dyn_dim]] * G)
+        for z_dim in range(dyn_ndim):
+            G = prior[z_dim]
+            GtWG = G.T @ (w[:, [z_dim]] * G)
             # TODO: Need a better approximate of mu^T K^{-1} mu than least squares.
             # G_mldiv_mu = lstsq(G, mu[:, dyn_dim])[0]
             # mu_Kinv_mu = inner(G_mldiv_mu, G_mldiv_mu)
 
             # mu^T (K + eI)^-1 mu
-            mu_Kinv_mu = mu[:, dyn_dim] @ (
-            mu[:, dyn_dim] - G @ solve(eps * eye_rank + G.T @ G, G.T @ mu[:, dyn_dim], sym_pos=True)) / eps
+            mu_Kinv_mu = mu[:, z_dim] @ (
+                mu[:, z_dim] - G @ solve(eps * Ir + G.T @ G, G.T @ mu[:, z_dim], sym_pos=True)) / eps
 
-            tmp = GtWG @ solve(eye_rank + GtWG, GtWG, sym_pos=True)  # expected to be nonsingular
+            tmp = GtWG @ solve(Ir + GtWG, GtWG, sym_pos=True)  # expected to be nonsingular
             tr = nbin - trace(GtWG) + trace(tmp)
-            lndet = slogdet(eye_rank - GtWG + tmp)[1]
+            lndet = slogdet(Ir - GtWG + tmp)[1]
 
             lb += -0.5 * mu_Kinv_mu - 0.5 * tr + 0.5 * lndet + 0.5 * nbin
 
@@ -165,19 +168,21 @@ def infer(model_fit, options):
             for dyn_dim in range(dyn_ndim):
                 G = prior[dyn_dim]
 
-                # working residual
+                # working residuals
+                # extensible to many other distributions
+                # very similar form to GLM
                 residual[:, spike_dims] = y[:, spike_dims] - r[:, spike_dims]
                 residual[:, lfp_dims] = (y[:, lfp_dims] - eta[:, lfp_dims]) / noise[lfp_dims]
 
-                if adjust_hessian:
-                    grad_mu_resid = (y[:, spike_dims] - r[:, spike_dims]) @ a[dyn_dim, spike_dims] + \
-                                    ((y[:, lfp_dims] - eta[:, lfp_dims]) / noise[lfp_dims]) @ a[dyn_dim, lfp_dims]
-                    # grad_mu = grad_mu_resid - lstsq(G.T, lstsq(G, mu[:, dyn_dim])[0])[0]
-                    # dmu_acc[trial, :, dyn_dim] = accumulate(dmu_acc[trial, :, dyn_dim], grad_mu, decay)
-                    wadj = w[:, dyn_dim] + eps + sqrt(dmu_acc[trial, :, dyn_dim])  # adjusted Hessian
-                else:
-                    wadj = w[:, dyn_dim]  # keep dimension
-                wadj = wadj[:, None]
+                # if adjust_hessian:
+                #     grad_mu_resid = (y[:, spike_dims] - r[:, spike_dims]) @ a[dyn_dim, spike_dims] + \
+                #                 ((y[:, lfp_dims] - eta[:, lfp_dims]) / noise[lfp_dims]) @ a[dyn_dim, lfp_dims]
+                #     grad_mu = grad_mu_resid - lstsq(G.T, lstsq(G, mu[:, dyn_dim])[0])[0]
+                #     dmu_acc[trial, :, dyn_dim] = accumulate(dmu_acc[trial, :, dyn_dim], grad_mu, decay)
+                #     wadj = w[:, dyn_dim] + eps + sqrt(dmu_acc[trial, :, dyn_dim])  # adjusted Hessian
+                # else:
+                wadj = w[:, [dyn_dim]]  # keep dimension
+                # wadj = wadj[:, None]
                 GtWG = G.T @ (wadj * G)
 
                 u = G @ (G.T @ (residual @ a[dyn_dim, :])) - mu[:, dyn_dim]
@@ -346,9 +351,9 @@ def infer(model_fit, options):
     tol = options['tol']
     # decay = options['decay']
     adjust_hessian = options['adjust_hessian']
-    dmu_acc = options['dmu_acc']
-    da_acc = options['da_acc']
-    db_acc = options['db_acc']
+    # dmu_acc = options['dmu_acc']
+    # da_acc = options['da_acc']
+    # db_acc = options['db_acc']
 
     spike_dims = model_fit['channel'] == SPIKE
     lfp_dims = model_fit['channel'] == LFP
@@ -426,7 +431,7 @@ def infer(model_fit, options):
                         hstep()
 
             # anneal learning rate
-            options['learning_rate'] = 1/(1 + it / options['niter'])
+            options['learning_rate'] = 1 / (1 + it / options['niter'])
 
             # Calculate angle between latent subspace if true latent is given.
             if x is not None:

@@ -9,6 +9,8 @@ from numpy import exp, column_stack, roll
 from numpy import zeros, ones, diag, arange, eye, asarray, atleast_3d, rollaxis
 from scipy.linalg import svd, lstsq, toeplitz, solve
 
+from .math import ichol_gauss
+
 
 def makeregressor(obs, p):
     """Construct full regressive matrix
@@ -97,29 +99,6 @@ def history(obs, lag):
     for n in range(nchannel):
         h[n, :] = add_constant(lagmat(obs[:, n], lag=lag))
 
-    return h
-
-
-def regmat(y, lag=0):
-    """Autoregression matrices
-
-    Args:
-        y: observation
-        lag: lag
-
-    Returns:
-        autoregression matrices (nchannel, ntrial, ntime, 1 + lag)
-    """
-
-    y = asarray(y)
-    if y.ndim < 3:
-        y = atleast_3d(y)
-        y = rollaxis(y, axis=-1)
-    ntrial, ntime, nchannel = y.shape
-    h = zeros((nchannel, ntrial, ntime, 1 + lag))
-    for n in range(nchannel):
-        for m in range(ntrial):
-            h[n, m, :] = add_constant(lagmat(y[m, :, n], lag=lag))
     return h
 
 
@@ -318,3 +297,48 @@ def trial_slices(trial_lengths: list):
     for i in range(ntrial):
         slices.append(s_[endpoints[i]:endpoints[i+1]])
     return slices
+
+
+def auto(y, lag):
+    """
+
+    Parameters
+    ----------
+    y : list
+        [array[time, y_ndim]]
+    lag :
+
+    Returns
+    -------
+    array[y_ndim, time, lag + 1]
+    """
+    assert len(y) > 0
+    return np.concatenate([np.stack([add_constant(lagmat(col, lag)) for col in trial.T]) for trial in y], axis=1)
+
+
+def sparse_prior(sigma, omega, trial_lengths, rank):
+    # [diagonal(G1, G2, ..., Gq)]
+    from scipy import sparse
+    return [sparse.block_diag([s * ichol_gauss(l, w, rank) for s, w in zip(sigma, omega)]) for l in trial_lengths]
+
+
+def regmat(y, x=None, lag=0):
+    """
+
+    Parameters
+    ----------
+    y : list
+        observation
+    x : list
+        external variables
+        [array(time, x_ndim)]
+    lag : int
+
+    Returns
+    -------
+
+    """
+    automat = auto(y, lag)
+    big_x = np.concatenate(x, axis=0)  # along time
+    y_ndim = automat.shape[0]
+    return np.concatenate([automat, np.stack([big_x] * y_ndim)], axis=2)
