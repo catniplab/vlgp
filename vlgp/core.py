@@ -1,49 +1,24 @@
 """Module that does inference"""
-import warnings
+# TODO: remove adjust_hessian option
 import gc
+import warnings
 from pprint import pprint
 
 import numpy as np
-from sklearn.decomposition import factor_analysis
-from numpy import identity, einsum, trace, inner, empty, inf, diag, newaxis, var, asarray, zeros, zeros_like, \
-    empty_like, sum, copyto, ones, reshape
+from numpy import identity, einsum, trace, empty, diag, newaxis, var, asarray, zeros, zeros_like, \
+    empty_like, sum, copyto, reshape
 from numpy.core.umath import sqrt, PINF, log
-from numpy.linalg import slogdet, LinAlgError
-from scipy.linalg import lstsq, eigh, solve, norm, svd
+from numpy.linalg import slogdet
+from scipy.linalg import lstsq, eigh, solve, norm, svd, LinAlgError
 from scipy.stats import spearmanr
+from sklearn.decomposition import factor_analysis
 
 from vlgp import hyper
-from .evaluation import timer
 from .constant import *
+from .evaluation import timer
 from .math import ichol_gauss, subspace, sexp
 from .optimizer import AdamOptimizer
 from .util import add_constant, rotate, lagmat
-
-default_options = dict(verbose=False,
-                       niter=200,
-                       learn_post=True,
-                       learn_param=True,
-                       learn_hyper=True,
-                       nhyper=5,
-                       e_niter=5,
-                       m_niter=5,
-                       decay=1,
-                       hessian=True,
-                       adjust_hessian=False,
-                       learning_rate=1.0,
-                       method='VB',
-                       post_prediction=True,
-                       update_bound=1.0,
-                       backtrack=False,
-                       subsample_size=None,
-                       hyper_obj='ELBO',
-                       Adam=False,
-                       gp_noise=1e-3,
-                       constrain_mu=True,
-                       constrain_a=inf,
-                       dmu_bound=1.0,
-                       da_bound=1.0,
-                       db_bound=5.0)
 
 
 def elbo(model_fit):
@@ -105,7 +80,6 @@ def elbo(model_fit):
         for dyn_dim in range(dyn_ndim):
             G = prior[dyn_dim]
             GtWG = G.T @ (w[:, [dyn_dim]] * G)
-            tmp = GtWG @ solve(eye_rank + GtWG, GtWG, sym_pos=True)  # expected to be nonsingular
             # TODO: Need a better approximate of mu^T K^{-1} mu than least squares.
             # G_mldiv_mu = lstsq(G, mu[:, dyn_dim])[0]
             # mu_Kinv_mu = inner(G_mldiv_mu, G_mldiv_mu)
@@ -113,8 +87,8 @@ def elbo(model_fit):
             # mu^T (K + eI)^-1 mu
             mu_Kinv_mu = mu[:, dyn_dim] @ (
             mu[:, dyn_dim] - G @ solve(eps * eye_rank + G.T @ G, G.T @ mu[:, dyn_dim], sym_pos=True)) / eps
-            # K = G @ G.T
-            # mu_Kinv_mu = mu[:, l] @ spilu(csc_matrix(K)).solve(mu[:, l])
+
+            tmp = GtWG @ solve(eye_rank + GtWG, GtWG, sym_pos=True)  # expected to be nonsingular
             tr = nbin - trace(GtWG) + trace(tmp)
             lndet = slogdet(eye_rank - GtWG + tmp)[1]
 
@@ -123,28 +97,28 @@ def elbo(model_fit):
     return lb, ll
 
 
-def accumulate(acc, grad, b=1):
-    """
-    Accumulate second moment of gradient for adjusting Hessian
-
-    Parameters
-    ----------
-    acc : ndarray
-        accumulation
-    grad : ndarray
-        gradient
-    b : double
-        decay rate
-
-    Returns
-    -------
-    ndarray
-        sum of second moments
-    """
-    if b < 1:
-        return b * acc + (1 - b) * grad ** 2
-    else:
-        return acc + grad ** 2
+# def accumulate(acc, grad, b=1):
+#     """
+#     Accumulate second moment of gradient for adjusting Hessian
+#
+#     Parameters
+#     ----------
+#     acc : ndarray
+#         accumulation
+#     grad : ndarray
+#         gradient
+#     b : double
+#         decay rate
+#
+#     Returns
+#     -------
+#     ndarray
+#         sum of second moments
+#     """
+#     if b < 1:
+#         return b * acc + (1 - b) * grad ** 2
+#     else:
+#         return acc + grad ** 2
 
 
 def infer(model_fit, options):
@@ -191,15 +165,15 @@ def infer(model_fit, options):
             for dyn_dim in range(dyn_ndim):
                 G = prior[dyn_dim]
 
-                residual[:, spike_dims] = y[:, spike_dims] - r[:, spike_dims]  # residuals of Poisson observations
-                residual[:, lfp_dims] = (y[:, lfp_dims] - eta[:, lfp_dims]) / noise[
-                    lfp_dims]  # residuals of Gaussian observations
+                # working residual
+                residual[:, spike_dims] = y[:, spike_dims] - r[:, spike_dims]
+                residual[:, lfp_dims] = (y[:, lfp_dims] - eta[:, lfp_dims]) / noise[lfp_dims]
 
                 if adjust_hessian:
                     grad_mu_resid = (y[:, spike_dims] - r[:, spike_dims]) @ a[dyn_dim, spike_dims] + \
                                     ((y[:, lfp_dims] - eta[:, lfp_dims]) / noise[lfp_dims]) @ a[dyn_dim, lfp_dims]
-                    grad_mu = grad_mu_resid - lstsq(G.T, lstsq(G, mu[:, dyn_dim])[0])[0]
-                    dmu_acc[trial, :, dyn_dim] = accumulate(dmu_acc[trial, :, dyn_dim], grad_mu, decay)
+                    # grad_mu = grad_mu_resid - lstsq(G.T, lstsq(G, mu[:, dyn_dim])[0])[0]
+                    # dmu_acc[trial, :, dyn_dim] = accumulate(dmu_acc[trial, :, dyn_dim], grad_mu, decay)
                     wadj = w[:, dyn_dim] + eps + sqrt(dmu_acc[trial, :, dyn_dim])  # adjusted Hessian
                 else:
                     wadj = w[:, dyn_dim]  # keep dimension
@@ -269,7 +243,7 @@ def infer(model_fit, options):
                     neghess_a[np.diag_indices_from(neghess_a)] += r[:, obs_dim] @ v
 
                     if adjust_hessian:
-                        da_acc[:, obs_dim] = accumulate(da_acc[:, obs_dim], grad_a, decay)
+                        # da_acc[:, obs_dim] = accumulate(da_acc[:, obs_dim], grad_a, decay)
                         neghess_a[np.diag_indices_from(neghess_a)] += eps + sqrt(da_acc[:, obs_dim])
                     try:
                         delta_a = solve(neghess_a, grad_a, sym_pos=True)
@@ -292,7 +266,7 @@ def infer(model_fit, options):
                     neghess_b = h[obs_dim, :].T @ (r[:, [obs_dim]] * h[obs_dim, :])
                     # TODO: inactive neurons never fire across all trials which may cause zero Hessian
                     if adjust_hessian:
-                        db_acc[:, obs_dim] = accumulate(db_acc[:, obs_dim], grad_b, decay)
+                        # db_acc[:, obs_dim] = accumulate(db_acc[:, obs_dim], grad_b, decay)
                         neghess_b[np.diag_indices_from(neghess_b)] += eps + sqrt(db_acc[:, obs_dim])
                     try:
                         delta_b = solve(neghess_b, grad_b, sym_pos=True)
@@ -370,7 +344,7 @@ def infer(model_fit, options):
     # options
     eps = options['eps']
     tol = options['tol']
-    decay = options['decay']
+    # decay = options['decay']
     adjust_hessian = options['adjust_hessian']
     dmu_acc = options['dmu_acc']
     da_acc = options['da_acc']
@@ -531,10 +505,10 @@ def infer(model_fit, options):
 def check_obs_type(types):
     types = asarray(types)
     coded_types = np.empty_like(types, dtype=int)
-    for i, type in enumerate(types):
-        if type == 'spike':
+    for i, type_ in enumerate(types):
+        if type_ == 'spike':
             coded_types[i] = SPIKE
-        elif type == 'lfp':
+        elif type_ == 'lfp':
             coded_types[i] = LFP
         else:
             coded_types[i] = UNUSED
@@ -544,6 +518,7 @@ def check_obs_type(types):
 def fit(y,
         obs_types,
         dyn_ndim,
+        exog=None,
         a=None,
         b=None,
         mu=None,
@@ -556,7 +531,7 @@ def fit(y,
         rank=None,
         eps=1e-8,
         tol=1e-5,
-        evaluators=[],
+        evaluators=None,
         **kwargs):
     """
     vLGP main function
@@ -569,6 +544,8 @@ def fit(y,
         types of observation dimensions, 'spike' or 'lfp'
     dyn_ndim : int
         number of latent dimensions
+    exog : ndarray
+        external factors
     a : ndarray, optional
         initial value of loading
     b : ndarray, optional
@@ -599,7 +576,7 @@ def fit(y,
     dict
         fit
     """
-    options = check_options(**kwargs)
+    options = check_options(kwargs)
     options['eps'] = eps
     options['tol'] = tol
     options['niter'] += 1
@@ -723,9 +700,9 @@ def fit(y,
     if options['method'] == 'VB':
         update_v(model_fit)
 
-    options['dmu_acc'] = zeros_like(mu)
-    options['da_acc'] = zeros_like(a)
-    options['db_acc'] = zeros_like(b)
+    # options['dmu_acc'] = zeros_like(mu)
+    # options['da_acc'] = zeros_like(a)
+    # options['db_acc'] = zeros_like(b)
 
     if options['Adam']:
         options['optimizer_mu'] = empty((ntrial, dyn_ndim), dtype=object)
@@ -743,7 +720,7 @@ def fit(y,
     return inference, options
 
 
-def check_options(**kwargs):
+def check_options(kwargs):
     """
     Fill missing options with default values
 
