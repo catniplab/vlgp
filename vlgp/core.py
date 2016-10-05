@@ -247,9 +247,9 @@ def infer(model_fit, options):
                     neghess_a = mu_plus_v_times_a.T @ (r[:, [obs_dim]] * mu_plus_v_times_a)  # + wv
                     neghess_a[np.diag_indices_from(neghess_a)] += r[:, obs_dim] @ v
 
-                    if adjust_hessian:
+                    # if adjust_hessian:
                         # da_acc[:, obs_dim] = accumulate(da_acc[:, obs_dim], grad_a, decay)
-                        neghess_a[np.diag_indices_from(neghess_a)] += eps + sqrt(da_acc[:, obs_dim])
+                        # neghess_a[np.diag_indices_from(neghess_a)] += eps + sqrt(da_acc[:, obs_dim])
                     try:
                         delta_a = solve(neghess_a, grad_a, sym_pos=True)
                     except LinAlgError:
@@ -270,9 +270,9 @@ def infer(model_fit, options):
                 if options['hessian']:
                     neghess_b = h[obs_dim, :].T @ (r[:, [obs_dim]] * h[obs_dim, :])
                     # TODO: inactive neurons never fire across all trials which may cause zero Hessian
-                    if adjust_hessian:
+                    # if adjust_hessian:
                         # db_acc[:, obs_dim] = accumulate(db_acc[:, obs_dim], grad_b, decay)
-                        neghess_b[np.diag_indices_from(neghess_b)] += eps + sqrt(db_acc[:, obs_dim])
+                        # neghess_b[np.diag_indices_from(neghess_b)] += eps + sqrt(db_acc[:, obs_dim])
                     try:
                         delta_b = solve(neghess_b, grad_b, sym_pos=True)
                     except LinAlgError:
@@ -322,7 +322,8 @@ def infer(model_fit, options):
             # subsample = np.arange(subsample_size) + np.random.randint(nbin - subsample_size)
             init_p = (sigma[dyn_dim] ** 2, omega[dyn_dim], 1e-3)
             bounds = ((1e-3, 1),
-                      (max(1e-6, omega[dyn_dim] / multiplier), min(1.0, omega[dyn_dim] * multiplier)),
+                      # (max(1e-6, omega[dyn_dim] / multiplier), min(1.0, omega[dyn_dim] * multiplier)),
+                      (1e-6, 1e-2),
                       (1e-4, 1e-2))
             mask = np.array([0, 1, 0])
             sigma2, omega[dyn_dim], _ = hyper.optim(options['hyper_obj'],
