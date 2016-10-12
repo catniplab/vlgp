@@ -1,10 +1,12 @@
 """Module that does inference"""
 # TODO: remove adjust_hessian option
 import gc
+import pickle
 import warnings
 from pprint import pprint
 
 import numpy as np
+import time
 from numpy import identity, einsum, trace, empty, diag, newaxis, var, asarray, zeros, zeros_like, \
     empty_like, sum, copyto, reshape
 from numpy.core.umath import sqrt, PINF, log
@@ -18,7 +20,7 @@ from .constant import *
 from .evaluation import timer
 from .math import ichol_gauss, subspace, sexp
 from .optimizer import AdamOptimizer
-from .util import add_constant, rotate, lagmat
+from .util import add_constant, rotate, lagmat, save
 
 
 def elbo(model_fit):
@@ -100,30 +102,6 @@ def elbo(model_fit):
     return lb, ll
 
 
-# def accumulate(acc, grad, b=1):
-#     """
-#     Accumulate second moment of gradient for adjusting Hessian
-#
-#     Parameters
-#     ----------
-#     acc : ndarray
-#         accumulation
-#     grad : ndarray
-#         gradient
-#     b : double
-#         decay rate
-#
-#     Returns
-#     -------
-#     ndarray
-#         sum of second moments
-#     """
-#     if b < 1:
-#         return b * acc + (1 - b) * grad ** 2
-#     else:
-#         return acc + grad ** 2
-
-
 def infer(model_fit, options):
     """
     Inference procedure
@@ -131,7 +109,6 @@ def infer(model_fit, options):
     Parameters
     ----------
     model_fit : dict
-        initial model fit
     options : dict
 
     Returns
@@ -190,9 +167,9 @@ def infer(model_fit, options):
                            G @ (GtWG @ solve(eyer + GtWG, (wadj * G).T @ u, sym_pos=True))
 
                 clip(delta_mu, options['dmu_bound'])
-                if options['Adam']:
-                    optimizer = options['optimizer_mu'][trial, dyn_dim]
-                    delta_mu = optimizer.next_update(delta_mu)
+                # if options['Adam']:
+                #     optimizer = options['optimizer_mu'][trial, dyn_dim]
+                #     delta_mu = optimizer.next_update(delta_mu)
                 mu[:, dyn_dim] += options['learning_rate'] * delta_mu
 
             eta = mu @ a + hb
@@ -259,9 +236,9 @@ def infer(model_fit, options):
                     delta_a = grad_a
 
                 clip(delta_a, options['da_bound'])
-                if options['Adam']:
-                    optimizer_a = options['optimizer_a'][obs_dim]
-                    delta_a = optimizer_a.next_update(delta_a)
+                # if options['Adam']:
+                #     optimizer_a = options['optimizer_a'][obs_dim]
+                #     delta_a = optimizer_a.next_update(delta_a)
                 a[:, obs_dim] += options['learning_rate'] * delta_a
 
                 # regression
@@ -282,9 +259,9 @@ def infer(model_fit, options):
                     delta_b = grad_b
 
                 clip(delta_b, options['db_bound'])
-                if options['Adam']:
-                    optimizer_b = options['optimizer_b'][obs_dim]
-                    delta_b = optimizer_b.next_update(delta_b)
+                # if options['Adam']:
+                #     optimizer_b = options['optimizer_b'][obs_dim]
+                #     delta_b = optimizer_b.next_update(delta_b)
                 b[:, obs_dim] += options['learning_rate'] * delta_b
             elif obs_types[obs_dim] == LFP:
                 # a's least squares solution for Gaussian channel
@@ -350,11 +327,6 @@ def infer(model_fit, options):
     # options
     eps = options['eps']
     tol = options['tol']
-    # decay = options['decay']
-    adjust_hessian = options['adjust_hessian']
-    # dmu_acc = options['dmu_acc']
-    # da_acc = options['da_acc']
-    # db_acc = options['db_acc']
 
     spike_dims = model_fit['channel'] == SPIKE
     lfp_dims = model_fit['channel'] == LFP
@@ -397,6 +369,7 @@ def infer(model_fit, options):
     stop = False
 
     logging_counter = 0
+    last_saving_time = time.perf_counter()
 
     if options['verbose']:
         print('\nstarting')
@@ -466,6 +439,7 @@ def infer(model_fit, options):
             elapsed[it, 0] = estep_elapsed()
             elapsed[it, 1] = mstep_elapsed()
             elapsed[it, 2] = iter_elapsed()
+
             ###################################
             # statistics of current iteration #
             ###################################
@@ -488,6 +462,25 @@ def infer(model_fit, options):
                 logging_counter += 1
 
             it += 1
+
+            model_fit['it'] = it
+            model_fit['ELBO'] = lb[:it]
+            model_fit['Elapsed'] = elapsed[:it, :]
+            model_fit['LoadingAngle'] = loading_angle[:it]
+            model_fit['LatentAngle'] = latent_angle[:it]
+            model_fit['RankCorr'] = latent_corr[:it]
+            model_fit['LL'] = ll[:it]
+            model_fit['stat'] = stat
+
+            now = time.perf_counter()
+            if now - last_saving_time > options['saving_interval']:
+                print('saving')
+                save(model_fit, 'tmp_fit.h5')
+                with open('tmp_fit.pickle', 'wb') as fout:
+                    pickle.dump(options, fout)
+                last_saving_time = now
+                print('saved')
+
     ##############################
     # end of iterative procedure #
     ##############################
@@ -498,13 +491,13 @@ def infer(model_fit, options):
         print('\nInference ends')
         print('{} iterations, ELBO: {:.4f}, elapsed: {:.3f}s\n'.format(it - 1, lb[it - 1], algo_elapsed()))
 
-    model_fit['ELBO'] = lb[:it]
-    model_fit['Elapsed'] = elapsed[:it, :]
-    model_fit['LoadingAngle'] = loading_angle[:it]
-    model_fit['LatentAngle'] = latent_angle[:it]
-    model_fit['RankCorr'] = latent_corr[:it]
-    model_fit['LL'] = ll[:it]
-    model_fit['stat'] = stat
+    # model_fit['ELBO'] = lb[:it]
+    # model_fit['Elapsed'] = elapsed[:it, :]
+    # model_fit['LoadingAngle'] = loading_angle[:it]
+    # model_fit['LatentAngle'] = latent_angle[:it]
+    # model_fit['RankCorr'] = latent_corr[:it]
+    # model_fit['LL'] = ll[:it]
+    # model_fit['stat'] = stat
     return model_fit
 
 
@@ -706,21 +699,17 @@ def fit(y,
     if options['method'] == 'VB':
         update_v(model_fit)
 
-    # options['dmu_acc'] = zeros_like(mu)
-    # options['da_acc'] = zeros_like(a)
-    # options['db_acc'] = zeros_like(b)
-
-    if options['Adam']:
-        options['optimizer_mu'] = empty((ntrial, dyn_ndim), dtype=object)
-        options['optimizer_a'] = empty(obs_ndim, dtype=object)
-        options['optimizer_b'] = empty(obs_ndim, dtype=object)
-
-        for each in np.nditer(options['optimizer_mu'], flags=['refs_ok'], op_flags=['readwrite']):
-            each[...] = AdamOptimizer(nbin, options['learning_rate'])
-        for each in np.nditer(options['optimizer_a'], flags=['refs_ok'], op_flags=['readwrite']):
-            each[...] = AdamOptimizer(dyn_ndim, options['learning_rate'])
-        for each in np.nditer(options['optimizer_b'], flags=['refs_ok'], op_flags=['readwrite']):
-            each[...] = AdamOptimizer(b.shape[0], options['learning_rate'])
+    # if options['Adam']:
+    #     options['optimizer_mu'] = empty((ntrial, dyn_ndim), dtype=object)
+    #     options['optimizer_a'] = empty(obs_ndim, dtype=object)
+    #     options['optimizer_b'] = empty(obs_ndim, dtype=object)
+    #
+    #     for each in np.nditer(options['optimizer_mu'], flags=['refs_ok'], op_flags=['readwrite']):
+    #         each[...] = AdamOptimizer(nbin, options['learning_rate'])
+    #     for each in np.nditer(options['optimizer_a'], flags=['refs_ok'], op_flags=['readwrite']):
+    #         each[...] = AdamOptimizer(dyn_ndim, options['learning_rate'])
+    #     for each in np.nditer(options['optimizer_b'], flags=['refs_ok'], op_flags=['readwrite']):
+    #         each[...] = AdamOptimizer(b.shape[0], options['learning_rate'])
 
     inference = postprocess(infer(model_fit, options))
     return inference, options
