@@ -179,7 +179,7 @@ def save(obj, fname, warning=False):
 
 def load(fname):
     with h5py.File(fname, 'r') as hf:
-        obj = {k: np.array(v) for k, v in hf.items()}
+        obj = {k: np.asarray(v) for k, v in hf.items()}
     return obj
 
 
