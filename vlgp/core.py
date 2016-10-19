@@ -778,20 +778,20 @@ def postprocess(model_fit):
     return model_fit
 
 
-def predict(y, x, a, b, v=None):
+def predict(x, a, b, y=None, v=None):
     """
     Predict firing rate
 
     Parameters
     ----------
-    y : ndarray
-        spike trains
     x : ndarray
-        posterior mean
+        latent
     a : ndarray
         loading
     b : ndarray
-        regression
+        history filter
+    y : ndarray
+        spike trains for history filter
     v : ndarray
         posterior variance
 
@@ -800,20 +800,23 @@ def predict(y, x, a, b, v=None):
     ndarray
         predicted firing rate
     """
-    ntrial, nbin, obs_ndim = y.shape
-    dyn_ndim = x.shape[-1]
+    ntrial, nbin, dyn_ndim = x.shape
+    obs_ndim = a.shape[1]
     lag = b.shape[0] - 1
 
+    shape_out = (ntrial, nbin, obs_ndim)
     # regression (h dot b) part
-    reg = empty_like(y)
+    if y is None:
+        y = np.zeros(shape_out)
+
+    h_dot_b = empty(shape_out)
     for obs_dim in range(obs_ndim):
         for trial in range(ntrial):
             h = add_constant(lagmat(y[trial, :, obs_dim], lag=lag))
-            reg[trial, :, obs_dim] = h @ b[:, obs_dim]
-    eta = x.reshape((-1, dyn_ndim)) @ a + reg.reshape((-1, obs_ndim))
-    r = np.exp(eta + 0.5 * v.reshape((-1, dyn_ndim)) @ (a ** 2)) if v is not None else np.exp(eta)
-    yhat = r.reshape(y.shape)
-    return yhat
+            h_dot_b[trial, :, obs_dim] = h @ b[:, obs_dim]
+    eta = x.reshape((-1, dyn_ndim)) @ a + h_dot_b.reshape((-1, obs_ndim))
+    yhat = np.exp(eta + 0.5 * v.reshape((-1, dyn_ndim)) @ (a ** 2)) if v is not None else np.exp(eta)
+    return np.reshape(yhat, shape_out)
 
 
 def clip(delta, lbound, ubound=None):
