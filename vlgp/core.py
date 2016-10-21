@@ -732,7 +732,7 @@ def check_options(kwargs):
         full options
     """
     options = dict(kwargs)
-    for k, v in default_options.items():
+    for k, v in DEFAULT_OPTIONS.items():
         # If key is in the dictionary, return its value. If not, insert key with a value of default and return default.
         options.setdefault(k, v)
     return options
