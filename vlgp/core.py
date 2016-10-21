@@ -455,7 +455,7 @@ def infer(model_fit, options):
                 stat[it]['sigma'] = good_sigma
                 stat[it]['omega'] = good_omega
 
-                if options['verbose'] and it == 2 ** logging_counter:
+                if options['verbose']: # and it == 2 ** logging_counter:
                     print('\n[{}]'.format(it))
                     pprint(stat[it])
                     # for k in sorted(stat[it]):
