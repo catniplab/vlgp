@@ -415,6 +415,19 @@ def hstep(model):
         [ichol_gauss(nbin, omega[dyn_dim], rank) * sigma[dyn_dim] for dyn_dim in range(dyn_ndim)])
 
 
+def infer(model):
+    options = model['options']
+
+    for _ in range(options['e_niter']):
+        estep(model)
+
+
+def estimate(model):
+    options = model['options']
+    for _ in range(options['m_niter']):
+        mstep(model)
+
+
 def emstep(model, callback=None):
     options = model['options']
     model['it'] += 1
@@ -424,16 +437,14 @@ def emstep(model, callback=None):
         ##########
         with timer() as estep_elapsed:
             if options['learn_post']:
-                for _ in range(options['e_niter']):
-                    estep(model)
+                infer(model)
 
         ##########
         # M step #
         ##########
         with timer() as mstep_elapsed:
             if options['learn_param']:
-                for _ in range(options['m_niter']):
-                    mstep(model)
+                estimate(model)
 
         ###################
         # hyperparam step #
