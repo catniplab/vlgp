@@ -168,11 +168,7 @@ def initialize(model):
 
     # initialize regression
     if b is None:
-        b = empty((1 + history_filter, obs_ndim), dtype=float)
-        for obs_dim in range(obs_ndim):
-            b[:, obs_dim] = \
-                lstsq(h.reshape((obs_ndim, -1, 1 + history_filter))[obs_dim, :], y.reshape((-1, obs_ndim))[:, obs_dim])[
-                    0]
+        b = lstsq_b(h)
 
     # initialize noises of LFP
     model['noise'] = var(y.reshape((-1, obs_ndim)), axis=0, ddof=0)
@@ -220,7 +216,10 @@ def initialize(model):
 
     prior = np.array([ichol_gauss(nbin, omega[dyn_dim], rank) * sigma[dyn_dim] for dyn_dim in range(dyn_ndim)])
 
-    # w and v
+    # fill model fields
+    model['a'] = a
+    model['b'] = b
+    model['mu'] = mu
     model['w'] = zeros_like(mu, dtype=float)
     model['v'] = zeros_like(mu, dtype=float)
     model['x'] = h
@@ -233,6 +232,14 @@ def initialize(model):
 
     inference = postprocess(em(model))
     return inference
+
+
+def lstsq_b(h, y):
+    obs_ndim = y.shape[-1]
+    p = h.shape[-1]
+    return np.array(
+        [lstsq(h.reshape((obs_ndim, -1, p))[obs_dim, :], y.reshape((-1, obs_ndim))[:, obs_dim])[0]
+         for obs_dim in range(obs_ndim)])
 
 
 def estep(model):
@@ -299,12 +306,7 @@ def estep(model):
 
     # center over all trials if not only infer posterior
     if options['constrain_mu']:
-        shape = model['mu'].shape
-        mu_over_trials = model['mu'].reshape((-1, dyn_ndim))
-        mean_over_trials = mu_over_trials.mean(axis=0)
-        model['b'][0, :] += mean_over_trials @ model['a']  # compensate bias
-        mu_over_trials -= mean_over_trials
-        model['mu'] = mu_over_trials.reshape(shape)
+        constrain_mu(model)
 
 
 def mstep(model):
@@ -313,8 +315,6 @@ def mstep(model):
     ntrial, nbin, dyn_ndim = model['mu'].shape
     obs_types = model['obs_types']
 
-    spike_dims = model['obs_types'] == SPIKE
-    lfp_dims = model['obs_types'] == LFP
     options = model['options']
 
     a = model['a']
@@ -379,7 +379,7 @@ def mstep(model):
             pass
 
     # normalize loading by latent and rescale latent
-    constrain_loading(model, method=options['constrain_a'], eps=options['eps'])
+    constrain_a(model)
 
 
 def hstep(model):
@@ -758,26 +758,6 @@ def clip(delta, lbound, ubound=None):
     np.clip(delta, lbound, ubound, out=delta)
 
 
-def constrain_loading(model, method=inf, eps=1e-8):
-    mu = model['mu']
-    shape_mu = mu.shape
-    mu = mu.reshape((-1, mu.shape[-1]))
-    a = model['a']
-    if method == 'none':
-        return
-    if method == 'svd':
-        # SVD is not good as above
-        # noinspection PyTupleAssignmentBalance
-        U, s, Vh = svd(a, full_matrices=False)
-        model['mu'] = np.reshape(mu @ a @ Vh.T, shape_mu)
-        model['a'] = Vh
-    else:
-        s = norm(a, ord=method, axis=1, keepdims=True) + eps
-        a /= s
-        mu *= s.squeeze()  # compensate latent
-        model['mu'] = mu.reshape(shape_mu)
-
-
 def update_w(model):
     obs_ndim, ntrial, nbin, nreg = model['x'].shape
     dyn_ndim = model['mu'].shape[-1]
@@ -801,18 +781,53 @@ def update_w(model):
 
 
 def update_v(model):
-    prior = model['chol']
-    rank = prior[0].shape[-1]
-    eyer = identity(rank)
-    ntrial, nbin, dyn_ndim = model['mu'].shape
+    if model['options']['method'] == VB:
+        prior = model['chol']
+        rank = prior[0].shape[-1]
+        eyer = identity(rank)
+        ntrial, nbin, dyn_ndim = model['mu'].shape
 
-    for trial in range(ntrial):
-        w = model['w'][trial, :]
-        for dyn_dim in range(dyn_ndim):
-            G = prior[dyn_dim]
-            GtWG = G.T @ (w[:, [dyn_dim]] * G)
-            try:
-                model['v'][trial, :, dyn_dim] = (
-                    G * (G - G @ GtWG + G @ (GtWG @ solve(eyer + GtWG, GtWG, sym_pos=True)))).sum(axis=1)
-            except LinAlgError:
-                warnings.warn("singular I + G'WG")
+        for trial in range(ntrial):
+            w = model['w'][trial, :]
+            for dyn_dim in range(dyn_ndim):
+                G = prior[dyn_dim]
+                GtWG = G.T @ (w[:, [dyn_dim]] * G)
+                try:
+                    model['v'][trial, :, dyn_dim] = (
+                        G * (G - G @ GtWG + G @ (GtWG @ solve(eyer + GtWG, GtWG, sym_pos=True)))).sum(axis=1)
+                except LinAlgError:
+                    warnings.warn("singular I + G'WG")
+
+
+def constrain_mu(model):
+    dyn_ndim = model['dyn_ndim']
+    shape = model['mu'].shape
+    mu_over_trials = model['mu'].reshape((-1, dyn_ndim))
+    mean_over_trials = mu_over_trials.mean(axis=0)
+    model['b'][0, :] += mean_over_trials @ model['a']  # compensate bias
+    mu_over_trials -= mean_over_trials
+    model['mu'] = mu_over_trials.reshape(shape)
+
+
+def constrain_a(model):
+    options = model['options']
+    method = options['constrain_a']
+    eps = options['eps']
+
+    mu = model['mu']
+    shape_mu = mu.shape
+    mu = mu.reshape((-1, mu.shape[-1]))
+    a = model['a']
+    if method == 'none':
+        return
+    if method == 'svd':
+        # SVD is not good as above
+        # noinspection PyTupleAssignmentBalance
+        U, s, Vh = svd(a, full_matrices=False)
+        model['mu'] = np.reshape(mu @ a @ Vh.T, shape_mu)
+        model['a'] = Vh
+    else:
+        s = norm(a, ord=method, axis=1, keepdims=True) + eps
+        a /= s
+        mu *= s.squeeze()  # compensate latent
+        model['mu'] = mu.reshape(shape_mu)

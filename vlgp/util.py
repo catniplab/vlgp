@@ -8,6 +8,7 @@ import numpy as np
 from numpy import exp, column_stack, roll
 from numpy import zeros, ones, diag, arange, eye, asarray, atleast_3d, rollaxis
 from scipy.linalg import svd, lstsq, toeplitz, solve
+from scipy.ndimage.filters import gaussian_filter1d
 
 from .math import ichol_gauss
 
@@ -342,3 +343,13 @@ def regmat(y, x=None, lag=0):
     big_x = np.concatenate(x, axis=0)  # along time
     y_ndim = automat.shape[0]
     return np.concatenate([automat, np.stack([big_x] * y_ndim)], axis=2)
+
+
+def smooth_1d(x, sigma=10):
+    assert x.ndim == 1
+    y = gaussian_filter1d(x, sigma=sigma, mode='constant', cval=0.0)
+    return y
+
+
+def smooth(x, sigma=10):
+    return np.stack([smooth_1d(row, sigma) for row in x])

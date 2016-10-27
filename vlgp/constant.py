@@ -38,3 +38,6 @@ DEFAULT_OPTIONS = dict(verbose=False,  # output detail
 MODEL_FIELDS = []
 
 PREREQUISITE_FIELDS = []
+
+VB = 'VB'
+MAP = 'MAP'
