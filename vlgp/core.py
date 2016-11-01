@@ -404,7 +404,7 @@ def infer(model_fit, options):
                             hstep()
 
                 # anneal learning rate
-                options['learning_rate'] = 1 / (1 + it / options['niter'])
+                # options['learning_rate'] = 1 / (1 + it / options['niter'])
 
                 # Calculate angle between latent subspace if true latent is given.
                 if x is not None:
@@ -603,7 +603,8 @@ def fit(y,
     # Use least squares if missing one of loading and latent
     if a is None and mu is None:
         fa = factor_analysis.FactorAnalysis(n_components=dyn_ndim, svd_method='lapack')
-        mu = fa.fit_transform(y.reshape((-1, obs_ndim)))
+        y_ = y.reshape((-1, obs_ndim))
+        mu = fa.fit_transform(y_)
         a = fa.components_
 
         # constrain loading and center latent
