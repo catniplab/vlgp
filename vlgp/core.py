@@ -478,15 +478,11 @@ def infer(model_fit, options):
                     if now - last_saving_time > options['saving_interval']:
                         print('saving')
                         save(model_fit, 'tmp_fit.h5')
-                        with open('tmp_options.pickle', 'wb') as fout:
-                            pickle.dump(options, fout)
                         last_saving_time = now
                         print('saved')
     except KeyboardInterrupt:
         print('saving')
         save(model_fit, 'tmp_fit.h5')
-        with open('tmp_options.pickle', 'wb') as fout:
-            pickle.dump(options, fout)
         print('saved')
 
     ##############################
