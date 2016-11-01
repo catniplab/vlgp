@@ -404,7 +404,7 @@ def infer(model_fit, options):
                         hstep()
 
             # anneal learning rate
-            options['learning_rate'] = 1 / (1 + it / options['niter'])
+            # options['learning_rate'] = 1 / (1 + it / options['niter'])
 
             # Calculate angle between latent subspace if true latent is given.
             if x is not None:
