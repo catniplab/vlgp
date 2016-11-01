@@ -155,7 +155,7 @@ def lagmat(x, lag):
     return mat[startrow:stoprow, ncol:]
 
 
-def save(obj, fname, warning=False):
+def save(obj, fname):
     """
     Save inference object in HDF5
 
@@ -165,22 +165,14 @@ def save(obj, fname, warning=False):
         inference
     fname: string
         absolute path and filename
-    warning: bool
-        print warning if any field in obj is not supported by HDF5
     """
-    with h5py.File(fname, 'w') as hf:
-        for k, v in obj.items():
-            try:
-                hf.create_dataset(k, data=v, compression="gzip")
-            except TypeError:
-                msg = 'Discard unsupported type ({})'.format(k)
-                if warning:
-                    warnings.warn(msg)
+    with h5py.File(fname, 'w') as fout:
+        dict_to_hdf5(obj, fout)
 
 
 def load(fname):
-    with h5py.File(fname, 'r') as hf:
-        obj = {k: np.asarray(v) for k, v in hf.items()}
+    with h5py.File(fname, 'r') as fin:
+        obj = hdf5_to_dict(fin)
     return obj
 
 
@@ -353,3 +345,25 @@ def smooth_1d(x, sigma=10):
 
 def smooth(x, sigma=10):
     return np.stack([smooth_1d(row, sigma) for row in x])
+
+
+def dict_to_hdf5(d: dict, hdf):
+    for key, value in d.items():
+        if isinstance(value, dict):
+            group = hdf.create_group(key)
+            dict_to_hdf5(value, group)
+        else:
+            if isinstance(value, np.ndarray):
+                hdf.create_dataset(key, data=value, compression="gzip")
+            else:
+                hdf.create_dataset(key, data=value)
+
+
+def hdf5_to_dict(hdf):
+    d = dict()
+    for key, value in hdf.items():
+        if isinstance(value, h5py.Group):
+            d[key] = hdf5_to_dict(value)
+        else:
+            d[key] = np.asarray(value)
+    return d

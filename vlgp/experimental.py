@@ -17,6 +17,7 @@ from sklearn.decomposition import factor_analysis
 from tqdm import trange
 
 from vlgp import hyper
+from vlgp import name
 from .constant import *
 from .evaluation import timer
 from .math import ichol_gauss, subspace, sexp
@@ -123,21 +124,21 @@ def initialize(model):
     options = model['options']
 
     y = model['y']
-    ntrial, nbin, obs_ndim = y.shape
-    history_filter = model['history_filter']
-    dyn_ndim = model['dyn_ndim']
-
     a = model['a']
     b = model['b']
     mu = model['mu']
     sigma = model['sigma']
     omega = model['omega']
 
+    ntrial, nbin, y_ndim = y.shape
+    history_filter = model['history_filter']
+    z_ndim = model['dyn_ndim']
+
     eps = options['eps']
 
     # make design matrix of regression
-    h = empty((obs_ndim, ntrial, nbin, 1 + history_filter), dtype=float)
-    for obs_dim in range(obs_ndim):
+    h = empty((y_ndim, ntrial, nbin, 1 + history_filter), dtype=float)
+    for obs_dim in range(y_ndim):
         for trial in range(ntrial):
             h[obs_dim, trial, :] = add_constant(lagmat(y[trial, :, obs_dim], lag=history_filter))
 
@@ -145,8 +146,8 @@ def initialize(model):
     # Use factor analysis if both missing initial values
     # Use least squares if missing one of loading and latent
     if a is None and mu is None:
-        fa = factor_analysis.FactorAnalysis(n_components=dyn_ndim, svd_method='lapack')
-        mu = fa.fit_transform(y.reshape((-1, obs_ndim)))
+        fa = factor_analysis.FactorAnalysis(n_components=z_ndim, svd_method='lapack')
+        mu = fa.fit_transform(y.reshape((-1, y_ndim)))
         a = fa.components_
 
         # constrain loading and center latent
@@ -154,7 +155,7 @@ def initialize(model):
         a /= scale
         mu *= scale.squeeze()  # compensate latent
         mu -= mu.mean(axis=0)
-        mu = mu.reshape((ntrial, nbin, dyn_ndim))
+        mu = mu.reshape((ntrial, nbin, z_ndim))
 
         # noinspection PyTupleAssignmentBalance
         # U, s, Vh = svd(a, full_matrices=False)
@@ -162,29 +163,29 @@ def initialize(model):
         # a[:] = Vh
     else:
         if mu is None:
-            mu = lstsq(a.T, y.reshape((-1, obs_ndim)).T)[0].T.reshape((ntrial, nbin, dyn_ndim))
+            mu = lstsq(a.T, y.reshape((-1, y_ndim)).T)[0].T.reshape((ntrial, nbin, z_ndim))
         elif a is None:
-            a = lstsq(mu.reshape((-1, dyn_ndim)), y.reshape((-1, obs_ndim)))[0]
+            a = lstsq(mu.reshape((-1, z_ndim)), y.reshape((-1, y_ndim)))[0]
 
     # initialize regression
     if b is None:
-        b = lstsq_b(h)
+        b = leastsq(h)
 
     # initialize noises of LFP
-    model['noise'] = var(y.reshape((-1, obs_ndim)), axis=0, ddof=0)
+    model['noise'] = var(y.reshape((-1, y_ndim)), axis=0, ddof=0)
 
     ####################
     # initialize prior #
     ####################
     if sigma is None:
-        sigma = np.ones(dyn_ndim) * (1 - model['gpnoise'])
+        sigma = np.ones(z_ndim) * (1 - model['gpnoise'])
 
     if omega is None:
         if options['subsample_size'] is None:
             options['subsample_size'] = nbin // 5
         subsample_size = options['subsample_size']
-        omega = np.ones(dyn_ndim)
-        for dyn_dim in range(dyn_ndim):
+        omega = np.ones(z_ndim)
+        for dyn_dim in range(z_ndim):
             subsample = hyper.subsample(nbin, subsample_size, options['successive'])
             omega_grid = np.logspace(-6, 0, num=7, base=10)
             sigma2_opt = np.zeros_like(omega_grid)
@@ -214,7 +215,7 @@ def initialize(model):
         model['rank'] = nbin
     rank = model['rank']
 
-    prior = np.array([ichol_gauss(nbin, omega[dyn_dim], rank) * sigma[dyn_dim] for dyn_dim in range(dyn_ndim)])
+    prior = np.array([ichol_gauss(nbin, omega[dyn_dim], rank) * sigma[dyn_dim] for dyn_dim in range(z_ndim)])
 
     # fill model fields
     model['a'] = a
@@ -234,18 +235,20 @@ def initialize(model):
     return inference
 
 
-def lstsq_b(h, y):
-    obs_ndim = y.shape[-1]
-    p = h.shape[-1]
-    return np.array(
-        [lstsq(h.reshape((obs_ndim, -1, p))[obs_dim, :], y.reshape((-1, obs_ndim))[:, obs_dim])[0]
-         for obs_dim in range(obs_ndim)])
+def leastsq(x, y):
+    y_ndim = y.shape[-1]
+    p = x.shape[-1]
+    x_ = x.reshape((y_ndim, -1, p))
+    y_ = y.reshape((-1, y_ndim))
+    return np.array([lstsq(x_[y_dim, :], y_[:, y_dim])[0] for y_dim in range(y_ndim)])
 
 
 def estep(model):
     """Update variational distribution q (E step)"""
-    obs_ndim = model['y'].shape[-1]
-    ntrial, nbin, dyn_ndim = model['mu'].shape
+    options = model['options']
+
+    y_ndim = model['y'].shape[-1]
+    ntrial, nbin, z_ndim = model['mu'].shape
     prior = model['chol']
     rank = prior[0].shape[-1]
     a = model['a']
@@ -253,128 +256,131 @@ def estep(model):
     noise = model['noise']
     spike_dims = model['obs_types'] == SPIKE
     lfp_dims = model['obs_types'] == LFP
-    options = model['options']
 
     Ir = identity(rank)
-    residual = empty((nbin, obs_ndim), dtype=float)
-    U = empty((nbin, obs_ndim), dtype=float)
+    residual = empty((nbin, y_ndim), dtype=float)
+    U = empty((nbin, y_ndim), dtype=float)
+
+    y = model['y']
+    x = model['x']
+    mu = model['mu']
+    w = model['w']
+    v = model['v']
+    dmu = model['dmu']
 
     for trial in range(ntrial):
-        # trial slices
-        y = model['y'][trial, :]
-        x = model['x'][:, trial, :, :]
-        mu = model['mu'][trial, :]
-        w = model['w'][trial, :]
-        v = model['v'][trial, :]
-
-        hb = einsum('ijk, ki -> ji', x, b)
-        eta = mu @ a + hb
-        r = sexp(eta + 0.5 * v @ (a ** 2))
-        for dyn_dim in range(dyn_ndim):
-            G = prior[dyn_dim]
+        xb = einsum('ijk, ki -> ji', x[:, trial, :, :], b)
+        eta = mu[trial, :, :] @ a + xb
+        r = sexp(eta + 0.5 * v[trial, :, :] @ (a ** 2))
+        for z_dim in range(z_ndim):
+            G = prior[z_dim]
 
             # working residuals
             # extensible to many other distributions
             # similar form to GLM
-            residual[:, spike_dims] = y[:, spike_dims] - r[:, spike_dims]
-            residual[:, lfp_dims] = (y[:, lfp_dims] - eta[:, lfp_dims]) / noise[lfp_dims]
+            residual[:, spike_dims] = y[trial, :, spike_dims] - r[:, spike_dims]
+            residual[:, lfp_dims] = (y[trial, :, lfp_dims] - eta[:, lfp_dims]) / noise[lfp_dims]
 
-            wadj = w[:, [dyn_dim]]  # keep dimension
+            wadj = w[trial, :, [z_dim]]  # keep dimension
             GtWG = G.T @ (wadj * G)
 
-            u = G @ (G.T @ (residual @ a[dyn_dim, :])) - mu[:, dyn_dim]
+            u = G @ (G.T @ (residual @ a[z_dim, :])) - mu[trial, :, z_dim]
             delta_mu = u - G @ ((wadj * G).T @ u) + \
                        G @ (GtWG @ solve(Ir + GtWG, (wadj * G).T @ u, sym_pos=True))
 
             clip(delta_mu, options['dmu_bound'])
-            mu[:, dyn_dim] += options['learning_rate'] * delta_mu
+            dmu[trial, :, z_dim] = delta_mu
+            mu[trial, :, z_dim] += delta_mu
 
-        eta = mu @ a + hb
-        r = sexp(eta + 0.5 * v @ (a ** 2))
+        eta = mu[trial, :, :] @ a + xb
+        r = sexp(eta + 0.5 * v[trial, :, :] @ (a ** 2))
         U[:, spike_dims] = r[:, spike_dims]
         U[:, lfp_dims] = 1 / noise[lfp_dims]
-        copyto(w, U @ (a.T ** 2))
+        w[trial, :, :] = U @ (a.T ** 2)
         if options['method'] == 'VB':
-            for dyn_dim in range(dyn_ndim):
-                G = prior[dyn_dim]
-                GtWG = G.T @ (w[:, [dyn_dim]] * G)
+            for z_dim in range(z_ndim):
+                G = prior[z_dim]
+                GtWG = G.T @ (w[trial, :, [z_dim]] * G)
                 try:
-                    v[:, dyn_dim] = (G * (G - G @ GtWG + G @ (GtWG @ solve(Ir + GtWG, GtWG, sym_pos=True)))).sum(
+                    v[trial, :, z_dim] = (G * (G - G @ GtWG + G @ (GtWG @ solve(Ir + GtWG, GtWG, sym_pos=True)))).sum(
                         axis=1)
                 except LinAlgError:
                     warnings.warn("singular I + G'WG")
 
     # center over all trials if not only infer posterior
-    if options['constrain_mu']:
-        constrain_mu(model)
+    constrain_mu(model)
 
 
 def mstep(model):
     """Optimize loading and regression (M step)"""
-    obs_ndim, ntrial, nbin, nreg = model['x'].shape  # neuron, trial, time, regression
-    ntrial, nbin, dyn_ndim = model['mu'].shape
-    obs_types = model['obs_types']
+    y_ndim, ntrial, nbin, x_ndim = model['x'].shape  # neuron, trial, time, regression
+    ntrial, nbin, z_ndim = model['mu'].shape
+    y_types = model['obs_types']
 
     options = model['options']
 
     a = model['a']
+    da = model['da']
+    db = model['db']
     b = model['b']
 
-    y = model['y'].reshape((-1, obs_ndim))  # concatenate trials
-    x = model['x'].reshape((obs_ndim, -1, nreg))  # concatenate trials
+    y = model['y'].reshape((-1, y_ndim))  # concatenate trials
+    x = model['x'].reshape((y_ndim, -1, x_ndim))  # concatenate trials
 
-    mu = model['mu'].reshape((-1, dyn_ndim))
-    v = model['v'].reshape((-1, dyn_ndim))
+    mu = model['mu'].reshape((-1, z_ndim))
+    v = model['v'].reshape((-1, z_ndim))
 
     eta = mu @ a + einsum('ijk, ki -> ji', x, b)  # (neuron, time, regression) x (regression, neuron) -> (time, neuron)
     r = sexp(eta + 0.5 * v @ (a ** 2))
     model['noise'] = var(y - eta, axis=0, ddof=0)  # MLE
 
-    for obs_dim in range(obs_ndim):
-        if obs_types[obs_dim] == SPIKE:
+    for y_dim in range(y_ndim):
+        if y_types[y_dim] == SPIKE:
             # loading
-            mu_plus_v_times_a = mu + v * a[:, obs_dim]
-            grad_a = mu.T @ y[:, obs_dim] - mu_plus_v_times_a.T @ r[:, obs_dim]
+            mu_plus_v_times_a = mu + v * a[:, y_dim]
+            grad_a = mu.T @ y[:, y_dim] - mu_plus_v_times_a.T @ r[:, y_dim]
 
             if options['hessian']:
-                neghess_a = mu_plus_v_times_a.T @ (r[:, [obs_dim]] * mu_plus_v_times_a)  # + wv
-                neghess_a[np.diag_indices_from(neghess_a)] += r[:, obs_dim] @ v
+                neghess_a = mu_plus_v_times_a.T @ (r[:, [y_dim]] * mu_plus_v_times_a)  # + wv
+                neghess_a[np.diag_indices_from(neghess_a)] += r[:, y_dim] @ v
 
                 try:
                     delta_a = solve(neghess_a, grad_a, sym_pos=True)
                 except LinAlgError:
-                    delta_a = grad_a
+                    delta_a = options['learning_rate'] * grad_a
             else:
-                delta_a = grad_a
+                delta_a = options['learning_rate'] * grad_a
 
             clip(delta_a, options['da_bound'])
-            a[:, obs_dim] += options['learning_rate'] * delta_a
+            da[:, y_dim] = delta_a
+            a[:, y_dim] += delta_a
 
             # regression
-            grad_b = x[obs_dim, :].T @ (y[:, obs_dim] - r[:, obs_dim])
+            grad_b = x[y_dim, :].T @ (y[:, y_dim] - r[:, y_dim])
 
             if options['hessian']:
-                neghess_b = x[obs_dim, :].T @ (r[:, [obs_dim]] * x[obs_dim, :])
+                neghess_b = x[y_dim, :].T @ (r[:, [y_dim]] * x[y_dim, :])
                 try:
                     delta_b = solve(neghess_b, grad_b, sym_pos=True)
                 except LinAlgError:
-                    delta_b = grad_b
+                    delta_b = options['learning_rate'] * grad_b
             else:
-                delta_b = grad_b
+                delta_b = options['learning_rate'] * grad_b
 
             clip(delta_b, options['db_bound'])
-            b[:, obs_dim] += options['learning_rate'] * delta_b
-        elif obs_types[obs_dim] == LFP:
+            db[:, y_dim] = delta_b
+            b[:, y_dim] += delta_b
+        elif y_types[y_dim] == LFP:
             # a's least squares solution for Gaussian channel
             # (m'm + diag(j'v))^-1 m'(y - Hb)
             tmp = mu.T @ mu
             tmp[np.diag_indices_from(tmp)] += sum(v, axis=0)
-            a[:, obs_dim] = solve(tmp, mu.T @ (y[:, obs_dim] - x[obs_dim, :] @ b[:, obs_dim]), sym_pos=True)
+            a[:, y_dim] = solve(tmp, mu.T @ (y[:, y_dim] - x[y_dim, :] @ b[:, y_dim]), sym_pos=True)
 
             # b's least squares solution for Gaussian channel
             # (H'H)^-1 H'(y - ma)
-            b[:, obs_dim] = solve(x[obs_dim, :].T @ x[obs_dim, :],
-                                  x[obs_dim, :].T @ (y[:, obs_dim] - mu @ a[:, obs_dim]), sym_pos=True)
+            b[:, y_dim] = solve(x[y_dim, :].T @ x[y_dim, :],
+                                  x[y_dim, :].T @ (y[:, y_dim] - mu @ a[:, y_dim]), sym_pos=True)
         else:
             pass
 
@@ -385,7 +391,13 @@ def mstep(model):
 def hstep(model):
     """Optimize hyperparameters"""
     options = model['options']
-    ntrial, nbin, dyn_ndim = model['mu'].shape
+    if not options[name.hstep]:
+        return
+
+    if model[name.iteration] % options[name.hperiod] != 0:
+        return
+
+    ntrial, nbin, z_ndim = model['mu'].shape
     prior = model['chol']
     rank = prior[0].shape[-1]
     mu = model['mu']
@@ -395,28 +407,30 @@ def hstep(model):
         subsample_size = nbin // 2
     sigma = model['sigma']
     omega = model['omega']
-    for dyn_dim in range(dyn_ndim):
+    for z_dim in range(z_ndim):
         subsample = hyper.subsample(nbin, subsample_size)
-        init_p = (sigma[dyn_dim] ** 2, omega[dyn_dim], 1e-3)
+        hparam_init = (sigma[z_dim] ** 2, omega[z_dim], 1e-3)
         bounds = ((1e-3, 1),
                   (1e-6, 1e-2),
                   (1e-4, 1e-2))
         mask = np.array([0, 1, 0])
-        sigma2, omega[dyn_dim], _ = hyper.optim(options['hyper_obj'],
-                                                subsample,
-                                                mu[:, subsample, dyn_dim].T,
-                                                w[:, subsample, dyn_dim].T,
-                                                init_p,
-                                                bounds,
-                                                mask=mask,
-                                                return_f=False)  # noise variance, small value to avoid oversmoothing
-        sigma[dyn_dim] = sqrt(sigma2)
+        sigma2, omega[z_dim], _ = hyper.optim(options[name.hobjective],
+                                              subsample,
+                                                mu[:, subsample, z_dim].T,
+                                                w[:, subsample, z_dim].T,
+                                              hparam_init,
+                                              bounds,
+                                              mask=mask,
+                                              return_f=False)  # noise variance, small value to avoid oversmoothing
+        sigma[z_dim] = sqrt(sigma2)
     model['chol'] = np.array(
-        [ichol_gauss(nbin, omega[dyn_dim], rank) * sigma[dyn_dim] for dyn_dim in range(dyn_ndim)])
+        [ichol_gauss(nbin, omega[dyn_dim], rank) * sigma[dyn_dim] for dyn_dim in range(z_ndim)])
 
 
 def infer(model):
     options = model['options']
+    if not options[name.estep]:
+        return
 
     for _ in range(options['e_niter']):
         estep(model)
@@ -424,6 +438,10 @@ def infer(model):
 
 def estimate(model):
     options = model['options']
+
+    if not options[name.mstep]:
+        return
+
     for _ in range(options['m_niter']):
         mstep(model)
 
@@ -436,22 +454,19 @@ def emstep(model, callback=None):
         # E step #
         ##########
         with timer() as estep_elapsed:
-            if options['learn_post']:
-                infer(model)
+            infer(model)
 
         ##########
         # M step #
         ##########
         with timer() as mstep_elapsed:
-            if options['learn_param']:
-                estimate(model)
+            estimate(model)
 
         ###################
         # hyperparam step #
         ###################
         with timer() as hstep_elapsed:
-            if model['it'] % options['nhyper'] == 0 and options['learn_hyper']:
-                hstep(model)
+            hstep(model)
 
     model['e_elapsed'].append(estep_elapsed())
     model['m_elapsed'].append(mstep_elapsed())
@@ -478,7 +493,6 @@ def em(model, niter, callback=None):
     good_omega = model['omega'].copy()
 
     last_saving_time = time.perf_counter()
-    model['it']
 
     #######################
     # iterative algorithm #
@@ -487,9 +501,6 @@ def em(model, niter, callback=None):
     with timer() as elapsed:
         for it in trange(niter):
             emstep(model, callback)
-
-            # anneal learning rate
-            options['learning_rate'] = 1 / (1 + options['anneal'] * model['it'])
 
             #####################
             # convergence check #
@@ -526,12 +537,8 @@ def em(model, niter, callback=None):
 
             now = time.perf_counter()
             if now - last_saving_time > options['saving_interval']:
-                print('saving')
-                save(model, 'tmp_fit.h5')
-                with open('tmp_fit.pickle', 'wb') as fout:
-                    pickle.dump(options, fout)
+                save(model, model['path'])
                 last_saving_time = now
-                print('saved')
 
             if stop:
                 break
@@ -574,101 +581,6 @@ def make_regression(x, y, history_filter):
     return None
 
 
-def fit(y,
-        obs_types,
-        dyn_ndim,
-        x=None,
-        a=None,
-        b=None,
-        history_filter=0,
-        mu=None,
-        z=None,
-        alpha=None,
-        beta=None,
-        sigma=None,
-        omega=None,
-        rank=None,
-        eps=1e-8,
-        tol=1e-5,
-        **kwargs):
-    """
-    vLGP main function
-
-    Parameters
-    ----------
-    y : ndarray
-        obserbation
-    obs_types : ndarray
-        types of observation dimensions, 'spike' or 'lfp'
-    dyn_ndim : int
-        number of latent dimensions
-    exog : ndarray
-        external factors
-    a : ndarray, optional
-        initial value of loading
-    b : ndarray, optional
-        initial value of regression
-    mu : ndarray, optional
-        initial value of posterior mean
-    x : ndarray, optional
-        true value of latent
-    alpha : ndarray, optional
-        true value of loading
-    beta : ndarray, optional
-        true value of regression
-    history_filter : int, optional
-    rank : int, optional
-        rank of incomplete Cholesky
-    eps : double, optional
-        a small positive number
-    tol : double, optional
-        numerical tolerance
-    evaluators : list optional
-        list of evaluators
-    kwargs : dict, optional
-        algorithm options. See fill_options()
-
-    Returns
-    -------
-    dict
-        fit
-    """
-
-    model = dict()
-    y = asarray(y)
-    y = y.astype(float)
-    if y.ndim < 2:
-        y = y[..., newaxis]
-    if y.ndim < 3:
-        y = y[newaxis, ...]
-    model['y'] = y
-    model['dyn_ndim'] = dyn_ndim
-    model['history_filter'] = history_filter
-    model['obs_types'] = obs_types
-    model['x'] = x
-    model['a'] = a
-    model['b'] = b
-    model['mu'] = mu
-    model['sigma'] = sigma
-    model['omega'] = omega
-    model['rank'] = rank
-    model['z'] = z
-    model['alpha'] = alpha
-    model['beta'] = beta
-
-    # model['x'] = make_regression(x, y, history_filter)
-
-    options = dict(kwargs)
-    options['eps'] = eps
-    options['tol'] = tol
-
-    initialize(model)
-    em(model)
-    postprocess(model)
-
-    return model
-
-
 def postprocess(model):
     """
     Remove intermediate and empty variables, and compute decomposition of posterior covariance.
@@ -683,16 +595,16 @@ def postprocess(model):
     dict
         fit that contains prior, posterior, loading and regression
     """
-    ntrial, nbin, dyn_ndim = model['mu'].shape
+    ntrial, nbin, z_ndim = model['mu'].shape
     prior = model['chol']
     rank = prior[0].shape[-1]
     w = model['w']
     eyer = identity(rank)
-    L = empty((ntrial, dyn_ndim, nbin, rank))
+    L = empty((ntrial, z_ndim, nbin, rank))
     for trial in range(ntrial):
-        for dyn_dim in range(dyn_ndim):
-            G = prior[dyn_dim]
-            GtWG = G.T @ (w[trial, :, [dyn_dim]].T * G)
+        for z_dim in range(z_ndim):
+            G = prior[z_dim]
+            GtWG = G.T @ (w[trial, :, [z_dim]].T * G)
             try:
                 tmp = eyer - GtWG + GtWG @ solve(eyer + GtWG, GtWG, sym_pos=True)  # A should be PD but numerically not
             except LinAlgError:
@@ -700,11 +612,10 @@ def postprocess(model):
                 tmp = eyer - GtWG + GtWG @ lstsq(eyer + GtWG, GtWG)[0]  # least squares
             eigval, eigvec = eigh(tmp)
             eigval.clip(0, PINF, out=eigval)  # remove negative eigenvalues
-            L[trial, dyn_dim, :] = G @ (eigvec @ diag(sqrt(eigval)))
+            L[trial, z_dim, :] = G @ (eigvec @ diag(sqrt(eigval)))
     model['L'] = L
     model.pop('h')
     model.pop('stat')
-    return model
 
 
 def predict(z, a, b, y=None, v=None):
@@ -781,7 +692,7 @@ def update_w(model):
 
 
 def update_v(model):
-    if model['options']['method'] == VB:
+    if model['options']['method'] == name.VB:
         prior = model['chol']
         rank = prior[0].shape[-1]
         eyer = identity(rank)
@@ -800,23 +711,29 @@ def update_v(model):
 
 
 def constrain_mu(model):
-    dyn_ndim = model['dyn_ndim']
+    options = model['options']
+    if not options['constrain_mu']:
+        return
+
+    z_ndim = model['dyn_ndim']
     shape = model['mu'].shape
-    mu_over_trials = model['mu'].reshape((-1, dyn_ndim))
-    mean_over_trials = mu_over_trials.mean(axis=0)
+    mu_ = model['mu'].reshape((-1, z_ndim))
+    mean_over_trials = mu_.mean(axis=0, keepdims=True)
     model['b'][0, :] += mean_over_trials @ model['a']  # compensate bias
-    mu_over_trials -= mean_over_trials
-    model['mu'] = mu_over_trials.reshape(shape)
+    mu_ -= mean_over_trials
+    model['mu'] = mu_.reshape(shape)
 
 
 def constrain_a(model):
     options = model['options']
+    if not options['constrain_a']:
+        return
+
     method = options['constrain_a']
     eps = options['eps']
 
-    mu = model['mu']
-    shape_mu = mu.shape
-    mu = mu.reshape((-1, mu.shape[-1]))
+    shape_mu = model['mu'].shape
+    mu_ = model['mu'].reshape((-1, shape_mu.shape[-1]))
     a = model['a']
     if method == 'none':
         return
@@ -824,10 +741,10 @@ def constrain_a(model):
         # SVD is not good as above
         # noinspection PyTupleAssignmentBalance
         U, s, Vh = svd(a, full_matrices=False)
-        model['mu'] = np.reshape(mu @ a @ Vh.T, shape_mu)
+        model['mu'] = np.reshape(mu_ @ a @ Vh.T, shape_mu)
         model['a'] = Vh
     else:
         s = norm(a, ord=method, axis=1, keepdims=True) + eps
         a /= s
-        mu *= s.squeeze()  # compensate latent
-        model['mu'] = mu.reshape(shape_mu)
+        mu_ *= s.squeeze()  # compensate latent
+        model['mu'] = mu_.reshape(shape_mu)

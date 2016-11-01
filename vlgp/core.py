@@ -376,111 +376,118 @@ def infer(model_fit, options):
     # iterative algorithm #
     #######################
     gc.disable()  # disable gabbage collection during the iterative procedure
-    with timer() as algo_elapsed:
-        with tqdm(total=options['niter'] - 1) as pbar:
-            while not stop and it < options['niter']:
-                with timer() as iter_elapsed:
-                    ##########
-                    # E step #
-                    ##########
-                    with timer() as estep_elapsed:
-                        if options['learn_post']:
-                            for _ in range(options['e_niter']):
-                                estep()
+    try:
+        with timer() as algo_elapsed:
+            with tqdm(total=options['niter'] - 1) as pbar:
+                while not stop and it < options['niter']:
+                    with timer() as iter_elapsed:
+                        ##########
+                        # E step #
+                        ##########
+                        with timer() as estep_elapsed:
+                            if options['learn_post']:
+                                for _ in range(options['e_niter']):
+                                    estep()
 
-                    ##########
-                    # M step #
-                    ##########
-                    with timer() as mstep_elapsed:
-                        if options['learn_param']:
-                            for _ in range(options['m_niter']):
-                                mstep()
+                        ##########
+                        # M step #
+                        ##########
+                        with timer() as mstep_elapsed:
+                            if options['learn_param']:
+                                for _ in range(options['m_niter']):
+                                    mstep()
 
-                    ###################
-                    # hyperparam step #
-                    ###################
-                    with timer() as hstep_elapsed:
-                        if it % options['nhyper'] == 0 and options['learn_hyper']:
-                            hstep()
+                        ###################
+                        # hyperparam step #
+                        ###################
+                        with timer() as hstep_elapsed:
+                            if it % options['nhyper'] == 0 and options['learn_hyper']:
+                                hstep()
 
-                # anneal learning rate
-                # options['learning_rate'] = 1 / (1 + it / options['niter'])
+                    # anneal learning rate
+                    # options['learning_rate'] = 1 / (1 + it / options['niter'])
 
-                # Calculate angle between latent subspace if true latent is given.
-                if x is not None:
-                    for itrial in range(x.shape[0]):
-                        rotated[itrial, :] = rotate(add_constant(model_fit['mu'][itrial, :]), x[itrial, :])
-                    latent_angle[it] = subspace(rotated.reshape((-1, x.shape[-1])), x.reshape((-1, x.shape[-1])))
-                    rho, _ = spearmanr(rotated.reshape((-1, x.shape[-1])), x.reshape((-1, x.shape[-1])))
-                    latent_corr[it] = rho[np.arange(x.shape[-1]), np.arange(x.shape[-1]) + x.shape[-1]]
+                    # Calculate angle between latent subspace if true latent is given.
+                    if x is not None:
+                        for itrial in range(x.shape[0]):
+                            rotated[itrial, :] = rotate(add_constant(model_fit['mu'][itrial, :]), x[itrial, :])
+                        latent_angle[it] = subspace(rotated.reshape((-1, x.shape[-1])), x.reshape((-1, x.shape[-1])))
+                        rho, _ = spearmanr(rotated.reshape((-1, x.shape[-1])), x.reshape((-1, x.shape[-1])))
+                        latent_corr[it] = rho[np.arange(x.shape[-1]), np.arange(x.shape[-1]) + x.shape[-1]]
 
-                # Calculate angle between loading subspace if true loading is given.
-                if alpha is not None:
-                    loading_angle[it] = subspace(alpha.T, model_fit['a'].T)
+                    # Calculate angle between loading subspace if true loading is given.
+                    if alpha is not None:
+                        loading_angle[it] = subspace(alpha.T, model_fit['a'].T)
 
-                #####################
-                # convergence check #
-                #####################
-                lb[it], ll[it] = 0, 0
-                converged = norm(model_fit['mu'].ravel() - good_mu.ravel()) <= (
-                    eps + tol * norm(good_mu.ravel())) and norm(
-                    model_fit['a'].ravel() - good_a.ravel()) <= (eps + tol * norm(good_a.ravel())) and norm(
-                    model_fit['b'].ravel() - good_b.ravel()) <= (eps + tol * norm(good_b.ravel()))
+                    #####################
+                    # convergence check #
+                    #####################
+                    lb[it], ll[it] = 0, 0
+                    converged = norm(model_fit['mu'].ravel() - good_mu.ravel()) <= (
+                        eps + tol * norm(good_mu.ravel())) and norm(
+                        model_fit['a'].ravel() - good_a.ravel()) <= (eps + tol * norm(good_a.ravel())) and norm(
+                        model_fit['b'].ravel() - good_b.ravel()) <= (eps + tol * norm(good_b.ravel()))
 
-                copyto(good_mu, model_fit['mu'])
-                copyto(good_w, model_fit['w'])
-                copyto(good_v, model_fit['v'])
-                copyto(good_a, model_fit['a'])
-                copyto(good_b, model_fit['b'])
-                copyto(good_noise, model_fit['noise'])
+                    copyto(good_mu, model_fit['mu'])
+                    copyto(good_w, model_fit['w'])
+                    copyto(good_v, model_fit['v'])
+                    copyto(good_a, model_fit['a'])
+                    copyto(good_b, model_fit['b'])
+                    copyto(good_noise, model_fit['noise'])
 
-                stop = converged
+                    stop = converged
 
-                elapsed[it, 0] = estep_elapsed()
-                elapsed[it, 1] = mstep_elapsed()
-                elapsed[it, 2] = iter_elapsed()
+                    elapsed[it, 0] = estep_elapsed()
+                    elapsed[it, 1] = mstep_elapsed()
+                    elapsed[it, 2] = iter_elapsed()
 
-                ###################################
-                # statistics of current iteration #
-                ###################################
+                    ###################################
+                    # statistics of current iteration #
+                    ###################################
 
-                stat[it] = dict()
-                stat[it]['E-step elapsed'] = elapsed[it, 0]
-                stat[it]['M-step elapsed'] = elapsed[it, 1]
-                stat[it]['H-step elapsed'] = hstep_elapsed()
-                stat[it]['Total elapsed'] = elapsed[it, 2]
-                # stat[it]['ELBO'] = lb[it]
-                # stat[it]['LL'] = ll[it]
-                stat[it]['sigma'] = good_sigma
-                stat[it]['omega'] = good_omega
+                    stat[it] = dict()
+                    stat[it]['E-step elapsed'] = elapsed[it, 0]
+                    stat[it]['M-step elapsed'] = elapsed[it, 1]
+                    stat[it]['H-step elapsed'] = hstep_elapsed()
+                    stat[it]['Total elapsed'] = elapsed[it, 2]
+                    # stat[it]['ELBO'] = lb[it]
+                    # stat[it]['LL'] = ll[it]
+                    stat[it]['sigma'] = good_sigma
+                    stat[it]['omega'] = good_omega
 
-                if options['verbose']:  # and it == 2 ** logging_counter:
-                    print('\n[{}]'.format(it))
-                    pprint(stat[it])
-                    # for k in sorted(stat[it]):
-                    #     pp.print('{}: {}'.format(k, stat[it][k]))
-                    logging_counter += 1
+                    if options['verbose']:  # and it == 2 ** logging_counter:
+                        print('\n[{}]'.format(it))
+                        pprint(stat[it])
+                        # for k in sorted(stat[it]):
+                        #     pp.print('{}: {}'.format(k, stat[it][k]))
+                        logging_counter += 1
 
-                it += 1
-                pbar.update(1)
+                    it += 1
+                    pbar.update(1)
 
-                model_fit['it'] = it
-                model_fit['ELBO'] = lb[:it]
-                model_fit['Elapsed'] = elapsed[:it, :]
-                model_fit['LoadingAngle'] = loading_angle[:it]
-                model_fit['LatentAngle'] = latent_angle[:it]
-                model_fit['RankCorr'] = latent_corr[:it]
-                model_fit['LL'] = ll[:it]
-                model_fit['stat'] = stat
+                    model_fit['it'] = it
+                    model_fit['ELBO'] = lb[:it]
+                    model_fit['Elapsed'] = elapsed[:it, :]
+                    model_fit['LoadingAngle'] = loading_angle[:it]
+                    model_fit['LatentAngle'] = latent_angle[:it]
+                    model_fit['RankCorr'] = latent_corr[:it]
+                    model_fit['LL'] = ll[:it]
+                    model_fit['stat'] = stat
 
-                now = time.perf_counter()
-                if now - last_saving_time > options['saving_interval']:
-                    print('saving')
-                    save(model_fit, 'tmp_fit.h5')
-                    with open('tmp_fit.pickle', 'wb') as fout:
-                        pickle.dump(options, fout)
-                    last_saving_time = now
-                    print('saved')
+                    now = time.perf_counter()
+                    if now - last_saving_time > options['saving_interval']:
+                        print('saving')
+                        save(model_fit, 'tmp_fit.h5')
+                        with open('tmp_options.pickle', 'wb') as fout:
+                            pickle.dump(options, fout)
+                        last_saving_time = now
+                        print('saved')
+    except KeyboardInterrupt:
+        print('saving')
+        save(model_fit, 'tmp_fit.h5')
+        with open('tmp_options.pickle', 'wb') as fout:
+            pickle.dump(options, fout)
+        print('saved')
 
     ##############################
     # end of iterative procedure #
