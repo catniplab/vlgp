@@ -313,6 +313,8 @@ def infer(model, options):
     #################
     # function body #
     #################
+    model['options'] = options
+
     # truth
     x = model.get('x')
     alpha = model.get('alpha')
