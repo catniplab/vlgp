@@ -26,13 +26,14 @@ DEFAULT_OPTIONS = dict(verbose=False,  # output detail
                        subsample_size=None,  # subsample size of H-step
                        hyper_obj='ELBO',  # ELBO or GP, objective function of H-step
                        Adam=False,  # Adam optimizer
-                       gp_noise=1e-3,  # instaneous noise variance
+                       gp_noise=1e-6,  # instaneous noise variance
                        constrain_mu=True,  # demean
                        constrain_a=inf,  # normalize loading, same argument as numpy/scipy norm or 'svd'
                        dmu_bound=1.0,  # clip the updates
                        da_bound=1.0,
                        db_bound=1.0,
-                       saving_interval=3600  # save every 1 hour
+                       omega_bound=(1e-5, 1e-3),
+                       saving_interval=3600 * 2  # save every 2 hour
                        )
 
 MODEL_FIELDS = []

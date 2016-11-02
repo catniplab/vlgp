@@ -1,5 +1,4 @@
 import gc
-import pickle
 import warnings
 from pprint import pprint
 
@@ -100,13 +99,13 @@ def elbo(model_fit):
     return lb, ll
 
 
-def infer(model_fit, options):
+def infer(model, options):
     """
     Inference procedure
 
     Parameters
     ----------
-    model_fit : dict
+    model : dict
     options : dict
 
     Returns
@@ -117,13 +116,13 @@ def infer(model_fit, options):
 
     def estep():
         """Optimize posterior (E step)"""
-        obs_ndim = model_fit['y'].shape[-1]
-        ntrial, nbin, dyn_ndim = model_fit['mu'].shape
-        prior = model_fit['chol']
+        obs_ndim = model['y'].shape[-1]
+        ntrial, nbin, dyn_ndim = model['mu'].shape
+        prior = model['chol']
         rank = prior[0].shape[-1]
-        a = model_fit['a']
-        b = model_fit['b']
-        noise = model_fit['noise']
+        a = model['a']
+        b = model['b']
+        noise = model['noise']
 
         eyer = identity(rank)
         residual = empty((nbin, obs_ndim), dtype=float)
@@ -131,11 +130,11 @@ def infer(model_fit, options):
 
         for trial in range(ntrial):
             # trial slices
-            y = model_fit['y'][trial, :]
-            h = model_fit['h'][:, trial, :, :]
-            mu = model_fit['mu'][trial, :]
-            w = model_fit['w'][trial, :]
-            v = model_fit['v'][trial, :]
+            y = model['y'][trial, :]
+            h = model['h'][:, trial, :, :]
+            mu = model['mu'][trial, :]
+            w = model['w'][trial, :]
+            v = model['v'][trial, :]
 
             hb = einsum('ijk, ki -> ji', h, b)
             eta = mu @ a + hb
@@ -187,30 +186,30 @@ def infer(model_fit, options):
 
         # center over all trials if not only infer posterior
         if options['constrain_mu']:
-            shape = model_fit['mu'].shape
-            mu_over_trials = model_fit['mu'].reshape((-1, dyn_ndim))
+            shape = model['mu'].shape
+            mu_over_trials = model['mu'].reshape((-1, dyn_ndim))
             mean_over_trials = mu_over_trials.mean(axis=0)
-            model_fit['b'][0, :] += mean_over_trials @ model_fit['a']  # compensate bias
+            model['b'][0, :] += mean_over_trials @ model['a']  # compensate bias
             mu_over_trials -= mean_over_trials
-            model_fit['mu'] = mu_over_trials.reshape(shape)
+            model['mu'] = mu_over_trials.reshape(shape)
 
     def mstep():
         """Optimize loading and regression (M step)"""
-        obs_ndim, ntrial, nbin, lag1 = model_fit['h'].shape  # neuron, trial, time, lag
-        ntrial, nbin, dyn_ndim = model_fit['mu'].shape
-        obs_types = model_fit['channel']
-        a = model_fit['a']
-        b = model_fit['b']
+        obs_ndim, ntrial, nbin, lag1 = model['h'].shape  # neuron, trial, time, lag
+        ntrial, nbin, dyn_ndim = model['mu'].shape
+        obs_types = model['channel']
+        a = model['a']
+        b = model['b']
 
-        y = model_fit['y'].reshape((-1, obs_ndim))  # concatenate trials
-        h = model_fit['h'].reshape((obs_ndim, -1, lag1))  # concatenate trials
+        y = model['y'].reshape((-1, obs_ndim))  # concatenate trials
+        h = model['h'].reshape((obs_ndim, -1, lag1))  # concatenate trials
 
-        mu = model_fit['mu'].reshape((-1, dyn_ndim))
-        v = model_fit['v'].reshape((-1, dyn_ndim))
+        mu = model['mu'].reshape((-1, dyn_ndim))
+        v = model['v'].reshape((-1, dyn_ndim))
 
         eta = mu @ a + einsum('ijk, ki -> ji', h, b)  # (neuron, time, lag) x (lag, neuron) -> (time, neuron)
         r = sexp(eta + 0.5 * v @ (a ** 2))
-        model_fit['noise'] = var(y - eta, axis=0, ddof=0)  # MLE
+        model['noise'] = var(y - eta, axis=0, ddof=0)  # MLE
 
         for obs_dim in range(obs_ndim):
             if obs_types[obs_dim] == SPIKE:
@@ -276,30 +275,26 @@ def infer(model_fit, options):
                 pass
 
         # normalize loading by latent and rescale latent
-        constrain_loading(model_fit, method=options['constrain_a'], eps=options['eps'])
+        constrain_loading(model, method=options['constrain_a'], eps=options['eps'])
 
     def hstep():
         """Optimize hyperparameters"""
-        ntrial, nbin, dyn_ndim = model_fit['mu'].shape
-        prior = model_fit['chol']
+        ntrial, nbin, dyn_ndim = model['mu'].shape
+        prior = model['chol']
         rank = prior[0].shape[-1]
-        mu = model_fit['mu']
-        w = model_fit['w']
+        mu = model['mu']
+        w = model['w']
         subsample_size = options['subsample_size']
         if subsample_size is None:
             subsample_size = nbin // 2
-        sigma = model_fit['sigma']
-        omega = model_fit['omega']
-        multiplier = 10.0
+        sigma = model['sigma']
+        omega = model['omega']
         for dyn_dim in range(dyn_ndim):
-            # subsample = np.random.choice(nbin, subsample_size, replace=False)
             subsample = hyper.subsample(nbin, subsample_size)
-            # subsample = np.arange(subsample_size) + np.random.randint(nbin - subsample_size)
-            init_p = (sigma[dyn_dim] ** 2, omega[dyn_dim], 1e-3)
+            init_p = (sigma[dyn_dim] ** 2, omega[dyn_dim], options['gp_noise'])
             bounds = ((1e-3, 1),
-                      # (max(1e-6, omega[dyn_dim] / multiplier), min(1.0, omega[dyn_dim] * multiplier)),
-                      (1e-6, 1e-2),
-                      (1e-4, 1e-2))
+                      options['omega_bound'],
+                      (options['gp_noise'] / 2, options['gp_noise'] * 2))
             mask = np.array([0, 1, 0])
             sigma2, omega[dyn_dim], _ = hyper.optim(options['hyper_obj'],
                                                     subsample,
@@ -312,33 +307,33 @@ def infer(model_fit, options):
             sigma[dyn_dim] = sqrt(sigma2)
         copyto(good_sigma, sigma)
         copyto(good_omega, omega)
-        model_fit['chol'] = np.array(
+        model['chol'] = np.array(
             [ichol_gauss(nbin, omega[dyn_dim], rank) * sigma[dyn_dim] for dyn_dim in range(dyn_ndim)])
 
     #################
     # function body #
     #################
     # truth
-    x = model_fit.get('x')
-    alpha = model_fit.get('alpha')
+    x = model.get('x')
+    alpha = model.get('alpha')
 
     # options
     eps = options['eps']
     tol = options['tol']
 
-    spike_dims = model_fit['channel'] == SPIKE
-    lfp_dims = model_fit['channel'] == LFP
+    spike_dims = model['channel'] == SPIKE
+    lfp_dims = model['channel'] == LFP
 
     ################################
     # old values
-    good_mu = model_fit['mu'].copy()
-    good_w = model_fit['w'].copy()
-    good_v = model_fit['v'].copy()
-    good_a = model_fit['a'].copy()
-    good_b = model_fit['b'].copy()
-    good_noise = model_fit['noise'].copy()
-    good_sigma = model_fit['sigma'].copy()
-    good_omega = model_fit['omega'].copy()
+    good_mu = model['mu'].copy()
+    good_w = model['w'].copy()
+    good_v = model['v'].copy()
+    good_a = model['a'].copy()
+    good_b = model['b'].copy()
+    good_noise = model['noise'].copy()
+    good_sigma = model['sigma'].copy()
+    good_omega = model['omega'].copy()
 
     stat = empty(options['niter'], dtype=object)
     lb = zeros(options['niter'], dtype=float)
@@ -346,18 +341,18 @@ def infer(model_fit, options):
     elapsed = zeros((options['niter'], 3), dtype=float)
     loading_angle = zeros(options['niter'], dtype=float)
     latent_angle = zeros(options['niter'], dtype=float)
-    latent_corr = zeros((options['niter'], model_fit['mu'].shape[-1]), dtype=float)
+    latent_corr = zeros((options['niter'], model['mu'].shape[-1]), dtype=float)
 
     # iteration 0
     # lb[0], ll[0] = elbo(obj)
     lb[0], ll[0] = np.finfo(float).min, np.finfo(float).min
     if alpha is not None:
-        loading_angle[0] = subspace(alpha.T, model_fit['a'].T)
+        loading_angle[0] = subspace(alpha.T, model['a'].T)
     if x is not None:
         rotated = empty_like(x, dtype=float)
         # rotate trial by trial
         for itrial in range(x.shape[0]):
-            rotated[itrial, :] = rotate(add_constant(model_fit['mu'][itrial, :]), x[itrial, :])
+            rotated[itrial, :] = rotate(add_constant(model['mu'][itrial, :]), x[itrial, :])
         latent_angle[0] = subspace(rotated.reshape((-1, x.shape[-1])), x.reshape((-1, x.shape[-1])))
         rho, _ = spearmanr(rotated.reshape((-1, x.shape[-1])), x.reshape((-1, x.shape[-1])))
         latent_corr[0] = rho[np.arange(x.shape[-1]), np.arange(x.shape[-1]) + x.shape[-1]]
@@ -410,30 +405,30 @@ def infer(model_fit, options):
                     # Calculate angle between latent subspace if true latent is given.
                     if x is not None:
                         for itrial in range(x.shape[0]):
-                            rotated[itrial, :] = rotate(add_constant(model_fit['mu'][itrial, :]), x[itrial, :])
+                            rotated[itrial, :] = rotate(add_constant(model['mu'][itrial, :]), x[itrial, :])
                         latent_angle[it] = subspace(rotated.reshape((-1, x.shape[-1])), x.reshape((-1, x.shape[-1])))
                         rho, _ = spearmanr(rotated.reshape((-1, x.shape[-1])), x.reshape((-1, x.shape[-1])))
                         latent_corr[it] = rho[np.arange(x.shape[-1]), np.arange(x.shape[-1]) + x.shape[-1]]
 
                     # Calculate angle between loading subspace if true loading is given.
                     if alpha is not None:
-                        loading_angle[it] = subspace(alpha.T, model_fit['a'].T)
+                        loading_angle[it] = subspace(alpha.T, model['a'].T)
 
                     #####################
                     # convergence check #
                     #####################
                     lb[it], ll[it] = 0, 0
-                    converged = norm(model_fit['mu'].ravel() - good_mu.ravel()) <= (
+                    converged = norm(model['mu'].ravel() - good_mu.ravel()) <= (
                         eps + tol * norm(good_mu.ravel())) and norm(
-                        model_fit['a'].ravel() - good_a.ravel()) <= (eps + tol * norm(good_a.ravel())) and norm(
-                        model_fit['b'].ravel() - good_b.ravel()) <= (eps + tol * norm(good_b.ravel()))
+                        model['a'].ravel() - good_a.ravel()) <= (eps + tol * norm(good_a.ravel())) and norm(
+                        model['b'].ravel() - good_b.ravel()) <= (eps + tol * norm(good_b.ravel()))
 
-                    copyto(good_mu, model_fit['mu'])
-                    copyto(good_w, model_fit['w'])
-                    copyto(good_v, model_fit['v'])
-                    copyto(good_a, model_fit['a'])
-                    copyto(good_b, model_fit['b'])
-                    copyto(good_noise, model_fit['noise'])
+                    copyto(good_mu, model['mu'])
+                    copyto(good_w, model['w'])
+                    copyto(good_v, model['v'])
+                    copyto(good_a, model['a'])
+                    copyto(good_b, model['b'])
+                    copyto(good_noise, model['noise'])
 
                     stop = converged
 
@@ -465,24 +460,24 @@ def infer(model_fit, options):
                     it += 1
                     pbar.update(1)
 
-                    model_fit['it'] = it
-                    model_fit['ELBO'] = lb[:it]
-                    model_fit['Elapsed'] = elapsed[:it, :]
-                    model_fit['LoadingAngle'] = loading_angle[:it]
-                    model_fit['LatentAngle'] = latent_angle[:it]
-                    model_fit['RankCorr'] = latent_corr[:it]
-                    model_fit['LL'] = ll[:it]
-                    model_fit['stat'] = stat
+                    model['it'] = it
+                    model['ELBO'] = lb[:it]
+                    model['Elapsed'] = elapsed[:it, :]
+                    model['LoadingAngle'] = loading_angle[:it]
+                    model['LatentAngle'] = latent_angle[:it]
+                    model['RankCorr'] = latent_corr[:it]
+                    model['LL'] = ll[:it]
+                    model['stat'] = stat
 
                     now = time.perf_counter()
                     if now - last_saving_time > options['saving_interval']:
                         print('saving')
-                        save(model_fit, 'tmp_fit.h5')
+                        save(model, model['path'])
                         last_saving_time = now
                         print('saved')
     except KeyboardInterrupt:
         print('saving')
-        save(model_fit, 'tmp_fit.h5')
+        save(model, model['path'])
         print('saved')
 
     ##############################
@@ -490,19 +485,19 @@ def infer(model_fit, options):
     ##############################
     gc.enable()  # enable gabbage collection
 
-    lb[it - 1], ll[it - 1] = elbo(model_fit)
+    lb[it - 1], ll[it - 1] = elbo(model)
     if options['verbose']:
         print('\nInference ends')
-        print('{} iterations, ELBO: {:.4f}, elapsed: {:.3f}s\n'.format(it - 1, lb[it - 1], algo_elapsed()))
+        print('{} iterations, ELBO: {:.4f}\n'.format(it - 1, lb[it - 1]))
 
-    # model_fit['ELBO'] = lb[:it]
-    # model_fit['Elapsed'] = elapsed[:it, :]
-    # model_fit['LoadingAngle'] = loading_angle[:it]
-    # model_fit['LatentAngle'] = latent_angle[:it]
-    # model_fit['RankCorr'] = latent_corr[:it]
-    # model_fit['LL'] = ll[:it]
-    # model_fit['stat'] = stat
-    return model_fit
+    # model['ELBO'] = lb[:it]
+    # model['Elapsed'] = elapsed[:it, :]
+    # model['LoadingAngle'] = loading_angle[:it]
+    # model['LatentAngle'] = latent_angle[:it]
+    # model['RankCorr'] = latent_corr[:it]
+    # model['LL'] = ll[:it]
+    # model['stat'] = stat
+    return model
 
 
 def check_obs_type(types):
@@ -534,7 +529,7 @@ def fit(y,
         rank=None,
         eps=1e-8,
         tol=1e-5,
-        evaluators=None,
+        path='vlgp_fit',
         **kwargs):
     """
     vLGP main function
@@ -569,8 +564,8 @@ def fit(y,
         a small positive number
     tol : double, optional
         numerical tolerance
-    evaluators : list optional
-        list of evaluators
+    path : string, optional
+        path to the save file
     kwargs : dict, optional
         algorithm options. See fill_options()
 
@@ -656,8 +651,8 @@ def fit(y,
             fval_opt = np.zeros_like(omega_grid)
 
             bounds = ((1e-3, 1.0),
-                      (1e-6, 1),
-                      (1e-4, 1e-2))
+                      options['omega_bound'],
+                      (options['gp_noise'] / 2, options['gp_noise'] * 2))
             mask = np.array([0, 1, 0])  # only optimize omega
             for i, o in enumerate(omega_grid):
                 init_p = (1 - options['gp_noise'], o, options['gp_noise'])
@@ -683,7 +678,7 @@ def fit(y,
     w = zeros_like(mu, dtype=float)
     v = zeros_like(mu, dtype=float)
 
-    model_fit = dict(y=y,
+    model = dict(y=y,
                      channel=obs_types,
                      h=h,
                      sigma=sigma,
@@ -698,11 +693,12 @@ def fit(y,
                      noise=noise,
                      x=x,
                      alpha=alpha,
-                     beta=beta)
+                     beta=beta,
+                     path=path)
 
-    update_w(model_fit)
+    update_w(model)
     if options['method'] == 'VB':
-        update_v(model_fit)
+        update_v(model)
 
     # if options['Adam']:
     #     options['optimizer_mu'] = empty((ntrial, dyn_ndim), dtype=object)
@@ -716,7 +712,7 @@ def fit(y,
     #     for each in np.nditer(options['optimizer_b'], flags=['refs_ok'], op_flags=['readwrite']):
     #         each[...] = AdamOptimizer(b.shape[0], options['learning_rate'])
 
-    inference = postprocess(infer(model_fit, options))
+    inference = postprocess(infer(model, options))
     return inference, options
 
 
