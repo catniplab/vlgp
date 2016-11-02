@@ -353,10 +353,13 @@ def dict_to_hdf5(d: dict, hdf):
             group = hdf.create_group(key)
             dict_to_hdf5(value, group)
         else:
-            if isinstance(value, np.ndarray):
-                hdf.create_dataset(key, data=value, compression="gzip")
-            else:
-                hdf.create_dataset(key, data=value)
+            try:
+                if isinstance(value, np.ndarray):
+                    hdf.create_dataset(key, data=value, compression="gzip")
+                else:
+                    hdf.create_dataset(key, data=value)
+            except:
+                pass
 
 
 def hdf5_to_dict(hdf):
