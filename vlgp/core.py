@@ -195,14 +195,14 @@ def infer(model, options):
 
     def mstep():
         """Optimize loading and regression (M step)"""
-        obs_ndim, ntrial, nbin, lag1 = model['h'].shape  # neuron, trial, time, lag
+        y_ndim, ntrial, nbin, lag1 = model['h'].shape  # neuron, trial, time, lag
         ntrial, nbin, dyn_ndim = model['mu'].shape
         obs_types = model['channel']
         a = model['a']
         b = model['b']
 
-        y = model['y'].reshape((-1, obs_ndim))  # concatenate trials
-        h = model['h'].reshape((obs_ndim, -1, lag1))  # concatenate trials
+        y = model['y'].reshape((-1, y_ndim))  # concatenate trials
+        h = model['h'].reshape((y_ndim, -1, lag1))  # concatenate trials
 
         mu = model['mu'].reshape((-1, dyn_ndim))
         v = model['v'].reshape((-1, dyn_ndim))
@@ -211,15 +211,15 @@ def infer(model, options):
         r = sexp(eta + 0.5 * v @ (a ** 2))
         model['noise'] = var(y - eta, axis=0, ddof=0)  # MLE
 
-        for obs_dim in range(obs_ndim):
-            if obs_types[obs_dim] == SPIKE:
+        for y_dim in range(y_ndim):
+            if obs_types[y_dim] == SPIKE:
                 # loading
-                mu_plus_v_times_a = mu + v * a[:, obs_dim]
-                grad_a = mu.T @ y[:, obs_dim] - mu_plus_v_times_a.T @ r[:, obs_dim]
+                mu_plus_v_times_a = mu + v * a[:, y_dim]
+                grad_a = mu.T @ y[:, y_dim] - mu_plus_v_times_a.T @ r[:, y_dim]
 
                 if options['hessian']:
-                    neghess_a = mu_plus_v_times_a.T @ (r[:, [obs_dim]] * mu_plus_v_times_a)  # + wv
-                    neghess_a[np.diag_indices_from(neghess_a)] += r[:, obs_dim] @ v
+                    neghess_a = mu_plus_v_times_a.T @ (r[:, [y_dim]] * mu_plus_v_times_a)  # + wv
+                    neghess_a[np.diag_indices_from(neghess_a)] += r[:, y_dim] @ v
 
                     # if adjust_hessian:
                     # da_acc[:, obs_dim] = accumulate(da_acc[:, obs_dim], grad_a, decay)
@@ -236,13 +236,13 @@ def infer(model, options):
                 # if options['Adam']:
                 #     optimizer_a = options['optimizer_a'][obs_dim]
                 #     delta_a = optimizer_a.next_update(delta_a)
-                a[:, obs_dim] += options['learning_rate'] * delta_a
+                a[:, y_dim] += options['learning_rate'] * delta_a
 
                 # regression
-                grad_b = h[obs_dim, :].T @ (y[:, obs_dim] - r[:, obs_dim])
+                grad_b = h[y_dim, :].T @ (y[:, y_dim] - r[:, y_dim])
 
                 if options['hessian']:
-                    neghess_b = h[obs_dim, :].T @ (r[:, [obs_dim]] * h[obs_dim, :])
+                    neghess_b = h[y_dim, :].T @ (r[:, [y_dim]] * h[y_dim, :])
                     # TODO: inactive neurons never fire across all trials which may cause zero Hessian
                     # if adjust_hessian:
                     # db_acc[:, obs_dim] = accumulate(db_acc[:, obs_dim], grad_b, decay)
@@ -259,18 +259,18 @@ def infer(model, options):
                 # if options['Adam']:
                 #     optimizer_b = options['optimizer_b'][obs_dim]
                 #     delta_b = optimizer_b.next_update(delta_b)
-                b[:, obs_dim] += options['learning_rate'] * delta_b
-            elif obs_types[obs_dim] == LFP:
+                b[:, y_dim] += options['learning_rate'] * delta_b
+            elif obs_types[y_dim] == LFP:
                 # a's least squares solution for Gaussian channel
                 # (m'm + diag(j'v))^-1 m'(y - Hb)
                 tmp = mu.T @ mu
                 tmp[np.diag_indices_from(tmp)] += sum(v, axis=0)
-                a[:, obs_dim] = solve(tmp, mu.T @ (y[:, obs_dim] - h[obs_dim, :] @ b[:, obs_dim]), sym_pos=True)
+                a[:, y_dim] = solve(tmp, mu.T @ (y[:, y_dim] - h[y_dim, :] @ b[:, y_dim]), sym_pos=True)
 
                 # b's least squares solution for Gaussian channel
                 # (H'H)^-1 H'(y - ma)
-                b[:, obs_dim] = solve(h[obs_dim, :].T @ h[obs_dim, :],
-                                      h[obs_dim, :].T @ (y[:, obs_dim] - mu @ a[:, obs_dim]), sym_pos=True)
+                b[:, y_dim] = solve(h[y_dim, :].T @ h[y_dim, :],
+                                    h[y_dim, :].T @ (y[:, y_dim] - mu @ a[:, y_dim]), sym_pos=True)
             else:
                 pass
 
@@ -279,7 +279,7 @@ def infer(model, options):
 
     def hstep():
         """Optimize hyperparameters"""
-        ntrial, nbin, dyn_ndim = model['mu'].shape
+        ntrial, nbin, z_ndim = model['mu'].shape
         prior = model['chol']
         rank = prior[0].shape[-1]
         mu = model['mu']
@@ -289,26 +289,26 @@ def infer(model, options):
             subsample_size = nbin // 2
         sigma = model['sigma']
         omega = model['omega']
-        for dyn_dim in range(dyn_ndim):
+        for z_dim in range(z_ndim):
             subsample = hyper.subsample(nbin, subsample_size)
-            init_p = (sigma[dyn_dim] ** 2, omega[dyn_dim], options['gp_noise'])
+            init_p = (sigma[z_dim] ** 2, omega[z_dim], options['gp_noise'])
             bounds = ((1e-3, 1),
                       options['omega_bound'],
                       (options['gp_noise'] / 2, options['gp_noise'] * 2))
             mask = np.array([0, 1, 0])
-            sigma2, omega[dyn_dim], _ = hyper.optim(options['hyper_obj'],
-                                                    subsample,
-                                                    mu[:, subsample, dyn_dim].T,
-                                                    w[:, subsample, dyn_dim].T,
-                                                    init_p,
-                                                    bounds,
-                                                    mask=mask,
-                                                    return_f=False)  # noise variance, small value to avoid oversmoothing
-            sigma[dyn_dim] = sqrt(sigma2)
+            sigma2, omega[z_dim], _ = hyper.optim(options['hyper_obj'],
+                                                  subsample,
+                                                  mu[:, subsample, z_dim].T,
+                                                  w[:, subsample, z_dim].T,
+                                                  init_p,
+                                                  bounds,
+                                                  mask=mask,
+                                                  return_f=False)  # noise variance, small value to avoid oversmoothing
+            sigma[z_dim] = sqrt(sigma2)
         copyto(good_sigma, sigma)
         copyto(good_omega, omega)
         model['chol'] = np.array(
-            [ichol_gauss(nbin, omega[dyn_dim], rank) * sigma[dyn_dim] for dyn_dim in range(dyn_ndim)])
+            [ichol_gauss(nbin, omega[z_dim], rank) * sigma[z_dim] for z_dim in range(z_ndim)])
 
     #################
     # function body #
@@ -477,7 +477,7 @@ def infer(model, options):
                         save(model, model['path'])
                         last_saving_time = now
                         print('saved')
-    except KeyboardInterrupt:
+    finally:
         print('saving')
         save(model, model['path'])
         print('saved')
@@ -681,22 +681,22 @@ def fit(y,
     v = zeros_like(mu, dtype=float)
 
     model = dict(y=y,
-                     channel=obs_types,
-                     h=h,
-                     sigma=sigma,
-                     omega=omega,
-                     chol=prior,
-                     mu=mu,
-                     w=w,
-                     v=v,
-                     L=empty((ntrial, dyn_ndim, nbin, rank)),
-                     a=a,
-                     b=b,
-                     noise=noise,
-                     x=x,
-                     alpha=alpha,
-                     beta=beta,
-                     path=path)
+                 channel=obs_types,
+                 h=h,
+                 sigma=sigma,
+                 omega=omega,
+                 chol=prior,
+                 mu=mu,
+                 w=w,
+                 v=v,
+                 L=empty((ntrial, dyn_ndim, nbin, rank)),
+                 a=a,
+                 b=b,
+                 noise=noise,
+                 x=x,
+                 alpha=alpha,
+                 beta=beta,
+                 path=path)
 
     update_w(model)
     if options['method'] == 'VB':
