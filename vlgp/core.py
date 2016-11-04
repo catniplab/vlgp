@@ -160,8 +160,11 @@ def infer(model, options):
                 GtWG = G.T @ (wadj * G)
 
                 u = G @ (G.T @ (residual @ a[dyn_dim, :])) - mu[:, dyn_dim]
-                delta_mu = u - G @ ((wadj * G).T @ u) + \
-                           G @ (GtWG @ solve(eyer + GtWG, (wadj * G).T @ u, sym_pos=True))
+                try:
+                    delta_mu = u - G @ ((wadj * G).T @ u) + \
+                               G @ (GtWG @ solve(eyer + GtWG, (wadj * G).T @ u, sym_pos=True))
+                except LinAlgError:
+                    delta_mu = 0
 
                 clip(delta_mu, options['dmu_bound'])
                 # if options['Adam']:
@@ -604,8 +607,10 @@ def fit(y,
     if a is None and mu is None:
         fa = factor_analysis.FactorAnalysis(n_components=dyn_ndim, svd_method='lapack')
         y_ = y.reshape((-1, obs_ndim))
-        mu = fa.fit_transform(y_)
+        y0 = y[0, :]
+        fa.fit(y0)
         a = fa.components_
+        mu = fa.transform(y_)
 
         # constrain loading and center latent
         scale = norm(a, ord=inf, axis=1, keepdims=True) + eps
