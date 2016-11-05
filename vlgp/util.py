@@ -344,7 +344,7 @@ def smooth_1d(x, sigma=10):
 
 
 def smooth(x, sigma=10):
-    return np.stack([smooth_1d(row, sigma) for row in x])
+    return np.stack([smooth_1d(row, sigma) for row in x.T]).T
 
 
 def dict_to_hdf5(d: dict, hdf):

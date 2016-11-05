@@ -224,13 +224,11 @@ def infer(model, options):
                     neghess_a = mu_plus_v_times_a.T @ (r[:, [y_dim]] * mu_plus_v_times_a)  # + wv
                     neghess_a[np.diag_indices_from(neghess_a)] += r[:, y_dim] @ v
 
-                    # if adjust_hessian:
-                    # da_acc[:, obs_dim] = accumulate(da_acc[:, obs_dim], grad_a, decay)
-                    # neghess_a[np.diag_indices_from(neghess_a)] += eps + sqrt(da_acc[:, obs_dim])
                     try:
                         delta_a = solve(neghess_a, grad_a, sym_pos=True)
                     except LinAlgError:
-                        # print('singular Hessian a')
+                        delta_a = grad_a
+                    except ValueError:
                         delta_a = grad_a
                 else:
                     delta_a = grad_a
@@ -272,8 +270,11 @@ def infer(model, options):
 
                 # b's least squares solution for Gaussian channel
                 # (H'H)^-1 H'(y - ma)
+                # b[:, y_dim] = solve(h[y_dim, :].T @ h[y_dim, :],
+                #                     h[y_dim, :].T @ (y[:, y_dim] - mu @ a[:, y_dim]), sym_pos=True)
                 b[:, y_dim] = solve(h[y_dim, :].T @ h[y_dim, :],
                                     h[y_dim, :].T @ (y[:, y_dim] - mu @ a[:, y_dim]), sym_pos=True)
+                b[1:, y_dim] = 0
             else:
                 pass
 
@@ -299,7 +300,7 @@ def infer(model, options):
                       options['omega_bound'],
                       (options['gp_noise'] / 2, options['gp_noise'] * 2))
             mask = np.array([0, 1, 0])
-            sigma2, omega[z_dim], _ = hyper.optim(options['hyper_obj'],
+            sigma2, omega_new, _ = hyper.optim(options['hyper_obj'],
                                                   subsample,
                                                   mu[:, subsample, z_dim].T,
                                                   w[:, subsample, z_dim].T,
@@ -307,6 +308,9 @@ def infer(model, options):
                                                   bounds,
                                                   mask=mask,
                                                   return_f=False)  # noise variance, small value to avoid oversmoothing
+            if not np.any(np.isclose(omega_new, options['omega_bound'])):
+                # unattainable bounds
+                omega[z_dim] = omega_new
             sigma[z_dim] = sqrt(sigma2)
         copyto(good_sigma, sigma)
         copyto(good_omega, omega)
@@ -316,7 +320,6 @@ def infer(model, options):
     #################
     # function body #
     #################
-    model['options'] = options
 
     # truth
     x = model.get('x')
@@ -629,9 +632,11 @@ def fit(y,
             a = lstsq(mu.reshape((-1, dyn_ndim)), y.reshape((-1, obs_ndim)))[0]
 
     # initialize regression
+    spike_dims = obs_types == SPIKE
+
     if b is None:
         b = empty((1 + lag, obs_ndim), dtype=float)
-        for obs_dim in range(obs_ndim):
+        for obs_dim in np.arange(obs_ndim)[spike_dims]:
             b[:, obs_dim] = \
                 lstsq(h.reshape((obs_ndim, -1, 1 + lag))[obs_dim, :], y.reshape((-1, obs_ndim))[:, obs_dim])[0]
 
@@ -700,7 +705,8 @@ def fit(y,
                  x=x,
                  alpha=alpha,
                  beta=beta,
-                 path=path)
+                 path=path,
+                 options=options)
 
     update_w(model)
     if options['method'] == 'VB':
@@ -718,8 +724,10 @@ def fit(y,
     #     for each in np.nditer(options['optimizer_b'], flags=['refs_ok'], op_flags=['readwrite']):
     #         each[...] = AdamOptimizer(b.shape[0], options['learning_rate'])
 
-    inference = postprocess(infer(model, options))
-    return inference, options
+    # inference = postprocess()
+    infer(model, options)
+
+    return model
 
 
 def check_options(kwargs):
