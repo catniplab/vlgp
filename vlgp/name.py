@@ -19,8 +19,12 @@ MSTEP = 'learn_param'
 HSTEP = 'learn_hyper'
 HPERIOD = 'nhyper'
 HOBJ = 'hyper_obj'
+TRIALLET = 'subsample_size'
+PRIORICHOL = 'chol'
+PRIORSTD = 'sigma'
+PRIORTIMESCALE = 'omega'
 
 MAXITER = 'niter'
 ITER = 'it'
 
-Y_TYPE = 'obs_types'
+Y_TYPE = 'channel'

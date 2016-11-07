@@ -6,7 +6,7 @@ import warnings
 import h5py
 import numpy as np
 from numpy import exp, column_stack, roll
-from numpy import zeros, ones, diag, arange, eye, asarray, atleast_3d, rollaxis
+from numpy import zeros, ones, diag, arange, eye, asarray
 from scipy.linalg import svd, lstsq, toeplitz, solve
 from scipy.ndimage.filters import gaussian_filter1d
 
@@ -288,7 +288,7 @@ def trial_slices(trial_lengths: list):
     endpoints = cumsum(endpoints)
     slices = []
     for i in range(ntrial):
-        slices.append(s_[endpoints[i]:endpoints[i+1]])
+        slices.append(s_[endpoints[i]:endpoints[i + 1]])
     return slices
 
 
