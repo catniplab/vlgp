@@ -412,7 +412,7 @@ def hstep(model: dict):
         [ichol_gauss(nbin, omega[dyn_dim], rank) * sigma[dyn_dim] for dyn_dim in range(z_ndim)])
 
 
-def em(model, callback=None):
+def em(model, callback=[]):
     options = model['options']
     tol = options['tol']
     niter = options['niter']
@@ -455,7 +455,8 @@ def em(model, callback=None):
             model['h_elapsed'].append(hstep_elapsed())
             model['em_elapsed'].append(em_elapsed())
 
-            callback(model)
+            for func in callback:
+                func(model)
 
             #####################
             # convergence check #
