@@ -720,7 +720,7 @@ def fit(y,
     # infer(model, options)
     model['last_saving_time'] = time.perf_counter()
     with tqdm(total=options['niter'] - 1) as pbar:
-        em(model, callback=partial(info, pbar=pbar))
+        em(model, callback=[partial(info, pbar=pbar)])
 
     return model
 

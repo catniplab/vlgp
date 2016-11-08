@@ -39,3 +39,9 @@ DEFAULT_OPTIONS = dict(verbose=False,  # output detail
 MODEL_FIELDS = []
 
 PREREQUISITE_FIELDS = []
+
+SAVE_FIELDS = ['y', 'x', 'channel',
+               'dyn_ndim', 'z_ndim', 'history filter',
+               'mu', 'a', 'b', 'v', 'w',
+               'options', 'stats',
+               'z', 'alpha', 'beta']
