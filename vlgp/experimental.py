@@ -234,7 +234,7 @@ def estep(model: dict):
     mu = model['mu']
     w = model['w']
     v = model['v']
-    dmu = model.setdefault('dmu', np.zeros_like(mu))
+    dmu = model['dmu']
 
     for i in range(options['e_niter']):
         for trial in range(ntrial):
@@ -296,9 +296,9 @@ def mstep(model: dict):
     y_types = model[Y_TYPE]
 
     a = model['a']
-    da = model.setdefault('da', np.zeros_like(a))
     b = model['b']
-    db = model.setdefault('db', np.zeros_like(b))
+    da = model['da']
+    db = model['db']
 
     y_ = model['y'].reshape((-1, y_ndim))  # concatenate trials
     x_ = model['h'].reshape((y_ndim, -1, x_ndim))  # concatenate trials
@@ -412,7 +412,8 @@ def hstep(model: dict):
         [ichol_gauss(nbin, omega[dyn_dim], rank) * sigma[dyn_dim] for dyn_dim in range(z_ndim)])
 
 
-def em(model, callback=[]):
+def em(model, callbacks=None):
+    callbacks = callbacks or []
     options = model['options']
     tol = options['tol']
     niter = options['niter']
@@ -423,58 +424,62 @@ def em(model, callback=[]):
     model.setdefault('h_elapsed', [])
     model.setdefault('em_elapsed', [])
 
+    model.setdefault('da', np.zeros_like(model['a']))
+    model.setdefault('db', np.zeros_like(model['b']))
+    model.setdefault('dmu', np.zeros_like(model['mu']))
+
     #######################
     # iterative algorithm #
     #######################
     gc.disable()  # disable gabbage collection during the iterative procedure
-    try:
-        for it in range(niter):
-            model['it'] += 1
+    for it in range(model['it'], niter):
+        model['it'] += 1
 
-            with timer() as em_elapsed:
-                ##########
-                # E step #
-                ##########
-                with timer() as estep_elapsed:
-                    estep(model)
+        with timer() as em_elapsed:
+            ##########
+            # E step #
+            ##########
+            with timer() as estep_elapsed:
+                estep(model)
 
-                ##########
-                # M step #
-                ##########
-                with timer() as mstep_elapsed:
-                    mstep(model)
+            ##########
+            # M step #
+            ##########
+            with timer() as mstep_elapsed:
+                mstep(model)
 
-                ###################
-                # hyperparam step #
-                ###################
-                with timer() as hstep_elapsed:
-                    hstep(model)
+            ###################
+            # hyperparam step #
+            ###################
+            with timer() as hstep_elapsed:
+                hstep(model)
 
-            model['e_elapsed'].append(estep_elapsed())
-            model['m_elapsed'].append(mstep_elapsed())
-            model['h_elapsed'].append(hstep_elapsed())
-            model['em_elapsed'].append(em_elapsed())
+        model['e_elapsed'].append(estep_elapsed())
+        model['m_elapsed'].append(mstep_elapsed())
+        model['h_elapsed'].append(hstep_elapsed())
+        model['em_elapsed'].append(em_elapsed())
 
-            for func in callback:
-                func(model)
+        for callback in callbacks:
+            try:
+                callback()
+            finally:
+                pass
 
-            #####################
-            # convergence check #
-            #####################
-            mu = model['mu']
-            dmu = model['dmu']
-            a = model['a']
-            da = model['da']
-            b = model['b']
-            db = model['db']
+        #####################
+        # convergence check #
+        #####################
+        mu = model['mu']
+        a = model['a']
+        b = model['b']
+        dmu = model['dmu']
+        da = model['da']
+        db = model['db']
 
-            converged = norm(dmu) < tol * norm(mu) and norm(da) < tol * norm(a) and norm(db) < tol * norm(b)
-            stop = converged
+        converged = norm(dmu) < tol * norm(mu) and norm(da) < tol * norm(a) and norm(db) < tol * norm(b)
+        stop = converged
 
-            if stop:
-                break
-    finally:
-        util.save(model, model['path'])
+        if stop:
+            break
 
     ##############################
     # end of iterative procedure #

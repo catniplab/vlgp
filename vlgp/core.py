@@ -15,6 +15,8 @@ from sklearn.decomposition import factor_analysis
 from tqdm import tqdm
 
 from vlgp import hyper
+from vlgp import util
+from vlgp.callback import Saver, Progress
 from vlgp.experimental import hstep, estep, mstep, update_w, update_v, em
 from .constant import *
 from .evaluation import timer
@@ -537,9 +539,8 @@ def fit(y,
         sigma=None,
         omega=None,
         rank=None,
-        eps=1e-8,
-        tol=1e-5,
-        path='vlgp_fit',
+        path='vlgpfit',
+        callbacks=None,
         **kwargs):
     """
     vLGP main function
@@ -585,9 +586,10 @@ def fit(y,
         fit
     """
     options = check_options(kwargs)
-    options['eps'] = eps
-    options['tol'] = tol
-    options['niter'] += 1
+
+    callbacks = callbacks or []
+    # tol = options['tol']
+    eps = options['eps']
 
     y = asarray(y)
     y = y.astype(float)
@@ -716,38 +718,16 @@ def fit(y,
     if options['method'] == 'VB':
         update_v(model)
 
-    # inference = postprocess()
-    # infer(model, options)
-    model['last_saving_time'] = time.perf_counter()
-    with tqdm(total=options['niter'] - 1) as pbar:
-        em(model, callback=[partial(info, pbar=pbar)])
+    saver = Saver(model)
+    pbar = Progress(model)
+
+    callbacks.extend([pbar, saver])
+    try:
+        em(model, callbacks)
+    finally:
+        util.save(model, model['path'])
 
     return model
-
-
-def info(model, pbar=None):
-    options = model['options']
-
-    if pbar:
-        pbar.update(1)
-
-    stat = dict()
-    stat['E-step elapsed'] = model['e_elapsed'][-1]
-    stat['M-step elapsed'] = model['m_elapsed'][-1]
-    stat['H-step elapsed'] = model['h_elapsed'][-1]
-    stat['Total elapsed'] = model['em_elapsed'][-1]
-    stat['sigma'] = model['sigma']
-    stat['omega'] = model['omega']
-
-    if options['verbose']:
-        pprint(stat)
-
-    now = time.perf_counter()
-    if now - model['last_saving_time'] > options['saving_interval']:
-        print('Saving model')
-        save(model, model['path'])
-        model['last_saving_time'] = now
-        print('Model saved')
 
 
 def check_options(kwargs):
