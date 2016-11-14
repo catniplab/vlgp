@@ -1,6 +1,6 @@
 from numpy import asarray, newaxis
 
-from vlgp.experimental import initialize, em, postprocess
+from vlgp.experimental import initialize, vem, postprocess
 
 
 def fit(y,
@@ -94,7 +94,7 @@ def fit(y,
     options['tol'] = tol
 
     initialize(model)
-    em(model)
+    vem(model)
     postprocess(model)
 
     return model

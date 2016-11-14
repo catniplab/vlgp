@@ -20,10 +20,13 @@ class Saver(Callback):
     def __call__(self, *args, **kwargs):
         now = time.perf_counter()
         if now - self.last_saving_time > self.period:
-            print('Saving')
-            save(self.model, self.model['path'])
-            self.last_saving_time = now
-            print('Saved')
+            self.save()
+
+    def save(self):
+        print('Saving')
+        save(self.model, self.model['path'])
+        self.last_saving_time = time.perf_counter()
+        print('Saved')
 
 
 class Progress(Callback):

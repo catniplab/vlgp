@@ -412,7 +412,7 @@ def hstep(model: dict):
         [ichol_gauss(nbin, omega[dyn_dim], rank) * sigma[dyn_dim] for dyn_dim in range(z_ndim)])
 
 
-def em(model, callbacks=None):
+def vem(model, callbacks=None):
     callbacks = callbacks or []
     options = model['options']
     tol = options['tol']

@@ -17,7 +17,7 @@ from tqdm import tqdm
 from vlgp import hyper
 from vlgp import util
 from vlgp.callback import Saver, Progress
-from vlgp.experimental import hstep, estep, mstep, update_w, update_v, em
+from vlgp.experimental import hstep, estep, mstep, update_w, update_v, vem
 from .constant import *
 from .evaluation import timer
 from .math import ichol_gauss, subspace, sexp
@@ -723,9 +723,10 @@ def fit(y,
 
     callbacks.extend([pbar, saver])
     try:
-        em(model, callbacks)
+        vem(model, callbacks)
     finally:
-        util.save(model, model['path'])
+        saver.save()
+        # util.save(model, model['path'])
 
     return model
 
