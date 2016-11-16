@@ -6,46 +6,36 @@ from tqdm import tqdm
 from .util import save
 
 
-class Callback:
-    def __init__(self, model):
-        self.model = model
-
-
-class Saver(Callback):
-    def __init__(self, model):
-        super().__init__(model)
-        self.period = self.model['options']['saving_interval']
+class Saver():
+    def __init__(self):
         self.last_saving_time = time.perf_counter()
 
-    def __call__(self, *args, **kwargs):
+    def save(self, model, force=False):
         now = time.perf_counter()
-        if now - self.last_saving_time > self.period:
-            self.save()
-
-    def save(self):
-        print('Saving')
-        save(self.model, self.model['path'])
-        self.last_saving_time = time.perf_counter()
-        print('Saved')
+        if force or now - self.last_saving_time > model['options']['saving_interval']:
+            print('Saving model to {}'.format(model['path']))
+            save(model, model['path'])
+            self.last_saving_time = time.perf_counter()
+            print('Model saved')
 
 
-class Progress(Callback):
-    def __init__(self, model):
-        super().__init__(model)
-        self.pbar = tqdm(total=self.model['options']['niter'])
+class Progressor():
+    def __init__(self, total):
+        self.pbar = tqdm(total=total)
 
-    def __call__(self, *args, **kwargs):
-        options = self.model['options']
-
+    def update(self, model):
         self.pbar.update(1)
+        self.print(model)
 
+    def print(self, model):
+        self.pbar.update(0)
+        options = model['options']
         stat = dict()
-        stat['E-step'] = self.model['e_elapsed'][-1]
-        stat['M-step'] = self.model['m_elapsed'][-1]
-        stat['H-step'] = self.model['h_elapsed'][-1]
-        stat['sigma'] = self.model['sigma']
-        stat['omega'] = self.model['omega']
-
+        stat['E-step'] = model['e_elapsed'][-1]
+        stat['M-step'] = model['m_elapsed'][-1]
+        stat['H-step'] = model['h_elapsed'][-1]
+        stat['sigma'] = model['sigma']
+        stat['omega'] = model['omega']
         if options['verbose']:
             pprint(stat)
 

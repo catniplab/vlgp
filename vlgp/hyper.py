@@ -124,8 +124,10 @@ def optim(obj, t, mu, w, params0, bounds, mask, return_f=False):
         else:
             raise NotImplementedError('not supported objective function')
         return -ll, -dll
-
-    opt, fval, info = fmin_l_bfgs_b(obj_func, log_param0, bounds=log_bounds)
+    try:
+        opt, fval, info = fmin_l_bfgs_b(obj_func, log_param0, bounds=log_bounds)
+    except Exception as e:
+        warnings.warn(e)
     if info['warnflag'] != 0:
         warnings.warn("fmin_l_bfgs_b terminated abnormally with the state: {}".format(info))
     opt = np.exp(opt)

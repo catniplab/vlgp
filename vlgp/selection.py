@@ -6,10 +6,11 @@ from numpy.core.umath import exp
 from scipy import stats
 from scipy.linalg import norm, lstsq
 
-from vlgp import check_options, add_constant, lagmat, ichol_gauss, postprocess, infer, fit
+from .core import check_options, add_constant, lagmat, ichol_gauss, postprocess, vem, check_y_type, initialize
+from .api import fit
 
 
-def seqfit(y, channel, sigma, omega, lag=0, rank=500, copy=False, **kwargs):
+def seqfit(y, obs_types, dyn_ndim, sigma, omega, history_filter=0, rank=200, copy=False, path=None, **kwargs):
     """Sequential inference
     Args:
         y:       observation matrix
@@ -25,70 +26,65 @@ def seqfit(y, channel, sigma, omega, lag=0, rank=500, copy=False, **kwargs):
         list of inference objects
     """
     assert sigma.shape == omega.shape
-    kwargs = check_options(**kwargs)
-
     y = asarray(y)
+    y = y.astype(float)
     if y.ndim < 2:
         y = y[..., newaxis]
     if y.ndim < 3:
         y = y[newaxis, ...]
-    channel = asarray(channel)
-    ntrial, ntime, nchannel = y.shape
-    nlatent = sigma.shape[0]
 
-    h = empty((nchannel, ntrial, ntime, 1 + lag), dtype=float)
-    for ichannel in range(nchannel):
-        for itrial in range(ntrial):
-            h[ichannel, itrial, :] = add_constant(lagmat(y[itrial, :, ichannel], lag=lag))
+    obs_types = check_y_type(obs_types)
 
-    chol = empty((nlatent, ntime, rank), dtype=float)
-    for ilatent in range(nlatent):
-        chol[ilatent, :] = ichol_gauss(ntime, omega[ilatent], rank) * sigma[ilatent]
+    ntrial, nbin, obs_ndim = y.shape
 
-    # initialize posterior
-    fa = sklearn.decomposition.factor_analysis.FactorAnalysis(n_components=nlatent, svd_method='lapack')
-    mu = fa.fit_transform(y.reshape((-1, nchannel)))
-    a = fa.components_
+    # make design matrix of regression
+    h = empty((obs_ndim, ntrial, nbin, 1 + history_filter), dtype=float)
+    for obs_dim in range(obs_ndim):
+        for trial in range(ntrial):
+            h[obs_dim, trial, :] = add_constant(lagmat(y[trial, :, obs_dim], lag=history_filter))
 
-    # constrain loading and center latent
-    anorm = norm(a, ord=inf, axis=1)
-    mu -= mu.mean(axis=0)
-    mu *= anorm
-    a /= anorm[..., newaxis]
-    mu = mu.reshape((ntrial, ntime, nlatent))
-    # L = empty((ntrial, nlatent, ntime, rank))
-    w = zeros((ntrial, ntime, nlatent))
-    v = np.repeat(sigma[newaxis, ...], ntrial * ntime, axis=1).reshape((ntrial, ntime, nlatent))
+    # Initialize posterior and loading
+    # Use factor analysis if both missing initial values
+    # Use least squares if missing one of loading and latent
 
-    # initialize parameters
-    b = empty((1 + lag, nchannel), dtype=float)
-    for ichannel in range(nchannel):
-        b[:, ichannel] = lstsq(h.reshape((nchannel, -1, 1 + lag))[ichannel, :], y.reshape((-1, nchannel))[:, ichannel])[
-            0]
+    full_model = dict(y=y,
+                 channel=obs_types,
+                 dyn_ndim=dyn_ndim,
+                 history_filter=history_filter,
+                 h=h,
+                 sigma=sigma,
+                 omega=omega,
+                 rank=rank,
+                 path=path,
+                 options=kwargs)
 
-    noise = var(y.reshape((-1, nchannel)), axis=0, ddof=0)
-    objs = []
-    if kwargs['verbose']:
-        print('\nSequential fit')
-    for ilatent in range(nlatent):
+    initialize(full_model)
+
+    model_seq = []
+
+    for ilatent in range(dyn_ndim):
         print('\n{} latent(s)'.format(ilatent + 1))
-        if copy:
-            obj = dict(y=y, channel=channel, h=h, sigma=sigma[:ilatent + 1].copy(), omega=omega[:ilatent + 1].copy(),
-                       chol=chol[:ilatent + 1, :].copy(), mu=mu[:, :, :ilatent + 1].copy(),
-                       w=w[:, :, :ilatent + 1].copy(), v=v[:, :, :ilatent + 1].copy(), a=a[:ilatent + 1, :].copy(),
-                       b=b.copy(), noise=noise.copy())
-        else:
-            obj = dict(y=y, channel=channel, h=h, sigma=sigma[:ilatent + 1], omega=omega[:ilatent + 1],
-                       chol=chol[:ilatent + 1, :], mu=mu[:, :, :ilatent + 1], w=w[:, :, :ilatent + 1],
-                       v=v[:, :, :ilatent + 1], a=a[:ilatent + 1, :], b=b, noise=noise)
+        model = dict(y=y,
+                     channel=obs_types,
+                     dyn_ndim=dyn_ndim,
+                     history_filter=history_filter,
+                     h=h,
+                     sigma=full_model['sigma'][:ilatent + 1],
+                     omega=full_model['omega'][:ilatent + 1],
+                     chol=full_model['chol'][:ilatent + 1, :],
+                     mu=full_model['mu'][:, :, :ilatent + 1],
+                     w=full_model['w'][:, :, :ilatent + 1],
+                     v=full_model['v'][:, :, :ilatent + 1],
+                     a=full_model['a'][:ilatent + 1, :],
+                     b=full_model['b'],
+                     noise=full_model['noise'],
+                     rank=rank,
+                     path=path,
+                     options=kwargs)
+        vem(model)
+        model_seq.append(model)
 
-        kwargs['dmu_acc'] = zeros_like(mu[:, :, :ilatent + 1])
-        kwargs['da_acc'] = zeros_like(a[:ilatent + 1, :])
-        kwargs['db_acc'] = zeros_like(b)
-
-        objs.append(postprocess(infer(obj, **kwargs)))
-
-    return objs
+    return model_seq
 
 
 def leave_one_out(trial, model, **kwargs):
@@ -143,7 +139,7 @@ def leave_one_out(trial, model, **kwargs):
         kwargs['learn_param'] = False
         kwargs['learn_hyper'] = False
 
-        obj = infer(obj, **kwargs)
+        obj = vem(obj)
         eta = obj['mu'].reshape((-1, nlatent)) @ a[:, ichannel] + htest.reshape((ntime * ntrial, -1)) @ b[:, ichannel]
         if channel[ichannel] == 'spike':
             if kwargs['post_prediction']:
@@ -200,10 +196,10 @@ def cv(y, channel, sigma, omega, a0=None, mu0=None, lag=0, rank=500, **kwargs):
                       'yhat': yhat[itrial, :][newaxis, ...],
                       'mu0': mu0[itrial, :][newaxis, ...] if mu0 is not None else None}
         itrain = arange(ntrial) != itrial
-        model, _ = fit(y[itrain, :], channel, dyn_ndim=dyn_ndim, sigma=sigma, omega=omega, x=None, a0=a0,
+        model = fit(y[itrain, :], channel, dyn_ndim=dyn_ndim, sigma=sigma, omega=omega, z=None, a0=a0,
                        mu0=mu0[itrain, :] if mu0 is not None else None,
                        alpha=None, beta=None,
-                       lag=lag, rank=rank, **kwargs)
+                       history_filter=lag, rank=rank, **kwargs)
         kwargs['verbose'] = False
         kwargs['dmu_acc'] = zeros_like(model['mu'])
         kwargs['da_acc'] = zeros_like(model['a'])

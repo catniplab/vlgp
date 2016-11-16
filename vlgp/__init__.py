@@ -2,9 +2,6 @@ import sys
 import logging
 import warnings
 
-from .core import *
-from .selection import *
-
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -21,4 +18,8 @@ handler.setFormatter(formatter)
 logger.addHandler(handler)
 
 if sys.version_info[0] < 3 or sys.version_info[1] < 5:
-    warnings.warn('Python >= 3.5 is required.')
+    warnings.warn('Python 3.5 or later is required.')
+
+
+from .api import *
+# from .selection import *
