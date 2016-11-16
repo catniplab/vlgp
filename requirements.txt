@@ -1,3 +1,4 @@
+tqdm
 sklearn
 matplotlib>=1.5
 numpy>=1.10.4

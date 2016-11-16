@@ -1,21 +1,23 @@
-"""Module that does inference"""
-# TODO: remove adjust_hessian option
 import gc
-import pickle
+import time
 import warnings
+from functools import partial
 from pprint import pprint
 
 import numpy as np
-import time
 from numpy import identity, einsum, trace, empty, diag, newaxis, var, asarray, zeros, zeros_like, \
-    empty_like, sum, copyto, reshape
+    empty_like, sum
 from numpy.core.umath import sqrt, PINF, log
 from numpy.linalg import slogdet
-from scipy.linalg import lstsq, eigh, solve, norm, svd, LinAlgError
+from scipy.linalg import lstsq, eigh, solve, norm, LinAlgError
 from scipy.stats import spearmanr
 from sklearn.decomposition import factor_analysis
+from tqdm import tqdm
 
 from vlgp import hyper
+from vlgp import util
+from vlgp.callback import Saver, Progress
+from vlgp.experimental import hstep, estep, mstep, update_w, update_v, vem
 from .constant import *
 from .evaluation import timer
 from .math import ichol_gauss, subspace, sexp
@@ -69,8 +71,8 @@ def elbo(model_fit):
     llspike = sum(y[:, spike_dims] * eta[:, spike_dims] - r[:, spike_dims])  # verified by predict()
 
     # noinspection PyTypeChecker
-    lllfp = - 0.5 * sum(
-        ((y[:, lfp_dims] - eta[:, lfp_dims]) ** 2 + v @ (a[:, lfp_dims] ** 2)) / noise[lfp_dims] + log(noise[lfp_dims]))
+    lllfp = - 0.5 * sum(((y[:, lfp_dims] - eta[:, lfp_dims]) ** 2 + v @ (a[:, lfp_dims] ** 2)) / noise[lfp_dims] + log(
+        noise[lfp_dims] + log(2 * np.pi)))
 
     ll = llspike + lllfp
 
@@ -101,13 +103,13 @@ def elbo(model_fit):
     return lb, ll
 
 
-def infer(model_fit, options):
+def infer(model, options):
     """
     Inference procedure
 
     Parameters
     ----------
-    model_fit : dict
+    model : dict
     options : dict
 
     Returns
@@ -116,230 +118,234 @@ def infer(model_fit, options):
         model fit
     """
 
-    def estep():
-        """Optimize posterior (E step)"""
-        obs_ndim = model_fit['y'].shape[-1]
-        ntrial, nbin, dyn_ndim = model_fit['mu'].shape
-        prior = model_fit['chol']
-        rank = prior[0].shape[-1]
-        a = model_fit['a']
-        b = model_fit['b']
-        noise = model_fit['noise']
+    # def estep():
+    #     """Optimize posterior (E step)"""
+    #     obs_ndim = model['y'].shape[-1]
+    #     ntrial, nbin, dyn_ndim = model['mu'].shape
+    #     prior = model['chol']
+    #     rank = prior[0].shape[-1]
+    #     a = model['a']
+    #     b = model['b']
+    #     noise = model['noise']
+    #
+    #     eyer = identity(rank)
+    #     residual = empty((nbin, obs_ndim), dtype=float)
+    #     U = empty((nbin, obs_ndim), dtype=float)
+    #
+    #     for trial in range(ntrial):
+    #         # trial slices
+    #         y = model['y'][trial, :]
+    #         h = model['h'][:, trial, :, :]
+    #         mu = model['mu'][trial, :]
+    #         w = model['w'][trial, :]
+    #         v = model['v'][trial, :]
+    #
+    #         hb = einsum('ijk, ki -> ji', h, b)
+    #         eta = mu @ a + hb
+    #         r = sexp(eta + 0.5 * v @ (a ** 2))
+    #         for dyn_dim in range(dyn_ndim):
+    #             G = prior[dyn_dim]
+    #
+    #             # working residuals
+    #             # extensible to many other distributions
+    #             # very similar form to GLM
+    #             residual[:, spike_dims] = y[:, spike_dims] - r[:, spike_dims]
+    #             residual[:, lfp_dims] = (y[:, lfp_dims] - eta[:, lfp_dims]) / noise[lfp_dims]
+    #
+    #             # if adjust_hessian:
+    #             #     grad_mu_resid = (y[:, spike_dims] - r[:, spike_dims]) @ a[dyn_dim, spike_dims] + \
+    #             #                 ((y[:, lfp_dims] - eta[:, lfp_dims]) / noise[lfp_dims]) @ a[dyn_dim, lfp_dims]
+    #             #     grad_mu = grad_mu_resid - lstsq(G.T, lstsq(G, mu[:, dyn_dim])[0])[0]
+    #             #     dmu_acc[trial, :, dyn_dim] = accumulate(dmu_acc[trial, :, dyn_dim], grad_mu, decay)
+    #             #     wadj = w[:, dyn_dim] + eps + sqrt(dmu_acc[trial, :, dyn_dim])  # adjusted Hessian
+    #             # else:
+    #             wadj = w[:, [dyn_dim]]  # keep dimension
+    #             # wadj = wadj[:, None]
+    #             GtWG = G.T @ (wadj * G)
+    #
+    #             u = G @ (G.T @ (residual @ a[dyn_dim, :])) - mu[:, dyn_dim]
+    #             try:
+    #                 delta_mu = u - G @ ((wadj * G).T @ u) + \
+    #                            G @ (GtWG @ solve(eyer + GtWG, (wadj * G).T @ u, sym_pos=True))
+    #             except LinAlgError:
+    #                 delta_mu = 0
+    #
+    #             clip(delta_mu, options['dmu_bound'])
+    #             # if options['Adam']:
+    #             #     optimizer = options['optimizer_mu'][trial, dyn_dim]
+    #             #     delta_mu = optimizer.next_update(delta_mu)
+    #             mu[:, dyn_dim] += options['learning_rate'] * delta_mu
+    #
+    #         eta = mu @ a + hb
+    #         r = sexp(eta + 0.5 * v @ (a ** 2))
+    #         U[:, spike_dims] = r[:, spike_dims]
+    #         U[:, lfp_dims] = 1 / noise[lfp_dims]
+    #         copyto(w, U @ (a.T ** 2))
+    #         if options['method'] == 'VB':
+    #             for dyn_dim in range(dyn_ndim):
+    #                 G = prior[dyn_dim]
+    #                 GtWG = G.T @ (w[:, [dyn_dim]] * G)
+    #                 try:
+    #                     v[:, dyn_dim] = (G * (G - G @ GtWG + G @ (GtWG @ solve(eyer + GtWG, GtWG, sym_pos=True)))).sum(
+    #                         axis=1)
+    #                 except LinAlgError:
+    #                     warnings.warn("singular I + G'WG")
+    #
+    #     # center over all trials if not only infer posterior
+    #     if options['constrain_mu']:
+    #         shape = model['mu'].shape
+    #         mu_over_trials = model['mu'].reshape((-1, dyn_ndim))
+    #         mean_over_trials = mu_over_trials.mean(axis=0)
+    #         model['b'][0, :] += mean_over_trials @ model['a']  # compensate bias
+    #         mu_over_trials -= mean_over_trials
+    #         model['mu'] = mu_over_trials.reshape(shape)
 
-        eyer = identity(rank)
-        residual = empty((nbin, obs_ndim), dtype=float)
-        U = empty((nbin, obs_ndim), dtype=float)
+    # def mstep():
+    #     """Optimize loading and regression (M step)"""
+    #     y_ndim, ntrial, nbin, lag1 = model['h'].shape  # neuron, trial, time, lag
+    #     ntrial, nbin, dyn_ndim = model['mu'].shape
+    #     obs_types = model['channel']
+    #     a = model['a']
+    #     b = model['b']
+    #
+    #     y = model['y'].reshape((-1, y_ndim))  # concatenate trials
+    #     h = model['h'].reshape((y_ndim, -1, lag1))  # concatenate trials
+    #
+    #     mu = model['mu'].reshape((-1, dyn_ndim))
+    #     v = model['v'].reshape((-1, dyn_ndim))
+    #
+    #     eta = mu @ a + einsum('ijk, ki -> ji', h, b)  # (neuron, time, lag) x (lag, neuron) -> (time, neuron)
+    #     r = sexp(eta + 0.5 * v @ (a ** 2))
+    #     model['noise'] = var(y - eta, axis=0, ddof=0)  # MLE
+    #
+    #     for y_dim in range(y_ndim):
+    #         if obs_types[y_dim] == SPIKE:
+    #             # loading
+    #             mu_plus_v_times_a = mu + v * a[:, y_dim]
+    #             grad_a = mu.T @ y[:, y_dim] - mu_plus_v_times_a.T @ r[:, y_dim]
+    #
+    #             if options['hessian']:
+    #                 neghess_a = mu_plus_v_times_a.T @ (r[:, [y_dim]] * mu_plus_v_times_a)  # + wv
+    #                 neghess_a[np.diag_indices_from(neghess_a)] += r[:, y_dim] @ v
+    #
+    #                 try:
+    #                     delta_a = solve(neghess_a, grad_a, sym_pos=True)
+    #                 except LinAlgError:
+    #                     delta_a = grad_a
+    #                 except ValueError:
+    #                     delta_a = grad_a
+    #             else:
+    #                 delta_a = grad_a
+    #
+    #             clip(delta_a, options['da_bound'])
+    #             # if options['Adam']:
+    #             #     optimizer_a = options['optimizer_a'][obs_dim]
+    #             #     delta_a = optimizer_a.next_update(delta_a)
+    #             a[:, y_dim] += options['learning_rate'] * delta_a
+    #
+    #             # regression
+    #             grad_b = h[y_dim, :].T @ (y[:, y_dim] - r[:, y_dim])
+    #
+    #             if options['hessian']:
+    #                 neghess_b = h[y_dim, :].T @ (r[:, [y_dim]] * h[y_dim, :])
+    #                 # TODO: inactive neurons never fire across all trials which may cause zero Hessian
+    #                 # if adjust_hessian:
+    #                 # db_acc[:, obs_dim] = accumulate(db_acc[:, obs_dim], grad_b, decay)
+    #                 # neghess_b[np.diag_indices_from(neghess_b)] += eps + sqrt(db_acc[:, obs_dim])
+    #                 try:
+    #                     delta_b = solve(neghess_b, grad_b, sym_pos=True)
+    #                 except LinAlgError:
+    #                     # print('singular Hessian b')
+    #                     delta_b = grad_b
+    #             else:
+    #                 delta_b = grad_b
+    #
+    #             clip(delta_b, options['db_bound'])
+    #             # if options['Adam']:
+    #             #     optimizer_b = options['optimizer_b'][obs_dim]
+    #             #     delta_b = optimizer_b.next_update(delta_b)
+    #             b[:, y_dim] += options['learning_rate'] * delta_b
+    #         elif obs_types[y_dim] == LFP:
+    #             # a's least squares solution for Gaussian channel
+    #             # (m'm + diag(j'v))^-1 m'(y - Hb)
+    #             tmp = mu.T @ mu
+    #             tmp[np.diag_indices_from(tmp)] += sum(v, axis=0)
+    #             a[:, y_dim] = solve(tmp, mu.T @ (y[:, y_dim] - h[y_dim, :] @ b[:, y_dim]), sym_pos=True)
+    #
+    #             # b's least squares solution for Gaussian channel
+    #             # (H'H)^-1 H'(y - ma)
+    #             # b[:, y_dim] = solve(h[y_dim, :].T @ h[y_dim, :],
+    #             #                     h[y_dim, :].T @ (y[:, y_dim] - mu @ a[:, y_dim]), sym_pos=True)
+    #             b[:, y_dim] = solve(h[y_dim, :].T @ h[y_dim, :],
+    #                                 h[y_dim, :].T @ (y[:, y_dim] - mu @ a[:, y_dim]), sym_pos=True)
+    #             b[1:, y_dim] = 0
+    #         else:
+    #             pass
+    #
+    #     # normalize loading by latent and rescale latent
+    #     constrain_loading(model, method=options['constrain_a'], eps=options['eps'])
 
-        for trial in range(ntrial):
-            # trial slices
-            y = model_fit['y'][trial, :]
-            h = model_fit['h'][:, trial, :, :]
-            mu = model_fit['mu'][trial, :]
-            w = model_fit['w'][trial, :]
-            v = model_fit['v'][trial, :]
-
-            hb = einsum('ijk, ki -> ji', h, b)
-            eta = mu @ a + hb
-            r = sexp(eta + 0.5 * v @ (a ** 2))
-            for dyn_dim in range(dyn_ndim):
-                G = prior[dyn_dim]
-
-                # working residuals
-                # extensible to many other distributions
-                # very similar form to GLM
-                residual[:, spike_dims] = y[:, spike_dims] - r[:, spike_dims]
-                residual[:, lfp_dims] = (y[:, lfp_dims] - eta[:, lfp_dims]) / noise[lfp_dims]
-
-                # if adjust_hessian:
-                #     grad_mu_resid = (y[:, spike_dims] - r[:, spike_dims]) @ a[dyn_dim, spike_dims] + \
-                #                 ((y[:, lfp_dims] - eta[:, lfp_dims]) / noise[lfp_dims]) @ a[dyn_dim, lfp_dims]
-                #     grad_mu = grad_mu_resid - lstsq(G.T, lstsq(G, mu[:, dyn_dim])[0])[0]
-                #     dmu_acc[trial, :, dyn_dim] = accumulate(dmu_acc[trial, :, dyn_dim], grad_mu, decay)
-                #     wadj = w[:, dyn_dim] + eps + sqrt(dmu_acc[trial, :, dyn_dim])  # adjusted Hessian
-                # else:
-                wadj = w[:, [dyn_dim]]  # keep dimension
-                # wadj = wadj[:, None]
-                GtWG = G.T @ (wadj * G)
-
-                u = G @ (G.T @ (residual @ a[dyn_dim, :])) - mu[:, dyn_dim]
-                delta_mu = u - G @ ((wadj * G).T @ u) + \
-                           G @ (GtWG @ solve(eyer + GtWG, (wadj * G).T @ u, sym_pos=True))
-
-                clip(delta_mu, options['dmu_bound'])
-                # if options['Adam']:
-                #     optimizer = options['optimizer_mu'][trial, dyn_dim]
-                #     delta_mu = optimizer.next_update(delta_mu)
-                mu[:, dyn_dim] += options['learning_rate'] * delta_mu
-
-            eta = mu @ a + hb
-            r = sexp(eta + 0.5 * v @ (a ** 2))
-            U[:, spike_dims] = r[:, spike_dims]
-            U[:, lfp_dims] = 1 / noise[lfp_dims]
-            copyto(w, U @ (a.T ** 2))
-            if options['method'] == 'VB':
-                for dyn_dim in range(dyn_ndim):
-                    G = prior[dyn_dim]
-                    GtWG = G.T @ (w[:, [dyn_dim]] * G)
-                    try:
-                        v[:, dyn_dim] = (G * (G - G @ GtWG + G @ (GtWG @ solve(eyer + GtWG, GtWG, sym_pos=True)))).sum(
-                            axis=1)
-                    except LinAlgError:
-                        warnings.warn("singular I + G'WG")
-
-        # center over all trials if not only infer posterior
-        if options['constrain_mu']:
-            shape = model_fit['mu'].shape
-            mu_over_trials = model_fit['mu'].reshape((-1, dyn_ndim))
-            mean_over_trials = mu_over_trials.mean(axis=0)
-            model_fit['b'][0, :] += mean_over_trials @ model_fit['a']  # compensate bias
-            mu_over_trials -= mean_over_trials
-            model_fit['mu'] = mu_over_trials.reshape(shape)
-
-    def mstep():
-        """Optimize loading and regression (M step)"""
-        obs_ndim, ntrial, nbin, lag1 = model_fit['h'].shape  # neuron, trial, time, lag
-        ntrial, nbin, dyn_ndim = model_fit['mu'].shape
-        obs_types = model_fit['channel']
-        a = model_fit['a']
-        b = model_fit['b']
-
-        y = model_fit['y'].reshape((-1, obs_ndim))  # concatenate trials
-        h = model_fit['h'].reshape((obs_ndim, -1, lag1))  # concatenate trials
-
-        mu = model_fit['mu'].reshape((-1, dyn_ndim))
-        v = model_fit['v'].reshape((-1, dyn_ndim))
-
-        eta = mu @ a + einsum('ijk, ki -> ji', h, b)  # (neuron, time, lag) x (lag, neuron) -> (time, neuron)
-        r = sexp(eta + 0.5 * v @ (a ** 2))
-        model_fit['noise'] = var(y - eta, axis=0, ddof=0)  # MLE
-
-        for obs_dim in range(obs_ndim):
-            if obs_types[obs_dim] == SPIKE:
-                # loading
-                mu_plus_v_times_a = mu + v * a[:, obs_dim]
-                grad_a = mu.T @ y[:, obs_dim] - mu_plus_v_times_a.T @ r[:, obs_dim]
-
-                if options['hessian']:
-                    neghess_a = mu_plus_v_times_a.T @ (r[:, [obs_dim]] * mu_plus_v_times_a)  # + wv
-                    neghess_a[np.diag_indices_from(neghess_a)] += r[:, obs_dim] @ v
-
-                    # if adjust_hessian:
-                        # da_acc[:, obs_dim] = accumulate(da_acc[:, obs_dim], grad_a, decay)
-                        # neghess_a[np.diag_indices_from(neghess_a)] += eps + sqrt(da_acc[:, obs_dim])
-                    try:
-                        delta_a = solve(neghess_a, grad_a, sym_pos=True)
-                    except LinAlgError:
-                        # print('singular Hessian a')
-                        delta_a = grad_a
-                else:
-                    delta_a = grad_a
-
-                clip(delta_a, options['da_bound'])
-                # if options['Adam']:
-                #     optimizer_a = options['optimizer_a'][obs_dim]
-                #     delta_a = optimizer_a.next_update(delta_a)
-                a[:, obs_dim] += options['learning_rate'] * delta_a
-
-                # regression
-                grad_b = h[obs_dim, :].T @ (y[:, obs_dim] - r[:, obs_dim])
-
-                if options['hessian']:
-                    neghess_b = h[obs_dim, :].T @ (r[:, [obs_dim]] * h[obs_dim, :])
-                    # TODO: inactive neurons never fire across all trials which may cause zero Hessian
-                    # if adjust_hessian:
-                        # db_acc[:, obs_dim] = accumulate(db_acc[:, obs_dim], grad_b, decay)
-                        # neghess_b[np.diag_indices_from(neghess_b)] += eps + sqrt(db_acc[:, obs_dim])
-                    try:
-                        delta_b = solve(neghess_b, grad_b, sym_pos=True)
-                    except LinAlgError:
-                        # print('singular Hessian b')
-                        delta_b = grad_b
-                else:
-                    delta_b = grad_b
-
-                clip(delta_b, options['db_bound'])
-                # if options['Adam']:
-                #     optimizer_b = options['optimizer_b'][obs_dim]
-                #     delta_b = optimizer_b.next_update(delta_b)
-                b[:, obs_dim] += options['learning_rate'] * delta_b
-            elif obs_types[obs_dim] == LFP:
-                # a's least squares solution for Gaussian channel
-                # (m'm + diag(j'v))^-1 m'(y - Hb)
-                tmp = mu.T @ mu
-                tmp[np.diag_indices_from(tmp)] += sum(v, axis=0)
-                a[:, obs_dim] = solve(tmp, mu.T @ (y[:, obs_dim] - h[obs_dim, :] @ b[:, obs_dim]), sym_pos=True)
-
-                # b's least squares solution for Gaussian channel
-                # (H'H)^-1 H'(y - ma)
-                b[:, obs_dim] = solve(h[obs_dim, :].T @ h[obs_dim, :],
-                                      h[obs_dim, :].T @ (y[:, obs_dim] - mu @ a[:, obs_dim]), sym_pos=True)
-            else:
-                pass
-
-        # normalize loading by latent and rescale latent
-        constrain_loading(model_fit, method=options['constrain_a'], eps=options['eps'])
-
-    def hstep():
-        """Optimize hyperparameters"""
-        ntrial, nbin, dyn_ndim = model_fit['mu'].shape
-        prior = model_fit['chol']
-        rank = prior[0].shape[-1]
-        mu = model_fit['mu']
-        w = model_fit['w']
-        subsample_size = options['subsample_size']
-        if subsample_size is None:
-            subsample_size = nbin // 2
-        sigma = model_fit['sigma']
-        omega = model_fit['omega']
-        multiplier = 10.0
-        for dyn_dim in range(dyn_ndim):
-            # subsample = np.random.choice(nbin, subsample_size, replace=False)
-            subsample = hyper.subsample(nbin, subsample_size)
-            # subsample = np.arange(subsample_size) + np.random.randint(nbin - subsample_size)
-            init_p = (sigma[dyn_dim] ** 2, omega[dyn_dim], 1e-3)
-            bounds = ((1e-3, 1),
-                      # (max(1e-6, omega[dyn_dim] / multiplier), min(1.0, omega[dyn_dim] * multiplier)),
-                      (1e-6, 1e-2),
-                      (1e-4, 1e-2))
-            mask = np.array([0, 1, 0])
-            sigma2, omega[dyn_dim], _ = hyper.optim(options['hyper_obj'],
-                                                    subsample,
-                                                    mu[:, subsample, dyn_dim].T,
-                                                    w[:, subsample, dyn_dim].T,
-                                                    init_p,
-                                                    bounds,
-                                                    mask=mask,
-                                                    return_f=False)  # noise variance, small value to avoid oversmoothing
-            sigma[dyn_dim] = sqrt(sigma2)
-        copyto(good_sigma, sigma)
-        copyto(good_omega, omega)
-        model_fit['chol'] = np.array(
-            [ichol_gauss(nbin, omega[dyn_dim], rank) * sigma[dyn_dim] for dyn_dim in range(dyn_ndim)])
+    # def hstep():
+    #     """Optimize hyperparameters"""
+    #     ntrial, nbin, z_ndim = model['mu'].shape
+    #     prior = model['chol']
+    #     rank = prior[0].shape[-1]
+    #     mu = model['mu']
+    #     w = model['w']
+    #     subsample_size = options['subsample_size']
+    #     if subsample_size is None:
+    #         subsample_size = nbin // 2
+    #     sigma = model['sigma']
+    #     omega = model['omega']
+    #     for z_dim in range(z_ndim):
+    #         subsample = hyper.subsample(nbin, subsample_size)
+    #         init_p = (sigma[z_dim] ** 2, omega[z_dim], options['gp_noise'])
+    #         bounds = ((1e-3, 1),
+    #                   options['omega_bound'],
+    #                   (options['gp_noise'] / 2, options['gp_noise'] * 2))
+    #         mask = np.array([0, 1, 0])
+    #         sigma2, omega_new, _ = hyper.optim(options['hyper_obj'],
+    #                                               subsample,
+    #                                               mu[:, subsample, z_dim].T,
+    #                                               w[:, subsample, z_dim].T,
+    #                                               init_p,
+    #                                               bounds,
+    #                                               mask=mask,
+    #                                               return_f=False)  # noise variance, small value to avoid oversmoothing
+    #         if not np.any(np.isclose(omega_new, options['omega_bound'])):
+    #             # unattainable bounds
+    #             omega[z_dim] = omega_new
+    #         sigma[z_dim] = sqrt(sigma2)
+    #     copyto(good_sigma, sigma)
+    #     copyto(good_omega, omega)
+    #     model['chol'] = np.array(
+    #         [ichol_gauss(nbin, omega[z_dim], rank) * sigma[z_dim] for z_dim in range(z_ndim)])
 
     #################
     # function body #
     #################
+
     # truth
-    x = model_fit.get('x')
-    alpha = model_fit.get('alpha')
+    x = model.get('x')
+    alpha = model.get('alpha')
 
     # options
-    eps = options['eps']
+    # eps = options['eps']
     tol = options['tol']
 
-    spike_dims = model_fit['channel'] == SPIKE
-    lfp_dims = model_fit['channel'] == LFP
+    # spike_dims = model['channel'] == SPIKE
+    # lfp_dims = model['channel'] == LFP
 
     ################################
     # old values
-    good_mu = model_fit['mu'].copy()
-    good_w = model_fit['w'].copy()
-    good_v = model_fit['v'].copy()
-    good_a = model_fit['a'].copy()
-    good_b = model_fit['b'].copy()
-    good_noise = model_fit['noise'].copy()
-    good_sigma = model_fit['sigma'].copy()
-    good_omega = model_fit['omega'].copy()
+    # good_mu = model['mu'].copy()
+    # good_w = model['w'].copy()
+    # good_v = model['v'].copy()
+    # good_a = model['a'].copy()
+    # good_b = model['b'].copy()
+    # good_noise = model['noise'].copy()
+    # good_sigma = model['sigma'].copy()
+    # good_omega = model['omega'].copy()
 
     stat = empty(options['niter'], dtype=object)
     lb = zeros(options['niter'], dtype=float)
@@ -347,18 +353,18 @@ def infer(model_fit, options):
     elapsed = zeros((options['niter'], 3), dtype=float)
     loading_angle = zeros(options['niter'], dtype=float)
     latent_angle = zeros(options['niter'], dtype=float)
-    latent_corr = zeros((options['niter'], model_fit['mu'].shape[-1]), dtype=float)
+    latent_corr = zeros((options['niter'], model['mu'].shape[-1]), dtype=float)
 
     # iteration 0
     # lb[0], ll[0] = elbo(obj)
     lb[0], ll[0] = np.finfo(float).min, np.finfo(float).min
     if alpha is not None:
-        loading_angle[0] = subspace(alpha.T, model_fit['a'].T)
+        loading_angle[0] = subspace(alpha.T, model['a'].T)
     if x is not None:
         rotated = empty_like(x, dtype=float)
         # rotate trial by trial
         for itrial in range(x.shape[0]):
-            rotated[itrial, :] = rotate(add_constant(model_fit['mu'][itrial, :]), x[itrial, :])
+            rotated[itrial, :] = rotate(add_constant(model['mu'][itrial, :]), x[itrial, :])
         latent_angle[0] = subspace(rotated.reshape((-1, x.shape[-1])), x.reshape((-1, x.shape[-1])))
         rho, _ = spearmanr(rotated.reshape((-1, x.shape[-1])), x.reshape((-1, x.shape[-1])))
         latent_corr[0] = rho[np.arange(x.shape[-1]), np.arange(x.shape[-1]) + x.shape[-1]]
@@ -377,127 +383,133 @@ def infer(model_fit, options):
     # iterative algorithm #
     #######################
     gc.disable()  # disable gabbage collection during the iterative procedure
-    with timer() as algo_elapsed:
-        while not stop and it < options['niter']:
-            with timer() as iter_elapsed:
-                ##########
-                # E step #
-                ##########
-                with timer() as estep_elapsed:
-                    if options['learn_post']:
-                        for _ in range(options['e_niter']):
-                            estep()
+    try:
+        with tqdm(total=options['niter'] - 1) as pbar:
+            while not stop and it < options['niter']:
+                with timer() as iter_elapsed:
+                    ##########
+                    # E step #
+                    ##########
+                    with timer() as estep_elapsed:
+                        estep(model)
 
-                ##########
-                # M step #
-                ##########
-                with timer() as mstep_elapsed:
-                    if options['learn_param']:
-                        for _ in range(options['m_niter']):
-                            mstep()
+                    ##########
+                    # M step #
+                    ##########
+                    with timer() as mstep_elapsed:
+                        mstep(model)
 
-                ###################
-                # hyperparam step #
-                ###################
-                with timer() as hstep_elapsed:
-                    if it % options['nhyper'] == 0 and options['learn_hyper']:
-                        hstep()
+                    ###################
+                    # hyperparam step #
+                    ###################
+                    with timer() as hstep_elapsed:
+                        hstep(model)
+                # anneal learning rate
+                # options['learning_rate'] = 1 / (1 + it / options['niter'])
 
-            # anneal learning rate
-            # options['learning_rate'] = 1 / (1 + it / options['niter'])
+                # Calculate angle between latent subspace if true latent is given.
+                if x is not None:
+                    for itrial in range(x.shape[0]):
+                        rotated[itrial, :] = rotate(add_constant(model['mu'][itrial, :]), x[itrial, :])
+                    latent_angle[it] = subspace(rotated.reshape((-1, x.shape[-1])), x.reshape((-1, x.shape[-1])))
+                    rho, _ = spearmanr(rotated.reshape((-1, x.shape[-1])), x.reshape((-1, x.shape[-1])))
+                    latent_corr[it] = rho[np.arange(x.shape[-1]), np.arange(x.shape[-1]) + x.shape[-1]]
 
-            # Calculate angle between latent subspace if true latent is given.
-            if x is not None:
-                for itrial in range(x.shape[0]):
-                    rotated[itrial, :] = rotate(add_constant(model_fit['mu'][itrial, :]), x[itrial, :])
-                latent_angle[it] = subspace(rotated.reshape((-1, x.shape[-1])), x.reshape((-1, x.shape[-1])))
-                rho, _ = spearmanr(rotated.reshape((-1, x.shape[-1])), x.reshape((-1, x.shape[-1])))
-                latent_corr[it] = rho[np.arange(x.shape[-1]), np.arange(x.shape[-1]) + x.shape[-1]]
+                # Calculate angle between loading subspace if true loading is given.
+                if alpha is not None:
+                    loading_angle[it] = subspace(alpha.T, model['a'].T)
 
-            # Calculate angle between loading subspace if true loading is given.
-            if alpha is not None:
-                loading_angle[it] = subspace(alpha.T, model_fit['a'].T)
+                #####################
+                # convergence check #
+                #####################
+                # lb[it], ll[it] = 0, 0
+                # converged = norm(model['mu'].ravel() - good_mu.ravel()) <= (
+                #     eps + tol * norm(good_mu.ravel())) and norm(
+                #     model['a'].ravel() - good_a.ravel()) <= (eps + tol * norm(good_a.ravel())) and norm(
+                #     model['b'].ravel() - good_b.ravel()) <= (eps + tol * norm(good_b.ravel()))
+                #
+                # copyto(good_mu, model['mu'])
+                # copyto(good_w, model['w'])
+                # copyto(good_v, model['v'])
+                # copyto(good_a, model['a'])
+                # copyto(good_b, model['b'])
+                # copyto(good_noise, model['noise'])
+                mu = model['mu']
+                dmu = model['dmu']
+                a = model['a']
+                da = model['da']
+                b = model['b']
+                db = model['db']
 
-            #####################
-            # convergence check #
-            #####################
-            lb[it], ll[it] = 0, 0
-            converged = norm(model_fit['mu'].ravel() - good_mu.ravel()) <= (eps + tol * norm(good_mu.ravel())) and norm(
-                model_fit['a'].ravel() - good_a.ravel()) <= (eps + tol * norm(good_a.ravel())) and norm(
-                model_fit['b'].ravel() - good_b.ravel()) <= (eps + tol * norm(good_b.ravel()))
+                converged = norm(dmu) < tol * norm(mu) and norm(da) < tol * norm(a) and norm(db) < tol * norm(b)
+                stop = converged
 
-            copyto(good_mu, model_fit['mu'])
-            copyto(good_w, model_fit['w'])
-            copyto(good_v, model_fit['v'])
-            copyto(good_a, model_fit['a'])
-            copyto(good_b, model_fit['b'])
-            copyto(good_noise, model_fit['noise'])
+                elapsed[it, 0] = estep_elapsed()
+                elapsed[it, 1] = mstep_elapsed()
+                elapsed[it, 2] = iter_elapsed()
 
-            stop = converged
+                ###################################
+                # statistics of current iteration #
+                ###################################
 
-            elapsed[it, 0] = estep_elapsed()
-            elapsed[it, 1] = mstep_elapsed()
-            elapsed[it, 2] = iter_elapsed()
+                stat[it] = dict()
+                stat[it]['E-step elapsed'] = elapsed[it, 0]
+                stat[it]['M-step elapsed'] = elapsed[it, 1]
+                stat[it]['H-step elapsed'] = hstep_elapsed()
+                stat[it]['Total elapsed'] = elapsed[it, 2]
+                # stat[it]['ELBO'] = lb[it]
+                # stat[it]['LL'] = ll[it]
+                stat[it]['sigma'] = model['sigma']
+                stat[it]['omega'] = model['oemga']
 
-            ###################################
-            # statistics of current iteration #
-            ###################################
+                if options['verbose']:  # and it == 2 ** logging_counter:
+                    print('\n[{}]'.format(it))
+                    pprint(stat[it])
+                    logging_counter += 1
 
-            stat[it] = dict()
-            stat[it]['E-step elapsed'] = elapsed[it, 0]
-            stat[it]['M-step elapsed'] = elapsed[it, 1]
-            stat[it]['H-step elapsed'] = hstep_elapsed()
-            stat[it]['Total elapsed'] = elapsed[it, 2]
-            # stat[it]['ELBO'] = lb[it]
-            # stat[it]['LL'] = ll[it]
-            stat[it]['sigma'] = good_sigma
-            stat[it]['omega'] = good_omega
+                it += 1
+                pbar.update(1)
 
-            if options['verbose']: # and it == 2 ** logging_counter:
-                print('\n[{}]'.format(it))
-                pprint(stat[it])
-                # for k in sorted(stat[it]):
-                #     pp.print('{}: {}'.format(k, stat[it][k]))
-                logging_counter += 1
+                model['it'] = it
+                model['ELBO'] = lb[:it]
+                model['Elapsed'] = elapsed[:it, :]
+                model['LoadingAngle'] = loading_angle[:it]
+                model['LatentAngle'] = latent_angle[:it]
+                model['RankCorr'] = latent_corr[:it]
+                model['LL'] = ll[:it]
+                model['stat'] = stat
 
-            it += 1
-
-            model_fit['it'] = it
-            model_fit['ELBO'] = lb[:it]
-            model_fit['Elapsed'] = elapsed[:it, :]
-            model_fit['LoadingAngle'] = loading_angle[:it]
-            model_fit['LatentAngle'] = latent_angle[:it]
-            model_fit['RankCorr'] = latent_corr[:it]
-            model_fit['LL'] = ll[:it]
-            model_fit['stat'] = stat
-
-            now = time.perf_counter()
-            if now - last_saving_time > options['saving_interval']:
-                print('saving')
-                save(model_fit, 'tmp_fit.h5')
-                with open('tmp_fit.pickle', 'wb') as fout:
-                    pickle.dump(options, fout)
-                last_saving_time = now
-                print('saved')
+                now = time.perf_counter()
+                if now - last_saving_time > options['saving_interval']:
+                    print('Saving')
+                    save(model, model['path'])
+                    last_saving_time = now
+                    print('Saved')
+    except KeyboardInterrupt:
+        print('Quit')
+    finally:
+        print('Saving')
+        save(model, model['path'])
+        print('Saved')
 
     ##############################
     # end of iterative procedure #
     ##############################
     gc.enable()  # enable gabbage collection
 
-    lb[it - 1], ll[it - 1] = elbo(model_fit)
+    lb[it - 1], ll[it - 1] = elbo(model)
     if options['verbose']:
         print('\nInference ends')
-        print('{} iterations, ELBO: {:.4f}, elapsed: {:.3f}s\n'.format(it - 1, lb[it - 1], algo_elapsed()))
+        print('{} iterations, ELBO: {:.4f}\n'.format(it - 1, lb[it - 1]))
 
-    # model_fit['ELBO'] = lb[:it]
-    # model_fit['Elapsed'] = elapsed[:it, :]
-    # model_fit['LoadingAngle'] = loading_angle[:it]
-    # model_fit['LatentAngle'] = latent_angle[:it]
-    # model_fit['RankCorr'] = latent_corr[:it]
-    # model_fit['LL'] = ll[:it]
-    # model_fit['stat'] = stat
-    return model_fit
+    # model['ELBO'] = lb[:it]
+    # model['Elapsed'] = elapsed[:it, :]
+    # model['LoadingAngle'] = loading_angle[:it]
+    # model['LatentAngle'] = latent_angle[:it]
+    # model['RankCorr'] = latent_corr[:it]
+    # model['LL'] = ll[:it]
+    # model['stat'] = stat
+    return model
 
 
 def check_obs_type(types):
@@ -527,9 +539,8 @@ def fit(y,
         sigma=None,
         omega=None,
         rank=None,
-        eps=1e-8,
-        tol=1e-5,
-        evaluators=None,
+        path='vlgpfit',
+        callbacks=None,
         **kwargs):
     """
     vLGP main function
@@ -564,8 +575,8 @@ def fit(y,
         a small positive number
     tol : double, optional
         numerical tolerance
-    evaluators : list optional
-        list of evaluators
+    path : string, optional
+        path to the save file
     kwargs : dict, optional
         algorithm options. See fill_options()
 
@@ -575,9 +586,10 @@ def fit(y,
         fit
     """
     options = check_options(kwargs)
-    options['eps'] = eps
-    options['tol'] = tol
-    options['niter'] += 1
+
+    callbacks = callbacks or []
+    # tol = options['tol']
+    eps = options['eps']
 
     y = asarray(y)
     y = y.astype(float)
@@ -601,8 +613,11 @@ def fit(y,
     # Use least squares if missing one of loading and latent
     if a is None and mu is None:
         fa = factor_analysis.FactorAnalysis(n_components=dyn_ndim, svd_method='lapack')
-        mu = fa.fit_transform(y.reshape((-1, obs_ndim)))
+        y_ = y.reshape((-1, obs_ndim))
+        y0 = y[0, :]
+        fa.fit(y0)
         a = fa.components_
+        mu = fa.transform(y_)
 
         # constrain loading and center latent
         scale = norm(a, ord=inf, axis=1, keepdims=True) + eps
@@ -622,9 +637,11 @@ def fit(y,
             a = lstsq(mu.reshape((-1, dyn_ndim)), y.reshape((-1, obs_ndim)))[0]
 
     # initialize regression
+    spike_dims = obs_types == SPIKE
+
     if b is None:
         b = empty((1 + lag, obs_ndim), dtype=float)
-        for obs_dim in range(obs_ndim):
+        for obs_dim in np.arange(obs_ndim)[spike_dims]:
             b[:, obs_dim] = \
                 lstsq(h.reshape((obs_ndim, -1, 1 + lag))[obs_dim, :], y.reshape((-1, obs_ndim))[:, obs_dim])[0]
 
@@ -650,8 +667,8 @@ def fit(y,
             fval_opt = np.zeros_like(omega_grid)
 
             bounds = ((1e-3, 1.0),
-                      (1e-6, 1),
-                      (1e-4, 1e-2))
+                      options['omega_bound'],
+                      (options['gp_noise'] / 2, options['gp_noise'] * 2))
             mask = np.array([0, 1, 0])  # only optimize omega
             for i, o in enumerate(omega_grid):
                 init_p = (1 - options['gp_noise'], o, options['gp_noise'])
@@ -677,41 +694,41 @@ def fit(y,
     w = zeros_like(mu, dtype=float)
     v = zeros_like(mu, dtype=float)
 
-    model_fit = dict(y=y,
-                     channel=obs_types,
-                     h=h,
-                     sigma=sigma,
-                     omega=omega,
-                     chol=prior,
-                     mu=mu,
-                     w=w,
-                     v=v,
-                     L=empty((ntrial, dyn_ndim, nbin, rank)),
-                     a=a,
-                     b=b,
-                     noise=noise,
-                     x=x,
-                     alpha=alpha,
-                     beta=beta)
+    model = dict(y=y,
+                 channel=obs_types,
+                 dyn_ndim=dyn_ndim,
+                 h=h,
+                 sigma=sigma,
+                 omega=omega,
+                 chol=prior,
+                 mu=mu,
+                 w=w,
+                 v=v,
+                 L=empty((ntrial, dyn_ndim, nbin, rank)),
+                 a=a,
+                 b=b,
+                 noise=noise,
+                 x=x,
+                 alpha=alpha,
+                 beta=beta,
+                 path=path,
+                 options=options)
 
-    update_w(model_fit)
+    update_w(model)
     if options['method'] == 'VB':
-        update_v(model_fit)
+        update_v(model)
 
-    # if options['Adam']:
-    #     options['optimizer_mu'] = empty((ntrial, dyn_ndim), dtype=object)
-    #     options['optimizer_a'] = empty(obs_ndim, dtype=object)
-    #     options['optimizer_b'] = empty(obs_ndim, dtype=object)
-    #
-    #     for each in np.nditer(options['optimizer_mu'], flags=['refs_ok'], op_flags=['readwrite']):
-    #         each[...] = AdamOptimizer(nbin, options['learning_rate'])
-    #     for each in np.nditer(options['optimizer_a'], flags=['refs_ok'], op_flags=['readwrite']):
-    #         each[...] = AdamOptimizer(dyn_ndim, options['learning_rate'])
-    #     for each in np.nditer(options['optimizer_b'], flags=['refs_ok'], op_flags=['readwrite']):
-    #         each[...] = AdamOptimizer(b.shape[0], options['learning_rate'])
+    saver = Saver(model)
+    pbar = Progress(model)
 
-    inference = postprocess(infer(model_fit, options))
-    return inference, options
+    callbacks.extend([pbar, saver])
+    try:
+        vem(model, callbacks)
+    finally:
+        saver.save()
+        # util.save(model, model['path'])
+
+    return model
 
 
 def check_options(kwargs):
@@ -735,13 +752,13 @@ def check_options(kwargs):
     return options
 
 
-def postprocess(model_fit):
+def postprocess(model):
     """
     Remove intermediate and empty variables, and compute decomposition of posterior covariance.
 
     Parameters
     ----------
-    model_fit : dict
+    model : dict
         raw fit
 
     Returns
@@ -749,10 +766,10 @@ def postprocess(model_fit):
     dict
         fit that contains prior, posterior, loading and regression
     """
-    ntrial, nbin, dyn_ndim = model_fit['mu'].shape
-    prior = model_fit['chol']
+    ntrial, nbin, dyn_ndim = model['mu'].shape
+    prior = model['chol']
     rank = prior[0].shape[-1]
-    w = model_fit['w']
+    w = model['w']
     eyer = identity(rank)
     L = empty((ntrial, dyn_ndim, nbin, rank))
     for trial in range(ntrial):
@@ -767,14 +784,14 @@ def postprocess(model_fit):
             eigval, eigvec = eigh(tmp)
             eigval.clip(0, PINF, out=eigval)  # remove negative eigenvalues
             L[trial, dyn_dim, :] = G @ (eigvec @ diag(sqrt(eigval)))
-    model_fit['L'] = L
-    keys = list(model_fit.keys())
+    model['L'] = L
+    keys = list(model.keys())
     for key in keys:
-        if model_fit.get(key, None) is None:
-            model_fit.pop(key, None)
-    model_fit.pop('h', None)
-    model_fit.pop('stat', None)
-    return model_fit
+        if model.get(key, None) is None:
+            model.pop(key, None)
+    model.pop('h', None)
+    model.pop('stat', None)
+    return model
 
 
 def predict(x, a, b, y=None, v=None):
@@ -827,62 +844,61 @@ def clip(delta, lbound, ubound=None):
         assert ubound > lbound
     np.clip(delta, lbound, ubound, out=delta)
 
-
-def constrain_loading(model_fit, method=inf, eps=1e-8):
-    mu = model_fit['mu']
-    shape_mu = mu.shape
-    mu = mu.reshape((-1, mu.shape[-1]))
-    a = model_fit['a']
-    if method == 'none':
-        return
-    if method == 'svd':
-        # SVD is not good as above
-        # noinspection PyTupleAssignmentBalance
-        U, s, Vh = svd(a, full_matrices=False)
-        model_fit['mu'] = np.reshape(mu @ a @ Vh.T, shape_mu)
-        model_fit['a'] = Vh
-    else:
-        s = norm(a, ord=method, axis=1, keepdims=True) + eps
-        a /= s
-        mu *= s.squeeze()  # compensate latent
-        model_fit['mu'] = mu.reshape(shape_mu)
-
-
-def update_w(model_fit):
-    obs_ndim, ntrial, nbin, lag1 = model_fit['h'].shape
-    dyn_ndim = model_fit['mu'].shape[-1]
-
-    spike_dims = model_fit['channel'] == SPIKE
-    lfp_dims = model_fit['channel'] == LFP
-
-    flat_mu = model_fit['mu'].reshape((-1, dyn_ndim))
-    flat_h = model_fit['h'].reshape((obs_ndim, -1, lag1))  # concatenate trials
-    flat_v = model_fit['v'].reshape((-1, dyn_ndim))
-    shape_w = model_fit['w'].shape
-
-    eta = flat_mu @ model_fit['a'] + einsum('ijk, ki -> ji', flat_h,
-                                            model_fit['b'])  # (neuron, time, lag) x (lag, neuron) -> (time, neuron)
-    r = sexp(eta + 0.5 * flat_v @ (model_fit['a'] ** 2))
-    U = empty_like(r)
-
-    U[:, spike_dims] = r[:, spike_dims]
-    U[:, lfp_dims] = 1 / model_fit['noise'][lfp_dims]
-    model_fit['w'] = reshape(U @ (model_fit['a'].T ** 2), shape_w)
-
-
-def update_v(model_fit):
-    prior = model_fit['chol']
-    rank = prior[0].shape[-1]
-    eyer = identity(rank)
-    ntrial, nbin, dyn_ndim = model_fit['mu'].shape
-
-    for trial in range(ntrial):
-        w = model_fit['w'][trial, :]
-        for dyn_dim in range(dyn_ndim):
-            G = prior[dyn_dim]
-            GtWG = G.T @ (w[:, [dyn_dim]] * G)
-            try:
-                model_fit['v'][trial, :, dyn_dim] = (
-                    G * (G - G @ GtWG + G @ (GtWG @ solve(eyer + GtWG, GtWG, sym_pos=True)))).sum(axis=1)
-            except LinAlgError:
-                warnings.warn("singular I + G'WG")
+# def constrain_loading(model_fit, method=inf, eps=1e-8):
+#     mu = model_fit['mu']
+#     shape_mu = mu.shape
+#     mu = mu.reshape((-1, mu.shape[-1]))
+#     a = model_fit['a']
+#     if method == 'none':
+#         return
+#     if method == 'svd':
+#         # SVD is not good as above
+#         # noinspection PyTupleAssignmentBalance
+#         U, s, Vh = svd(a, full_matrices=False)
+#         model_fit['mu'] = np.reshape(mu @ a @ Vh.T, shape_mu)
+#         model_fit['a'] = Vh
+#     else:
+#         s = norm(a, ord=method, axis=1, keepdims=True) + eps
+#         a /= s
+#         mu *= s.squeeze()  # compensate latent
+#         model_fit['mu'] = mu.reshape(shape_mu)
+#
+#
+# def update_w(model_fit):
+#     obs_ndim, ntrial, nbin, lag1 = model_fit['h'].shape
+#     dyn_ndim = model_fit['mu'].shape[-1]
+#
+#     spike_dims = model_fit['channel'] == SPIKE
+#     lfp_dims = model_fit['channel'] == LFP
+#
+#     flat_mu = model_fit['mu'].reshape((-1, dyn_ndim))
+#     flat_h = model_fit['h'].reshape((obs_ndim, -1, lag1))  # concatenate trials
+#     flat_v = model_fit['v'].reshape((-1, dyn_ndim))
+#     shape_w = model_fit['w'].shape
+#
+#     eta = flat_mu @ model_fit['a'] + einsum('ijk, ki -> ji', flat_h,
+#                                             model_fit['b'])  # (neuron, time, lag) x (lag, neuron) -> (time, neuron)
+#     r = sexp(eta + 0.5 * flat_v @ (model_fit['a'] ** 2))
+#     U = empty_like(r)
+#
+#     U[:, spike_dims] = r[:, spike_dims]
+#     U[:, lfp_dims] = 1 / model_fit['noise'][lfp_dims]
+#     model_fit['w'] = reshape(U @ (model_fit['a'].T ** 2), shape_w)
+#
+#
+# def update_v(model_fit):
+#     prior = model_fit['chol']
+#     rank = prior[0].shape[-1]
+#     eyer = identity(rank)
+#     ntrial, nbin, dyn_ndim = model_fit['mu'].shape
+#
+#     for trial in range(ntrial):
+#         w = model_fit['w'][trial, :]
+#         for dyn_dim in range(dyn_ndim):
+#             G = prior[dyn_dim]
+#             GtWG = G.T @ (w[:, [dyn_dim]] * G)
+#             try:
+#                 model_fit['v'][trial, :, dyn_dim] = (
+#                     G * (G - G @ GtWG + G @ (GtWG @ solve(eyer + GtWG, GtWG, sym_pos=True)))).sum(axis=1)
+#             except LinAlgError:
+#                 warnings.warn("singular I + G'WG")

@@ -10,7 +10,7 @@ UNFIRED = -1  # neuron that never fired
 
 # default options
 DEFAULT_OPTIONS = dict(verbose=False,  # output detail
-                       niter=200,  # max iteration
+                       niter=100,  # max iteration
                        learn_post=True,  # optimize posterior (E-step)
                        learn_param=True,  # optimize loading and regression (M-step)
                        learn_hyper=True,  # opitmize hyperparameters (H-step)
@@ -26,18 +26,24 @@ DEFAULT_OPTIONS = dict(verbose=False,  # output detail
                        subsample_size=None,  # subsample size of H-step
                        hyper_obj='ELBO',  # ELBO or GP, objective function of H-step
                        Adam=False,  # Adam optimizer
-                       gp_noise=1e-3,  # instaneous noise variance
+                       gp_noise=1e-4,  # instaneous noise variance
                        constrain_mu=True,  # demean
                        constrain_a=inf,  # normalize loading, same argument as numpy/scipy norm or 'svd'
                        dmu_bound=1.0,  # clip the updates
                        da_bound=1.0,
                        db_bound=1.0,
-                       saving_interval=3600  # save every 1 hour
+                       omega_bound=(1e-5, 1e-3),
+                       saving_interval=3600 * 2,  # save every 2 hour
+                       tol=1e-4,
+                       eps=1e-8
                        )
 
 MODEL_FIELDS = []
 
 PREREQUISITE_FIELDS = []
 
-VB = 'VB'
-MAP = 'MAP'
+SAVE_FIELDS = ['y', 'x', 'channel',
+               'dyn_ndim', 'z_ndim', 'history filter',
+               'mu', 'a', 'b', 'v', 'w',
+               'options', 'stats',
+               'z', 'alpha', 'beta']
