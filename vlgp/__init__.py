@@ -6,16 +6,20 @@ import warnings
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
-# create a file handler
-handler = logging.FileHandler('vlgp.log')
-handler.setLevel(logging.INFO)
-
 # create a logging format
 formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-handler.setFormatter(formatter)
+
+# create a file file_handler
+file_handler = logging.FileHandler('vlgp.log')
+file_handler.setLevel(logging.INFO)
+file_handler.setFormatter(formatter)
+logger.addHandler(file_handler)
 
 # add the handlers to the logger
-logger.addHandler(handler)
+
+stdout_handler = logging.StreamHandler(sys.stdout)
+stdout_handler.setLevel(logging.INFO)
+logger.addHandler(stdout_handler)
 
 logger.info('Module loaded')
 
