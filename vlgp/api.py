@@ -75,7 +75,7 @@ def fit(y,
     if y.ndim < 3:
         y = y[newaxis, ...]
 
-    obs_types = check_y_type(obs_types)
+    # obs_types = check_y_type(obs_types)
 
     ntrial, nbin, obs_ndim = y.shape
 
@@ -107,6 +107,8 @@ def fit(y,
                  options=kwargs)
 
     initialize(model)
+
+    # print(model['options'])
 
     saver = Saver()
     pbar = Progressor(model['options']['niter'])

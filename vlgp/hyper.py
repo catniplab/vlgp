@@ -2,7 +2,6 @@
 Hyperparameter optimization
 """
 import logging
-import warnings
 
 import numpy as np
 from numpy import exp, log

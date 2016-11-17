@@ -17,7 +17,6 @@ from .math import ichol_gauss, sexp
 from .name import *
 from .util import add_constant, lagmat
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -281,13 +280,13 @@ def estep(model: dict):
 
                 u = G @ (G.T @ (residual @ a[z_dim, :])) - mu[trial, :, z_dim]
                 try:
-                    delta_mu = u - G @ ((wadj * G).T @ u) + \
-                               G @ (GtWG @ solve(Ir + GtWG, (wadj * G).T @ u, sym_pos=True))
+                    block = solve(Ir + GtWG, (wadj * G).T @ u, sym_pos=True)
+                    delta_mu = u - G @ ((wadj * G).T @ u) + G @ (GtWG @ block)
+                    clip(delta_mu, options['dmu_bound'])
                 except Exception as e:
                     logger.exception(repr(e), exc_info=True)
-                    delta_mu = np.array([0])
+                    delta_mu = 0
 
-                clip(delta_mu, options['dmu_bound'])
                 dmu[trial, :, z_dim] = delta_mu
                 mu[trial, :, z_dim] += delta_mu
 
@@ -301,9 +300,8 @@ def estep(model: dict):
                     G = prior[z_dim]
                     GtWG = G.T @ (w[trial, ...][:, [z_dim]] * G)
                     try:
-                        v[trial, :, z_dim] = (
-                            G * (G - G @ GtWG + G @ (GtWG @ solve(Ir + GtWG, GtWG, sym_pos=True)))).sum(
-                            axis=1)
+                        block = solve(Ir + GtWG, GtWG, sym_pos=True)
+                        v[trial, :, z_dim] = (G * (G - G @ GtWG + G @ (GtWG @ block))).sum(axis=1)
                     except Exception as e:
                         logger.exception(repr(e), exc_info=True)
 
@@ -435,9 +433,8 @@ def hstep(model: dict):
                                             hparam_init,
                                             bounds,
                                             mask=mask,
-                                            return_f=False)  # noise variance, small value to avoid oversmoothing
+                                            return_f=False)
         if not np.any(np.isclose(omega_new, options['omega_bound'])):
-            # unattainable bounds
             omega[z_dim] = omega_new
         sigma[z_dim] = sqrt(sigmasq)
     model[PRIORICHOL] = np.array(
@@ -521,6 +518,8 @@ def vem(model, callbacks=None):
 
 def check_y_type(types):
     types = asarray(types)
+    if np.issubdtype(types.dtype, np.integer):
+        return types
     coded_types = np.empty_like(types, dtype=int)
     for i, type_ in enumerate(types):
         if type_ == 'spike':

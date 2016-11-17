@@ -15,11 +15,9 @@ file_handler.setLevel(logging.INFO)
 file_handler.setFormatter(formatter)
 logger.addHandler(file_handler)
 
-# add the handlers to the logger
-
-stdout_handler = logging.StreamHandler(sys.stdout)
-stdout_handler.setLevel(logging.INFO)
-logger.addHandler(stdout_handler)
+# stdout_handler = logging.StreamHandler(sys.stdout)
+# stdout_handler.setLevel(logging.INFO)
+# logger.addHandler(stdout_handler)
 
 logger.info('Module loaded')
 
