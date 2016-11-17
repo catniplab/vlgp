@@ -17,7 +17,10 @@ handler.setFormatter(formatter)
 # add the handlers to the logger
 logger.addHandler(handler)
 
+logger.info('Module loaded')
+
 if sys.version_info[0] < 3 or sys.version_info[1] < 5:
+    logger.warning(str(sys.version_info))
     warnings.warn('Python 3.5 or later is required.')
 
 

@@ -1,4 +1,5 @@
 import gc
+import logging
 import warnings
 
 import numpy as np
@@ -15,6 +16,9 @@ from .evaluation import timer
 from .math import ichol_gauss, sexp
 from .name import *
 from .util import add_constant, lagmat
+
+
+logger = logging.getLogger(__name__)
 
 
 def check_options(kwargs):
@@ -279,7 +283,8 @@ def estep(model: dict):
                 try:
                     delta_mu = u - G @ ((wadj * G).T @ u) + \
                                G @ (GtWG @ solve(Ir + GtWG, (wadj * G).T @ u, sym_pos=True))
-                except:
+                except Exception as e:
+                    logger.exception(repr(e), exc_info=True)
                     delta_mu = np.array([0])
 
                 clip(delta_mu, options['dmu_bound'])
@@ -299,8 +304,8 @@ def estep(model: dict):
                         v[trial, :, z_dim] = (
                             G * (G - G @ GtWG + G @ (GtWG @ solve(Ir + GtWG, GtWG, sym_pos=True)))).sum(
                             axis=1)
-                    except LinAlgError:
-                        warnings.warn("singular I + G'WG")
+                    except Exception as e:
+                        logger.exception(repr(e), exc_info=True)
 
         # center over all trials if not only infer posterior
         constrain_mu(model)
@@ -349,7 +354,8 @@ def mstep(model: dict):
 
                     try:
                         delta_a = solve(neghess_a, grad_a, sym_pos=True)
-                    except:
+                    except Exception as e:
+                        logger.exception(repr(e), exc_info=True)
                         delta_a = options['learning_rate'] * grad_a
                 else:
                     delta_a = options['learning_rate'] * grad_a
@@ -365,7 +371,8 @@ def mstep(model: dict):
                     neghess_b = x_[y_dim, :].T @ (r[:, [y_dim]] * x_[y_dim, :])
                     try:
                         delta_b = solve(neghess_b, grad_b, sym_pos=True)
-                    except:
+                    except Exception as e:
+                        logger.exception(repr(e), exc_info=True)
                         delta_b = options['learning_rate'] * grad_b
                 else:
                     delta_b = options['learning_rate'] * grad_b
@@ -555,8 +562,9 @@ def postprocess(model):
             GtWG = G.T @ (w[trial, :, [z_dim]].T * G)
             try:
                 tmp = eyer - GtWG + GtWG @ solve(eyer + GtWG, GtWG, sym_pos=True)  # A should be PD but numerically not
-            except LinAlgError:
-                warnings.warn('Singular matrix. Use least squares instead.')
+            except Exception as e:
+                # warnings.warn('Singular matrix. Use least squares instead.')
+                logger.exception(repr(e), exc_info=True)
                 tmp = eyer - GtWG + GtWG @ lstsq(eyer + GtWG, GtWG)[0]  # least squares
             eigval, eigvec = eigh(tmp)
             eigval.clip(0, PINF, out=eigval)  # remove negative eigenvalues

@@ -1,6 +1,7 @@
 """
 Hyperparameter optimization
 """
+import logging
 import warnings
 
 import numpy as np
@@ -9,6 +10,9 @@ from numpy import trace
 from scipy.linalg import cholesky, LinAlgError, cho_solve
 from scipy.optimize import fmin_l_bfgs_b
 from scipy.spatial.distance import pdist, squareform
+
+
+logger = logging.getLogger(__name__)
 
 
 def se_kernel(x, params):
@@ -127,9 +131,8 @@ def optim(obj, t, mu, w, params0, bounds, mask, return_f=False):
     try:
         opt, fval, info = fmin_l_bfgs_b(obj_func, log_param0, bounds=log_bounds)
     except Exception as e:
-        warnings.warn(e)
-    if info['warnflag'] != 0:
-        warnings.warn("fmin_l_bfgs_b terminated abnormally with the state: {}".format(info))
+        opt = log_param0
+        logger.exception(repr(e), exc_info=True)
     opt = np.exp(opt)
     if return_f:
         return opt, fval

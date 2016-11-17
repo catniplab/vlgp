@@ -116,7 +116,7 @@ def fit(y,
     try:
         vem(model, callbacks)
     finally:
-        print('Exiting...')
+        print('\nExiting...\n')
         pbar.print(model)
         saver.save(model, force=True)
 
