@@ -1,4 +1,5 @@
 import time
+import click
 from pprint import pprint
 
 # import tqdm without enforcing it as a dependency
@@ -13,7 +14,7 @@ except ImportError:
 from .util import save
 
 
-class Saver():
+class Saver:
     def __init__(self):
         self.last_saving_time = time.perf_counter()
 
@@ -26,17 +27,20 @@ class Saver():
             print('Model saved')
 
 
-class Progressor():
+class Progressor:
     def __init__(self, total):
         self.pbar = tqdm(total=total)
 
     def update(self, model):
         self.pbar.update(1)
-        if model['options']['verbose']:
-            self.print(model)
 
-    def print(self, model):
-        self.pbar.update(0)
+    def __del__(self):
+        self.pbar.close()
+
+
+class Printer:
+    @staticmethod
+    def print(model):
         options = model['options']
         stat = dict()
         stat['E-step'] = model['e_elapsed'] and model['e_elapsed'][-1]
@@ -44,11 +48,5 @@ class Progressor():
         stat['H-step'] = model['h_elapsed'] and model['h_elapsed'][-1]
         stat['sigma'] = model['sigma']
         stat['omega'] = model['omega']
-        # stat['dmu'] = model['dmu']
-        # stat['da'] = model['da']
-        # stat['db'] = model['db']
         if options['verbose']:
-            pprint(stat)
-
-    def __del__(self):
-        self.pbar.close()
+            pprint(stat, indent=4)

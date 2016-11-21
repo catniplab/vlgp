@@ -1,6 +1,6 @@
 from numpy import asarray, newaxis, empty
 
-from .callback import Saver, Progressor
+from .callback import Saver, Progressor, Printer
 from .core import initialize, vem, check_y_type
 from .util import add_constant, lagmat
 
@@ -111,15 +111,16 @@ def fit(y,
     # print(model['options'])
 
     saver = Saver()
+    printer = Printer()
     pbar = Progressor(model['options']['niter'])
 
     callbacks = callbacks or []
-    callbacks.extend([pbar.update, saver.save])
+    callbacks.extend([pbar.update, saver.save, printer.print])
     try:
         vem(model, callbacks)
     finally:
         print('\nExiting...\n')
-        pbar.print(model)
+        printer.print(model)
         saver.save(model, force=True)
 
     return model
