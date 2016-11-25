@@ -15,7 +15,7 @@ from .constant import *
 from .evaluation import timer
 from .math import ichol_gauss, sexp
 from .name import *
-from .util import add_constant, lagmat
+
 
 logger = logging.getLogger(__name__)
 
@@ -197,6 +197,9 @@ def initialize(model):
 
     # initialize noises of LFP
     model['noise'] = var(y_, axis=0, ddof=0)
+    model[Y_TYPE][model['noise'] == 0] = INACTIVE  # inactive neurons
+    a[:, model[Y_TYPE] == INACTIVE] = 0
+    b[:, model[Y_TYPE] == INACTIVE] = 0
 
     ####################
     # initialize prior #
@@ -417,6 +420,8 @@ def hstep(model: dict):
     subsample_size = options[TRIALLET]
     if subsample_size is None:
         subsample_size = nbin // 2
+    if subsample_size > nbin:
+        subsample_size = nbin
     sigma = model['sigma']
     omega = model['omega']
     for z_dim in range(z_ndim):
@@ -531,10 +536,6 @@ def check_y_type(types):
     return coded_types
 
 
-def make_regression(x, y, history_filter=0):
-    return None
-
-
 def postprocess(model):
     """
     Remove intermediate and empty variables, and compute decomposition of posterior covariance.
@@ -571,47 +572,6 @@ def postprocess(model):
     model['L'] = L
     model.pop('h')
     model.pop('stat')
-
-
-def predict(z, a, b, y=None, v=None):
-    """
-    Predict firing rate
-
-    Parameters
-    ----------
-    z : ndarray
-        latent
-    a : ndarray
-        loading
-    b : ndarray
-        history filter
-    y : ndarray
-        spike trains for history filter
-    v : ndarray
-        posterior variance
-
-    Returns
-    -------
-    ndarray
-        predicted firing rate
-    """
-    ntrial, nbin, z_ndim = z.shape
-    y_ndim = a.shape[1]
-    history_filter = b.shape[0] - 1
-
-    shape_out = (ntrial, nbin, y_ndim)
-    # regression (h dot b) part
-    if y is None:
-        y = np.zeros(shape_out)
-
-    hb = empty(shape_out)
-    for y_dim in range(y_ndim):
-        for trial in range(ntrial):
-            h = add_constant(lagmat(y[trial, :, y_dim], lag=history_filter))
-            hb[trial, :, y_dim] = h @ b[:, y_dim]
-    eta = z.reshape((-1, z_ndim)) @ a + hb.reshape((-1, y_ndim))
-    r = sexp(eta + 0.5 * v.reshape((-1, z_ndim)) @ (a ** 2)) if v is not None else sexp(eta)
-    return np.reshape(r, shape_out)
 
 
 def clip(delta, lbound, ubound=None):

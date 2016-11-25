@@ -1,3 +1,4 @@
+import logging
 import time
 import click
 from pprint import pprint
@@ -14,6 +15,9 @@ except ImportError:
 from .util import save
 
 
+logger = logging.getLogger(__name__)
+
+
 class Saver:
     def __init__(self):
         self.last_saving_time = time.perf_counter()
@@ -21,21 +25,23 @@ class Saver:
     def save(self, model, force=False):
         now = time.perf_counter()
         if force or now - self.last_saving_time > model['options']['saving_interval']:
-            print('\nSaving model to {}'.format(model['path']))
+            logger.info('Saving model to {}'.format(model['path']))
             save(model, model['path'])
             self.last_saving_time = time.perf_counter()
-            print('Model saved')
 
 
 class Progressor:
     def __init__(self, total):
-        self.pbar = tqdm(total=total)
+        try:
+            from ipywidgets import FloatProgress
+            from IPython.display import display
+            self.pbar = FloatProgress(min=0, max=total)
+            display(self.pbar)
+        except ImportError:
+            self.pbar = dict(value=0)
 
     def update(self, model):
-        self.pbar.update(1)
-
-    def __del__(self):
-        self.pbar.close()
+        self.pbar.value += 1
 
 
 class Printer:

@@ -1,14 +1,17 @@
+import numpy as np
 from numpy import asarray, newaxis, empty
+import click
 
+from .math import sexp
 from .callback import Saver, Progressor, Printer
-from .core import initialize, vem, check_y_type
+from .core import initialize, vem
 from .util import add_constant, lagmat
 
 
 def fit(y,
-        obs_types,
         dyn_ndim,
-        exog=None,
+        x=None,
+        obs_types=None,
         a=None,
         b=None,
         mu=None,
@@ -33,7 +36,7 @@ def fit(y,
         types of observation dimensions, 'spike' or 'lfp'
     dyn_ndim : int
         number of latent dimensions
-    exog : ndarray, optional
+    x : ndarray, optional
         external factors
     a : ndarray, optional
         initial value of loading
@@ -76,8 +79,8 @@ def fit(y,
         y = y[newaxis, ...]
 
     # obs_types = check_y_type(obs_types)
-
     ntrial, nbin, obs_ndim = y.shape
+    obs_types = obs_types or ['spike'] * obs_ndim
 
     # make design matrix of regression
     h = empty((obs_ndim, ntrial, nbin, 1 + history_filter), dtype=float)
@@ -112,15 +115,56 @@ def fit(y,
 
     saver = Saver()
     printer = Printer()
-    pbar = Progressor(model['options']['niter'])
+    # nbpbar = Progressor(model['options']['niter'])
 
     callbacks = callbacks or []
-    callbacks.extend([pbar.update, saver.save, printer.print])
+    callbacks.extend([saver.save, printer.print])
     try:
         vem(model, callbacks)
     finally:
-        print('\nExiting...\n')
+        # print('\nExiting...\n')
         printer.print(model)
         saver.save(model, force=True)
 
     return model
+
+
+def predict(z, a, b, y=None, v=None):
+    """
+    Predict firing rate
+
+    Parameters
+    ----------
+    z : ndarray
+        latent
+    a : ndarray
+        loading
+    b : ndarray
+        history filter
+    y : ndarray
+        spike trains for history filter
+    v : ndarray
+        posterior variance
+
+    Returns
+    -------
+    ndarray
+        predicted firing rate
+    """
+    ntrial, nbin, z_ndim = z.shape
+    y_ndim = a.shape[1]
+    history_filter = b.shape[0] - 1
+
+    shape_out = (ntrial, nbin, y_ndim)
+    # regression (h dot b) part
+    if y is None:
+        y = np.zeros(shape_out)
+
+    hb = empty(shape_out)
+    for y_dim in range(y_ndim):
+        for trial in range(ntrial):
+            h = add_constant(lagmat(y[trial, :, y_dim], lag=history_filter))
+            hb[trial, :, y_dim] = h @ b[:, y_dim]
+    eta = z.reshape((-1, z_ndim)) @ a + hb.reshape((-1, y_ndim))
+    r = sexp(eta + 0.5 * v.reshape((-1, z_ndim)) @ (a ** 2)) if v is not None else sexp(eta)
+    return np.reshape(r, shape_out)

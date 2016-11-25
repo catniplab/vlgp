@@ -6,7 +6,7 @@ from numpy import inf
 UNUSED = 0  # dimension not to use
 SPIKE = 1  # spike train
 LFP = 2  # local field potential
-UNFIRED = -1  # neuron that never fired
+INACTIVE = -1  # neuron that never fired
 
 # default options
 DEFAULT_OPTIONS = dict(verbose=False,  # output detail
