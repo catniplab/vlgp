@@ -434,7 +434,7 @@ def hstep(model: dict):
     omega = model['omega']
     for z_dim in range(z_ndim):
         # subsample = gp.subsample(nbin, subsample_size)
-        hparam_init = (sigma[z_dim] ** 2, omega[z_dim], options['gp_noise'])
+        hparam0 = (sigma[z_dim] ** 2, omega[z_dim], options['gp_noise'])
         bounds = ((1e-3, 1),
                   options['omega_bound'],
                   (options['gp_noise'] / 2, options['gp_noise'] * 2))
@@ -444,7 +444,7 @@ def hstep(model: dict):
                                          np.arange(seg_len),
                                          mu[:, segment, z_dim].reshape(-1, seg_len).T,
                                          w[:, segment, z_dim].reshape(-1, seg_len).T,
-                                         hparam_init,
+                                         hparam0,
                                          bounds,
                                          mask=mask,
                                          return_f=False)
