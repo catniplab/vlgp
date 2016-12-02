@@ -10,7 +10,7 @@ from numpy.linalg import slogdet
 from scipy.linalg import lstsq, eigh, solve, norm, svd, LinAlgError
 from sklearn.decomposition import FactorAnalysis
 
-from vlgp import hyper
+from vlgp import gp
 from .constant import *
 from .evaluation import timer
 from .math import ichol_gauss, sexp
@@ -227,6 +227,10 @@ def initialize(model):
     update_w(model)
     update_v(model)
 
+    # cut trials
+    from vlgp.util import cut_trials
+    model['segment'] = cut_trials(nbin, ntrial, seg_len=model['options']['seg_len'])
+
 
 def leastsq(x, y):
     y_ndim = y.shape[-1]
@@ -417,28 +421,33 @@ def hstep(model: dict):
     rank = prior[0].shape[-1]
     mu = model['mu']
     w = model['w']
-    subsample_size = options[TRIALLET]
-    if subsample_size is None:
-        subsample_size = nbin // 2
-    if subsample_size > nbin:
-        subsample_size = nbin
+
+    seg_len = options['seg_len']
+    segment = model['segment']
+
+    # subsample_size = options[TRIALLET]
+    # if subsample_size is None:
+    #     subsample_size = nbin // 2
+    # if subsample_size > nbin:
+    #     subsample_size = nbin
     sigma = model['sigma']
     omega = model['omega']
     for z_dim in range(z_ndim):
-        subsample = hyper.subsample(nbin, subsample_size)
+        # subsample = gp.subsample(nbin, subsample_size)
         hparam_init = (sigma[z_dim] ** 2, omega[z_dim], options['gp_noise'])
         bounds = ((1e-3, 1),
                   options['omega_bound'],
                   (options['gp_noise'] / 2, options['gp_noise'] * 2))
         mask = np.array([0, 1, 0])
-        sigmasq, omega_new, _ = hyper.optim(options[HOBJ],
-                                            subsample,
-                                            mu[:, subsample, z_dim].T,
-                                            w[:, subsample, z_dim].T,
-                                            hparam_init,
-                                            bounds,
-                                            mask=mask,
-                                            return_f=False)
+
+        sigmasq, omega_new, _ = gp.optim(options[HOBJ],
+                                         np.arange(seg_len),
+                                         mu[:, segment, z_dim].reshape(-1, seg_len).T,
+                                         w[:, segment, z_dim].reshape(-1, seg_len).T,
+                                         hparam_init,
+                                         bounds,
+                                         mask=mask,
+                                         return_f=False)
         if not np.any(np.isclose(omega_new, options['omega_bound'])):
             omega[z_dim] = omega_new
         sigma[z_dim] = sqrt(sigmasq)

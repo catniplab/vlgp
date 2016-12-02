@@ -26,7 +26,7 @@ def fit(y,
         callbacks=None,
         **kwargs):
     """
-    vLGP main function
+    vlgp main function
 
     Parameters
     ----------

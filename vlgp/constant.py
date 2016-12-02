@@ -35,7 +35,8 @@ DEFAULT_OPTIONS = dict(verbose=False,  # output detail
                        omega_bound=(1e-5, 1e-3),
                        saving_interval=3600 * 2,  # save every 2 hour
                        tol=1e-4,
-                       eps=1e-8
+                       eps=1e-8,
+                       seg_len=20
                        )
 
 MODEL_FIELDS = []

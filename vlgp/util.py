@@ -1,6 +1,7 @@
 """
 Tool functions
 """
+import math
 import warnings
 
 import h5py
@@ -370,3 +371,31 @@ def hdf5_to_dict(hdf):
         else:
             d[key] = np.asarray(value)
     return d
+
+
+def cut_trials(nbin, ntrial, seg_len=20):
+    """
+    Cut trials into small segments of equal length
+
+    Parameters
+    ----------
+    nbin
+    ntrial
+    seg_len
+
+    Returns
+    -------
+
+    """
+    # TODO: Allow different indexing among trials. Now all trials use the same indexing.
+    if nbin <= seg_len:
+        seg_len = nbin
+
+    nseg = math.ceil(nbin / seg_len)
+    overlap = nseg * seg_len - nbin
+    start = np.cumsum(np.ones(nseg, dtype=int) * seg_len) - seg_len
+    if nseg == 1:
+        return [np.s_[:]] * ntrial
+    else:
+        offset = np.cumsum(np.append([0], np.random.multinomial(overlap, np.ones(nseg - 1) / (nseg - 1))))
+        return np.array([np.arange(s, s + seg_len) for s in start - offset])
