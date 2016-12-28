@@ -323,7 +323,7 @@ def update_params(params, lpstar_min, log_prior_theta, n, rank):
     G = ichol_gauss(n, theta, rank)
 
     # q = cho_solve((G, True), params['f'])
-    q = lstsq(G, params['f'])[0]
+    q = np.concatenate(map(lambda x: lstsq(G, x)[0], params['f']))
     log_prior_factor = -0.5 * q.T @ q - n * np.log(params['sigma'])
     params['lpstar'] = log_prior_factor + log_prior_theta
     params['on_slice'] = params['lpstar'] >= lpstar_min
