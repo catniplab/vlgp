@@ -207,8 +207,10 @@ def subsample(n, size, successive=False):
 
 
 def slice_sweep(particle, slice_fn, slice_width=1, step_out=True):
+    isscalar = np.isscalar(particle['position'])
+    particle['position'] = np.atleast_1d(particle['position'])
     dd = particle['position'].size
-    if slice_width.size == 1:
+    if np.isscalar(slice_width):
         slice_width *= np.ones(dd)
 
     for d in np.random.permutation(dd):
@@ -235,7 +237,6 @@ def slice_sweep(particle, slice_fn, slice_width=1, step_out=True):
                 particle['position'][d] += slice_width[d]
             x_r = particle['position'][d]
 
-        chk = False
         while True:
             particle['position'][d] = np.random.random() * (x_r - x_l) + x_l
             particle = slice_fn(particle, lpstar_min)
@@ -247,59 +248,16 @@ def slice_sweep(particle, slice_fn, slice_width=1, step_out=True):
                 x_l = particle['position'][d]
             else:
                 raise ValueError('BUG DETECTED: Shrunk to current position and still not acceptable.')
-
-
-# def loglik(model):
-#     """Log-likelihood
-#
-#     Parameters
-#     ----------
-#     model
-#
-#     Returns
-#     -------
-#
-#     """
-#     y_ndim, ntrial, nbin, nreg = model['h'].shape  # neuron, trial, time, regression
-#     z_ndim = model['mu'].shape[-1]
-#
-#     y = model['y'].reshape((-1, y_ndim))  # concatenate trials
-#     x = model['h'].reshape((y_ndim, -1, nreg))  # concatenate trials
-#     y_types = model[Y_TYPE]
-#
-#     mu = model['mu'].reshape((-1, z_ndim))
-#     v = model['v'].reshape((-1, z_ndim))
-#
-#     a = model['a']
-#     b = model['b']
-#     noise = model['noise']
-#
-#     spike_dims = y_types == SPIKE
-#     lfp_dims = y_types == LFP
-#
-#     eta = mu @ a + einsum('ijk, ki -> ji', x.reshape((y_ndim, nbin * ntrial, nreg)), b)
-#     r = sexp(eta)
-#     # possible useless calculation here and for noise when spike and LFP mixed.
-#     # LFP (Gaussian) has no firing rate and spike (Poisson) has no 'noise'.
-#     # useless dims could be removed to save computational time and space.
-#
-#     llspike = sum(y[:, spike_dims] * eta[:, spike_dims] - r[:, spike_dims])  # verified by predict()
-#
-#     # noinspection PyTypeChecker
-#     lllfp = - 0.5 * sum(
-#         ((y[:, lfp_dims] - eta[:, lfp_dims]) ** 2 + v @ (a[:, lfp_dims] ** 2)) / noise[lfp_dims] + log(
-#             noise[lfp_dims]))
-#
-#     ll = llspike + lllfp
-#     return ll
+    if isscalar:
+        particle['position'] = np.asscalar(particle['position'])
 
 
 def gp_slice_sampling(model, slice_width=10):
     log_prior_theta = lambda l: 0.0 if 1e-6 < l < 10 else -np.inf
-    ntrial, nbin, z_ndim = model['mu']
+    ntrial, nbin, z_ndim = model['mu'].shape
     for z_dim in range(z_ndim):
         theta = model['omega'][z_dim]
-        params = {'position': theta, 'f': model['mu'][:, :, z_dim]}
+        params = {'position': theta, 'f': model['mu'][:, :, z_dim], 'sigma': model['sigma']}
         update_params(params, lpstar_min=-np.inf, log_prior_theta=log_prior_theta, n=nbin, rank=model['rank'])
         step_out = slice_width > 0
         slice_sweep(params,
@@ -323,11 +281,12 @@ def update_params(params, lpstar_min, log_prior_theta, n, rank):
     G = ichol_gauss(n, theta, rank)
 
     # q = cho_solve((G, True), params['f'])
-    q = np.concatenate(map(lambda x: lstsq(G, x)[0], params['f']))
+    q = np.concatenate(list(map(lambda x: lstsq(G, x)[0], params['f'])))
     log_prior_factor = -0.5 * q.T @ q - n * np.log(params['sigma'])
-    params['lpstar'] = log_prior_factor + log_prior_theta
+    params['lpstar'] = log_prior_factor + l_prior_theta
     params['on_slice'] = params['lpstar'] >= lpstar_min
     params['ichol'] = G
+    return params
 
 
 def gp_small_segments(model):
