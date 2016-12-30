@@ -4,17 +4,15 @@ Hyperparameter optimization
 import logging
 
 import numpy as np
-from numpy import exp, log, einsum
+from numpy import exp, log
 from numpy import trace
 from numpy.core.umath import sqrt
 from scipy.linalg import cholesky, LinAlgError, cho_solve, lstsq
 from scipy.optimize import fmin_l_bfgs_b
 from scipy.spatial.distance import pdist, squareform
 
-from vlgp.constant import SPIKE, LFP
-from vlgp.math import ichol_gauss
-from vlgp.name import Y_TYPE, HOBJ, PRIORICHOL
-from .math import ichol_gauss, sexp
+from vlgp.name import HOBJ, PRIORICHOL
+from .math import ichol_gauss
 
 logger = logging.getLogger(__name__)
 
@@ -207,49 +205,40 @@ def subsample(n, size, successive=False):
 
 
 def slice_sweep(particle, slice_fn, slice_width=1, step_out=True):
-    isscalar = np.isscalar(particle['position'])
-    particle['position'] = np.atleast_1d(particle['position'])
-    dd = particle['position'].size
-    if np.isscalar(slice_width):
-        slice_width *= np.ones(dd)
+    lpstar_min = particle['lpstar'] + np.log(np.random.random())
+    x_cur = particle['position']
 
-    for d in np.random.permutation(dd):
-        lpstar_min = particle['lpstar'] + np.log(np.random.random())
-        x_cur = particle['position']
+    rr = np.random.random()
+    x_l = x_cur - rr * slice_width
+    x_r = x_cur + (1 - rr) * slice_width
 
-        rr = np.random.random()
-        x_l = x_cur - rr * slice_width[d]
-        x_r = x_cur + (1 - rr) * slice_width[d]
-
-        if step_out:
-            particle['position'][d] = x_l
-            while True:
-                particle = slice_fn(particle, lpstar_min)
-                if not particle['on_slice']:
-                    break
-                particle['position'][d] -= slice_width[d]
-            x_l = particle['position'][d]
-            particle['position'][d] = x_r
-            while True:
-                particle = slice_fn(particle, lpstar_min)
-                if not particle['on_slice']:
-                    break
-                particle['position'][d] += slice_width[d]
-            x_r = particle['position'][d]
-
+    if step_out:
+        particle['position'] = x_l
         while True:
-            particle['position'][d] = np.random.random() * (x_r - x_l) + x_l
             particle = slice_fn(particle, lpstar_min)
-            if particle['on_slice']:
+            if not particle['on_slice']:
                 break
-            if particle['position'][d] > x_cur:
-                x_r = particle['position'][d]
-            elif particle['position'][d] < x_cur:
-                x_l = particle['position'][d]
-            else:
-                raise ValueError('BUG DETECTED: Shrunk to current position and still not acceptable.')
-    if isscalar:
-        particle['position'] = np.asscalar(particle['position'])
+            particle['position'] -= slice_width
+        x_l = particle['position']
+        particle['position'] = x_r
+        while True:
+            particle = slice_fn(particle, lpstar_min)
+            if not particle['on_slice']:
+                break
+            particle['position'] += slice_width
+        x_r = particle['position']
+
+    while True:
+        particle['position'] = np.random.random() * (x_r - x_l) + x_l
+        particle = slice_fn(particle, lpstar_min)
+        if particle['on_slice']:
+            break
+        if particle['position'] > x_cur:
+            x_r = particle['position']
+        elif particle['position'] < x_cur:
+            x_l = particle['position']
+        else:
+            raise ValueError('BUG DETECTED: Shrunk to current position and still not acceptable.')
 
 
 def gp_slice_sampling(model, slice_width=10):
@@ -314,7 +303,7 @@ def gp_small_segments(model):
                   (options['gp_noise'] / 2, options['gp_noise'] * 2))
         mask = np.array([0, 1, 0])
 
-        sigmasq, omega_new, _ = gp.optim(options[HOBJ],
+        sigmasq, omega_new, _ = optim(options[HOBJ],
                                          np.arange(seg_len),
                                          mu[:, segment, z_dim].reshape(-1, seg_len).T,
                                          w[:, segment, z_dim].reshape(-1, seg_len).T,
