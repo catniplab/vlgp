@@ -10,12 +10,11 @@ from numpy.linalg import slogdet
 from scipy.linalg import lstsq, eigh, solve, norm, svd, LinAlgError
 from sklearn.decomposition import FactorAnalysis
 
-from vlgp import gp
+from vlgp.gp import gp_small_segments, gp_slice_sampling
 from .constant import *
 from .evaluation import timer
 from .math import ichol_gauss, sexp
 from .name import *
-
 
 logger = logging.getLogger(__name__)
 
@@ -416,43 +415,12 @@ def hstep(model: dict):
     if model[ITER] % options[HPERIOD] != 0:
         return
 
-    ntrial, nbin, z_ndim = model['mu'].shape
-    prior = model['chol']
-    rank = prior[0].shape[-1]
-    mu = model['mu']
-    w = model['w']
-
-    seg_len = options['seg_len']
-    segment = model['segment']
-
-    # subsample_size = options[TRIALLET]
-    # if subsample_size is None:
-    #     subsample_size = nbin // 2
-    # if subsample_size > nbin:
-    #     subsample_size = nbin
-    sigma = model['sigma']
-    omega = model['omega']
-    for z_dim in range(z_ndim):
-        # subsample = gp.subsample(nbin, subsample_size)
-        hparam0 = (sigma[z_dim] ** 2, omega[z_dim], options['gp_noise'])
-        bounds = ((1e-3, 1),
-                  options['omega_bound'],
-                  (options['gp_noise'] / 2, options['gp_noise'] * 2))
-        mask = np.array([0, 1, 0])
-
-        sigmasq, omega_new, _ = gp.optim(options[HOBJ],
-                                         np.arange(seg_len),
-                                         mu[:, segment, z_dim].reshape(-1, seg_len).T,
-                                         w[:, segment, z_dim].reshape(-1, seg_len).T,
-                                         hparam0,
-                                         bounds,
-                                         mask=mask,
-                                         return_f=False)
-        if not np.any(np.isclose(omega_new, options['omega_bound'])):
-            omega[z_dim] = omega_new
-        sigma[z_dim] = sqrt(sigmasq)
-    model[PRIORICHOL] = np.array(
-        [ichol_gauss(nbin, omega[dyn_dim], rank) * sigma[dyn_dim] for dyn_dim in range(z_ndim)])
+    if options['gp'] == 'cutting':
+        gp_small_segments(model)
+    elif options['gp'] == 'sampling':
+        gp_slice_sampling(model)
+    else:
+        raise ValueError('Unsupported hyperparameter method')
 
 
 def vem(model, callbacks=None):
