@@ -36,7 +36,8 @@ DEFAULT_OPTIONS = dict(verbose=False,  # output detail
                        saving_interval=3600 * 2,  # save every 2 hour
                        tol=1e-4,
                        eps=1e-8,
-                       seg_len=20
+                       seg_len=20,
+                       gp='cutting'
                        )
 
 MODEL_FIELDS = []

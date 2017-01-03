@@ -415,10 +415,12 @@ def hstep(model: dict):
     if model[ITER] % options[HPERIOD] != 0:
         return
 
-    if options['gp'] == 'slice':
+    if options['gp'] == 'cutting':
+        gp_small_segments(model)
+    elif options['gp'] == 'sampling':
         gp_slice_sampling(model)
     else:
-        gp_small_segments(model)
+        raise ValueError('Unsupported hyperparameter method')
 
 
 def vem(model, callbacks=None):

@@ -242,11 +242,12 @@ def slice_sweep(particle, slice_fn, slice_width=1, step_out=True):
 
 
 def gp_slice_sampling(model, slice_width=10):
-    log_prior_theta = lambda l: 0.0 if 1e-6 < l < 10 else -np.inf
+    options = model['options']
+    log_prior_theta = lambda l: 0.0 if options['omega_bound'][0] < l < options['omega_bound'][1] else -np.inf
     ntrial, nbin, z_ndim = model['mu'].shape
     for z_dim in range(z_ndim):
         theta = model['omega'][z_dim]
-        params = {'position': theta, 'f': model['mu'][:, :, z_dim], 'sigma': model['sigma']}
+        params = {'position': theta, 'f': model['mu'][:, :, z_dim], 'sigma': model['sigma'][z_dim]}
         update_params(params, lpstar_min=-np.inf, log_prior_theta=log_prior_theta, n=nbin, rank=model['rank'])
         step_out = slice_width > 0
         slice_sweep(params,
