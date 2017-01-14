@@ -112,14 +112,15 @@ def fit(y,
 
     initialize(model)
 
-    # print(model['options'])
-
-    saver = Saver()
-    printer = Printer()
-    # nbpbar = Progressor(model['options']['niter'])
-
     callbacks = callbacks or []
-    callbacks.extend([saver.save, printer.print])
+
+    printer = Printer()
+    callbacks.extend([printer.print])
+
+    if path is not None:
+        saver = Saver()
+        callbacks.extend([saver.save])
+
     try:
         vem(model, callbacks)
     finally:
@@ -169,3 +170,37 @@ def predict(z, a, b, y=None, v=None):
     eta = z.reshape((-1, z_ndim)) @ a + hb.reshape((-1, y_ndim))
     r = sexp(eta + 0.5 * v.reshape((-1, z_ndim)) @ (a ** 2)) if v is not None else sexp(eta)
     return np.reshape(r, shape_out)
+
+
+def leave_n_out(y,
+                a,
+                b,
+                sigma,
+                omega,
+                rank,
+                nfold=0,
+                path=None,
+                callbacks=None,
+                **kwargs):
+    ntrial, nbin, obs_ndim = y.shape
+    dyn_ndim = a.shape[0]
+    history_filter = b.shape[0] - 1
+
+    nfold = nfold if nfold > 0 else obs_ndim
+
+    obs_perm = np.random.permutation(obs_ndim)
+    folds = np.array_split(obs_perm, nfold)  # k-fold
+
+    for i, fold in enumerate(folds):
+        in_mask = np.ones(obs_ndim, dtype=bool)
+        in_mask[fold] = False
+        y_in = y[:, :, in_mask]
+        a_in = a[:, in_mask]
+        b_in = b[:, in_mask]
+        obs_types = ['spike'] * y_in.shape[2]
+        model_in = fit(y_in, dyn_ndim, obs_types=obs_types, a=a_in, b=b_in, history_filter=history_filter,
+                       sigma=sigma, omega=omega, rank=rank, path='{}_fold_{}'.format(path, i),
+                       method='VB',
+                       niter=100, tol=1e-4, verbose=False,
+                       learn_param=False, learn_post=True, learn_hyper=False, e_niter=2,
+                       dmu_bound=0.5)
