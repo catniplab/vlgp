@@ -32,7 +32,7 @@ def leave_n_out(y,
         model_in = fit(y_in, dyn_ndim, obs_types=obs_types, a=a_in, b=b_in, history_filter=history_filter,
                        sigma=sigma, omega=omega, rank=rank, path='{}_nfold_{}'.format(path, i),
                        method='VB',
-                       niter=100, tol=1e-4, verbose=False,
+                       niter=50, tol=1e-4, verbose=False,
                        learn_param=False, learn_post=True, learn_hyper=False, e_niter=2,
                        dmu_bound=0.5)
 
@@ -45,10 +45,10 @@ def cv(y,
        mfold=0,
        nfold=0,
        path=None,
+       history_filter=0,
        callbacks=None,
        **kwargs):
     ntrial, nbin, obs_ndim = y.shape
-    history_filter = b.shape[0] - 1
 
     mfold = mfold if mfold > 0 else ntrial
 
@@ -63,6 +63,7 @@ def cv(y,
         obs_types = ['spike'] * y_training.shape[2]
         model_training = fit(y_training, dyn_ndim=dyn_ndim, obs_types=obs_types, history_filter=history_filter,
                              sigma=sigma, omega=omega, rank=rank, path='{}_mfold_{}'.format(path, i),
+                             callbacks=callbacks,
                              method='VB',
                              niter=50, tol=1e-4, verbose=False,
                              learn_param=True, learn_post=True, learn_hyper=True,
