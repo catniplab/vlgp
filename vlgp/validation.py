@@ -61,8 +61,9 @@ def cv(y,
         y_training = y[training_mask, :, :]
         y_test = y[~training_mask, :, :]
         obs_types = ['spike'] * y_training.shape[2]
+        path = '{}_mfold_{}'.format(path, i),
         model_training = fit(y_training, dyn_ndim=dyn_ndim, obs_types=obs_types, history_filter=history_filter,
-                             sigma=sigma, omega=omega, rank=rank, path='{}_mfold_{}'.format(path, i),
+                             sigma=sigma, omega=omega, rank=rank, path=path,
                              callbacks=callbacks,
                              method='VB',
                              niter=50, tol=1e-4, verbose=False,
@@ -74,4 +75,4 @@ def cv(y,
         leave_n_out(y_test,
                     a=model_training['a'], b=model_training['b'],
                     sigma=model_training['sigma'], omega=model_training['omega'],
-                    rank=rank, nfold=nfold)
+                    rank=rank, nfold=nfold, path=path)
