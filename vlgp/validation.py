@@ -31,10 +31,8 @@ def leave_n_out(y,
         obs_types = ['spike'] * y_in.shape[2]
         model_in = fit(y_in, dyn_ndim, obs_types=obs_types, a=a_in, b=b_in, history_filter=history_filter,
                        sigma=sigma, omega=omega, rank=rank, path='{}_nfold_{}'.format(path, i),
-                       method='VB',
-                       niter=50, tol=1e-4, verbose=False,
                        learn_param=False, learn_post=True, learn_hyper=False, e_niter=2,
-                       dmu_bound=0.5)
+                       **kwargs)
 
 
 def cv(y,
@@ -61,18 +59,14 @@ def cv(y,
         y_training = y[training_mask, :, :]
         y_test = y[~training_mask, :, :]
         obs_types = ['spike'] * y_training.shape[2]
-        path = '{}_mfold_{}'.format(path, i),
+        fold_path = '{}_mfold_{}'.format(path, i),
         model_training = fit(y_training, dyn_ndim=dyn_ndim, obs_types=obs_types, history_filter=history_filter,
-                             sigma=sigma, omega=omega, rank=rank, path=path,
+                             sigma=sigma, omega=omega, rank=rank, path=fold_path,
                              callbacks=callbacks,
-                             method='VB',
-                             niter=50, tol=1e-4, verbose=False,
                              learn_param=True, learn_post=True, learn_hyper=True,
                              e_niter=5, m_niter=5, nhyper=5,
-                             dmu_bound=0.5, da_bound=0.1, constrain_a=np.inf,
-                             omega_bound=(1e-5, 1e-2), gp='cutting', subsample_size=200, hyper_obj='ELBO',
-                             successive=False)
+                             **kwargs)
         leave_n_out(y_test,
                     a=model_training['a'], b=model_training['b'],
                     sigma=model_training['sigma'], omega=model_training['omega'],
-                    rank=rank, nfold=nfold, path=path)
+                    rank=rank, nfold=nfold, path=fold_path)
