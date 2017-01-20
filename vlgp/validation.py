@@ -1,3 +1,4 @@
+import h5py
 import numpy as np
 
 from .api import fit
@@ -29,10 +30,16 @@ def leave_n_out(y,
         a_in = a[:, in_mask]
         b_in = b[:, in_mask]
         obs_types = ['spike'] * y_in.shape[2]
-        model_in = fit(y_in, dyn_ndim, obs_types=obs_types, a=a_in, b=b_in, history_filter=history_filter,
-                       sigma=sigma, omega=omega, rank=rank, path='{}_nfold_{}'.format(path, i),
+        fold_path = '{}_nfold_{}'.format(path, i)
+        # DEBUG
+        print(fold_path)
+        fit(y_in, dyn_ndim, obs_types=obs_types, a=a_in, b=b_in, history_filter=history_filter,
+                       sigma=sigma, omega=omega, rank=rank, path=fold_path,
                        learn_param=False, learn_post=True, learn_hyper=False, e_niter=2,
                        **kwargs)
+
+        with h5py.File(fold_path, 'a') as fout:
+            fout['fold'] = fold
 
 
 def cv(y,
@@ -59,13 +66,18 @@ def cv(y,
         y_training = y[training_mask, :, :]
         y_test = y[~training_mask, :, :]
         obs_types = ['spike'] * y_training.shape[2]
-        fold_path = '{}_mfold_{}'.format(path, i),
+        fold_path = '{}_mfold_{}'.format(path, i)
+        # DEBUG
+        print(fold_path)
         model_training = fit(y_training, dyn_ndim=dyn_ndim, obs_types=obs_types, history_filter=history_filter,
                              sigma=sigma, omega=omega, rank=rank, path=fold_path,
                              callbacks=callbacks,
                              learn_param=True, learn_post=True, learn_hyper=True,
-                             e_niter=5, m_niter=5, nhyper=5,
+                             e_niter=5, m_niter=5,
                              **kwargs)
+        with h5py.File(fold_path, 'a') as fout:
+            fout['fold'] = fold
+
         leave_n_out(y_test,
                     a=model_training['a'], b=model_training['b'],
                     sigma=model_training['sigma'], omega=model_training['omega'],
