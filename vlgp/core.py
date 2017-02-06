@@ -527,6 +527,12 @@ def postprocess(model):
     dict
         fit that contains prior, posterior, loading and regression
     """
+    # calc_post_cov(model)
+    model.pop('h')
+    model.pop('stat')
+
+
+def calc_post_cov(model):
     ntrial, nbin, z_ndim = model['mu'].shape
     prior = model['chol']
     rank = prior[0].shape[-1]
@@ -547,8 +553,6 @@ def postprocess(model):
             eigval.clip(0, PINF, out=eigval)  # remove negative eigenvalues
             L[trial, z_dim, :] = G @ (eigvec @ diag(sqrt(eigval)))
     model['L'] = L
-    model.pop('h')
-    model.pop('stat')
 
 
 def clip(delta, lbound, ubound=None):
