@@ -80,7 +80,11 @@ def fit(y,
     # obs_types = check_y_type(obs_types)
     ntrial, nbin, obs_ndim = y.shape
 
-    obs_types = obs_types if np.size(obs_types) > 0 else ['spike'] * obs_ndim  # all are spike trains by default
+    if obs_types is None:
+        obs_types = ['spike'] * obs_ndim
+
+    # obs_types = obs_types if len(obs_types) > 0 else ['spike'] * obs_ndim  # all are spike trains by default
+    # print(obs_types)
 
     # make design matrix of regression
     h = empty((obs_ndim, ntrial, nbin, 1 + history_filter), dtype=float)
