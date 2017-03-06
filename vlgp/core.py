@@ -615,13 +615,12 @@ def constrain_mu(model):
     shape = model['mu'].shape
     mu_flat = model['mu'].reshape((-1, z_ndim))
     mean_over_trials = mu_flat.mean(axis=0, keepdims=True)
+    std_over_trials =  mu_flat.std(axis=0, keepdims=True)
     model['b'][0, :] += np.squeeze(mean_over_trials @ model['a'])  # compensate bias
     mu_flat -= mean_over_trials
 
-    if options['constrain_mu'] == 'svd':
-        U, s, Vh = svd(mu_flat, full_matrices=False)
-        model['a'] = np.diag(s) @ Vh @ model['a']
-        mu_flat = U.reshape(shape)
+    if options['constrain_mu'] == 'scale':
+        mu_flat /= std_over_trials
 
     model['mu'] = mu_flat.reshape(shape)
 
