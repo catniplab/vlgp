@@ -156,6 +156,8 @@ def lagmat(x, lag):
     return mat[startrow:stoprow, ncol:]
 
 
+# TODO: consider persistence by joblib dump/load, or keep HDF5 for interoperability?
+# One advantage of HDF5 is that one can add/remove/modify any field in file without loading/saving all fields.
 def save(obj, fname):
     """
     Save inference object in HDF5

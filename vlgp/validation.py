@@ -33,6 +33,7 @@ def leave_n_out(y,
         fold_path = '{}_nfold_{}'.format(path, i)
         # DEBUG
         print(fold_path)
+        # TODO: Don't use fit. Construct model explicitly. Don't modify HDF5 file. Isolate IO implemention.
         fit(y_in, dyn_ndim, obs_types=obs_types, a=a_in, b=b_in, history_filter=history_filter,
             sigma=sigma, omega=omega, rank=rank, path=fold_path,
             learn_param=False, learn_post=True, learn_hyper=False, e_niter=2,

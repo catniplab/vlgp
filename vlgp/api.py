@@ -7,7 +7,28 @@ from .math import sexp
 from .util import add_constant, lagmat
 
 
-def fit(y,
+def fit(**kwargs):
+    # TODO: add a function that accepts model dict directly
+    # y = kwargs.get('y')
+    # dyn_ndim = kwargs.get('dyn_ndim')
+    # x = kwargs.get('x')
+    # obs_types = kwargs.get('obs_types')
+    # a = kwargs.get('a')
+    # b = kwargs.get('b')
+    # mu = kwargs.get('mu')
+    # history_filter = kwargs.get('history_filter')
+    # alpha = kwargs.get('alpha')
+    # beta = kwargs.get('beta')
+    # z = kwargs.get('z')
+    # sigma = kwargs.get('sigma')
+    # omega = kwargs.get('omega')
+    # rank = kwargs.get('rank')
+    # path = kwargs.get('path')
+    # kwargs.setdefault('y', None)
+    _fit(**kwargs)
+
+
+def _fit(y,
         dyn_ndim,
         x=None,
         obs_types=None,
@@ -69,6 +90,8 @@ def fit(y,
     dict
         fit
     """
+
+    # TODO: record trial numbers and neuron IDs
 
     y = asarray(y)
     y = y.astype(float)
