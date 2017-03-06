@@ -34,7 +34,7 @@ def leave_n_out(y,
         # DEBUG
         print(fold_path)
         # TODO: Don't use fit. Construct model explicitly. Don't modify HDF5 file. Isolate IO implemention.
-        fit(y_in, dyn_ndim, obs_types=obs_types, a=a_in, b=b_in, history_filter=history_filter,
+        fit(y=y_in, dyn_ndim=dyn_ndim, obs_types=obs_types, a=a_in, b=b_in, history_filter=history_filter,
             sigma=sigma, omega=omega, rank=rank, path=fold_path,
             learn_param=False, learn_post=True, learn_hyper=False, e_niter=2,
             **kwargs)
@@ -73,7 +73,7 @@ def cv(y,
         fold_path = '{}_fold_{}'.format(path, i)
         # DEBUG
         print(fold_path)
-        model_training = fit(y_training, dyn_ndim=dyn_ndim, obs_types=obs_types, history_filter=history_filter,
+        model_training = fit(y=y_training, dyn_ndim=dyn_ndim, obs_types=obs_types, history_filter=history_filter,
                              sigma=sigma, omega=omega, rank=rank, path=fold_path,
                              callbacks=callbacks,
                              learn_param=True, learn_post=True, learn_hyper=True,
@@ -134,8 +134,8 @@ def leave_out(y, model, path, leave=1, **kwargs):
         fold_path = '{}_leave_{}_out_{}'.format(path, leave, i)
         # DEBUG
         print('{}'.format(fold_path))
-        fit(y_in,
-            dyn_ndim,
+        fit(y=y_in,
+            dyn_ndim=dyn_ndim,
             obs_types=obs_types,
             a=a_in,
             b=b_in,
