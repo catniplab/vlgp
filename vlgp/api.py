@@ -7,6 +7,9 @@ from .math import sexp
 from .util import add_constant, lagmat
 
 
+__all__ = ['fit', 'predict']
+
+
 def fit(**kwargs):
     # TODO: add a function that accepts model dict directly
     # y = kwargs.get('y')
@@ -25,7 +28,7 @@ def fit(**kwargs):
     # rank = kwargs.get('rank')
     # path = kwargs.get('path')
     # kwargs.setdefault('y', None)
-    _fit(**kwargs)
+    return _fit(**kwargs)
 
 
 def _fit(y,
@@ -157,7 +160,7 @@ def _fit(y,
     return model
 
 
-def predict(z, a, b, y=None, v=None):
+def predict(z, a, b, y=None, v=None, maxrate=None):
     """
     Predict firing rate
 
@@ -195,4 +198,5 @@ def predict(z, a, b, y=None, v=None):
             hb[trial, :, y_dim] = h @ b[:, y_dim]
     eta = z.reshape((-1, z_ndim)) @ a + hb.reshape((-1, y_ndim))
     r = sexp(eta + 0.5 * v.reshape((-1, z_ndim)) @ (a ** 2)) if v is not None else sexp(eta)
+    np.clip(r, 0, maxrate, out=r)
     return np.reshape(r, shape_out)
