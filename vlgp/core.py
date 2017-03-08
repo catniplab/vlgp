@@ -36,7 +36,8 @@ def check_options(kwargs):
     """
     options = dict(kwargs)
     for k, v in DEFAULT_OPTIONS.items():
-        # If key is in the dictionary, return its value. If not, insert key with a value of default and return default.
+        # If key is in the dictionary, return its value.
+        # If not, insert key with a value of default and return default.
         options.setdefault(k, v)
     return options
 
@@ -87,14 +88,14 @@ def elbo(model):
     # LFP (Gaussian) has no firing rate and spike (Poisson) has no 'noise'.
     # useless dims could be removed to save computational time and space.
 
-    llspike = sum(y[:, spike_dims] * eta[:, spike_dims] - r[:,
-                                                          spike_dims])  # verified by predict()
+    llspike = sum(y[:, spike_dims] * eta[:, spike_dims] - r[:, spike_dims])
+    # verified by predict()
 
     # noinspection PyTypeChecker
     lllfp = - 0.5 * sum(
         (
             (y[:, lfp_dims] - eta[:, lfp_dims]) ** 2 + v @ (
-            a[:, lfp_dims] ** 2)) /
+                a[:, lfp_dims] ** 2)) /
         noise[lfp_dims] + log(noise[lfp_dims]))
 
     ll = llspike + lllfp
@@ -108,8 +109,8 @@ def elbo(model):
         w = model['w'][trial, :]
         for z_dim in range(z_ndim):
             G = prior[z_dim]
-            GtWG = G.T @ (w[:, [z_dim]] * G)
-            # TODO: Need a better approximate of mu^T K^{-1} mu than least squares.
+            GtWG = G.T @ (w[trial, :, z_dim, np.newaxis] * G)
+            # TODO: a better approximate of mu^T K^{-1} mu than least squares.
             # G_mldiv_mu = lstsq(G, mu[:, dyn_dim])[0]
             # mu_Kinv_mu = inner(G_mldiv_mu, G_mldiv_mu)
 
@@ -305,7 +306,7 @@ def estep(model: dict):
                                                                       lfp_dims]) / \
                                         noise[lfp_dims]
 
-                wadj = w[trial, ...][:, [z_dim]]  # keep dimension
+                wadj = w[trial, :, z_dim, np.newaxis]  # keep dimension
                 GtWG = G.T @ (wadj * G)
 
                 u = G @ (G.T @ (residual @ a[z_dim, :])) - mu[trial, :, z_dim]
@@ -328,12 +329,11 @@ def estep(model: dict):
             if options['method'] == 'VB':
                 for z_dim in range(z_ndim):
                     G = prior[z_dim]
-                    GtWG = G.T @ (w[trial, ...][:, [z_dim]] * G)
+                    GtWG = G.T @ (w[trial, :, z_dim, np.newaxis] * G)
                     try:
                         block = solve(Ir + GtWG, GtWG, sym_pos=True)
-                        v[trial, :, z_dim] = (
-                            G * (G - G @ GtWG + G @ (GtWG @ block))).sum(
-                            axis=1)
+                        v[trial, :, z_dim] = np.sum(
+                            G * (G - G @ GtWG + G @ (GtWG @ block)), axis=1)
                     except Exception as e:
                         logger.exception(repr(e), exc_info=True)
 
@@ -370,8 +370,8 @@ def mstep(model: dict):
     v_2d = model['v'].reshape((-1, z_ndim))
 
     for i in range(options['m_niter']):
-        eta = mu_2d @ a + einsum('ijk, ki -> ji', x_2d,
-                                 b)  # (neuron, time, regression) x (regression, neuron) -> (time, neuron)
+        eta = mu_2d @ a + einsum('ijk, ki -> ji', x_2d, b)
+        # (neuron, time, regression) x (regression, neuron) -> (time, neuron)
         r = sexp(eta + 0.5 * v_2d @ (a ** 2))
         model['noise'] = var(y_2d - eta, axis=0, ddof=0)  # MLE
 
@@ -384,7 +384,7 @@ def mstep(model: dict):
 
                 if options['hessian']:
                     neghess_a = mu_plus_v_times_a.T @ (
-                        r[:, [y_dim]] * mu_plus_v_times_a)  # + wv
+                        r[:, y_dim, np.newaxis] * mu_plus_v_times_a)
                     neghess_a[np.diag_indices_from(neghess_a)] += r[:,
                                                                   y_dim] @ v_2d
 
@@ -405,7 +405,7 @@ def mstep(model: dict):
 
                 if options['hessian']:
                     neghess_b = x_2d[y_dim, :].T @ (
-                        r[:, [y_dim]] * x_2d[y_dim, :])
+                        r[:, y_dim, np.newaxis] * x_2d[y_dim, :])
                     try:
                         delta_b = solve(neghess_b, grad_b, sym_pos=True)
                     except Exception as e:
@@ -577,19 +577,19 @@ def calc_post_cov(model):
     prior = model['chol']
     rank = prior[0].shape[-1]
     w = model['w']
-    eyer = identity(rank)
+    Ir = identity(rank)
     L = empty((ntrial, z_ndim, nbin, rank))
     for trial in range(ntrial):
         for z_dim in range(z_ndim):
             G = prior[z_dim]
-            GtWG = G.T @ (w[trial, :, [z_dim]].T * G)
+            GtWG = G.T @ (w[trial, :, z_dim, np.newaxis].T * G)
             try:
-                tmp = eyer - GtWG + GtWG @ solve(eyer + GtWG, GtWG,
-                                                 sym_pos=True)  # A should be PD but numerically not
+                tmp = Ir - GtWG + GtWG @ solve(Ir + GtWG, GtWG, sym_pos=True)
+                # A should be PD but numerically not
             except Exception as e:
                 # warnings.warn('Singular matrix. Use least squares instead.')
                 logger.exception(repr(e), exc_info=True)
-                tmp = eyer - GtWG + GtWG @ lstsq(eyer + GtWG, GtWG)[
+                tmp = Ir - GtWG + GtWG @ lstsq(Ir + GtWG, GtWG)[
                     0]  # least squares
             eigval, eigvec = eigh(tmp)
             eigval.clip(0, PINF, out=eigval)  # remove negative eigenvalues
@@ -640,7 +640,7 @@ def update_v(model):
             w = model['w'][trial, :]
             for z_dim in range(z_ndim):
                 G = prior[z_dim]
-                GtWG = G.T @ (w[:, [z_dim]] * G)
+                GtWG = G.T @ (w[:, z_dim, np.newaxis] * G)
                 try:
                     model['v'][trial, :, z_dim] = (
                         G * (G - G @ GtWG + G @ (
