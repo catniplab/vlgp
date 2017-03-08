@@ -263,6 +263,8 @@ def estep(model: dict):
     if not options[ESTEP]:
         return
 
+    constrain_a(model)
+
     y_ndim = model['y'].shape[-1]
     ntrial, nbin, z_ndim = model['mu'].shape
     prior = model['chol']
@@ -333,7 +335,7 @@ def estep(model: dict):
                         logger.exception(repr(e), exc_info=True)
 
         # center over all trials if not only infer posterior
-        constrain_mu(model)
+        # constrain_mu(model)
 
         if norm(dmu) < options['tol'] * norm(mu):
             break
@@ -345,6 +347,8 @@ def mstep(model: dict):
 
     if not options[MSTEP]:
         return
+
+    constrain_mu(model)
 
     y_ndim, ntrial, nbin, x_ndim = model[
         'h'].shape  # neuron, trial, time, regression
@@ -430,7 +434,7 @@ def mstep(model: dict):
                 pass
 
         # normalize loading by latent and rescale latent
-        constrain_a(model)
+        # constrain_a(model)
 
         if norm(da) < options['tol'] * norm(a) and norm(db) < options[
             'tol'] * norm(b):
