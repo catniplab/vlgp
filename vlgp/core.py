@@ -266,6 +266,7 @@ def estep(model: dict):
     if not options[ESTEP]:
         return
 
+    # See the explanation in mstep.
     constrain_a(model)
 
     y_ndim = model['y'].shape[-1]
@@ -351,6 +352,9 @@ def mstep(model: dict):
     if not options[MSTEP]:
         return
 
+    # It's more reasonable to constrain the latent before mstep.
+    # If the parameters are fixed, there's no need to optimize the posterior.
+    # Besides, the constraint modifies the loading and bias.
     constrain_mu(model)
 
     y_ndim, ntrial, nbin, x_ndim = model[
