@@ -93,7 +93,8 @@ def elbo(model):
     # noinspection PyTypeChecker
     lllfp = - 0.5 * sum(
         (
-        (y[:, lfp_dims] - eta[:, lfp_dims]) ** 2 + v @ (a[:, lfp_dims] ** 2)) /
+            (y[:, lfp_dims] - eta[:, lfp_dims]) ** 2 + v @ (
+            a[:, lfp_dims] ** 2)) /
         noise[lfp_dims] + log(noise[lfp_dims]))
 
     ll = llspike + lllfp
@@ -178,10 +179,11 @@ def initialize(model):
         mu = fa.transform(y_)
 
         # constrain loading and center latent
-        scale = norm(a, ord=inf, axis=1, keepdims=True) + eps
-        a /= scale
-        mu *= scale.squeeze()  # compensate latent
-        mu -= mu.mean(axis=0)
+        # scale = norm(a, ord=inf, axis=1, keepdims=True) + eps
+        # a /= scale
+        # mu *= scale.squeeze()  # compensate latent
+        # mu -= mu.mean(axis=0)
+
         mu = mu.reshape((ntrial, nbin, z_ndim))
 
         # noinspection PyTupleAssignmentBalance
@@ -330,7 +332,8 @@ def estep(model: dict):
                     try:
                         block = solve(Ir + GtWG, GtWG, sym_pos=True)
                         v[trial, :, z_dim] = (
-                        G * (G - G @ GtWG + G @ (GtWG @ block))).sum(axis=1)
+                            G * (G - G @ GtWG + G @ (GtWG @ block))).sum(
+                            axis=1)
                     except Exception as e:
                         logger.exception(repr(e), exc_info=True)
 
@@ -381,7 +384,7 @@ def mstep(model: dict):
 
                 if options['hessian']:
                     neghess_a = mu_plus_v_times_a.T @ (
-                    r[:, [y_dim]] * mu_plus_v_times_a)  # + wv
+                        r[:, [y_dim]] * mu_plus_v_times_a)  # + wv
                     neghess_a[np.diag_indices_from(neghess_a)] += r[:,
                                                                   y_dim] @ v_2d
 
@@ -402,7 +405,7 @@ def mstep(model: dict):
 
                 if options['hessian']:
                     neghess_b = x_2d[y_dim, :].T @ (
-                    r[:, [y_dim]] * x_2d[y_dim, :])
+                        r[:, [y_dim]] * x_2d[y_dim, :])
                     try:
                         delta_b = solve(neghess_b, grad_b, sym_pos=True)
                     except Exception as e:
@@ -420,13 +423,14 @@ def mstep(model: dict):
                 tmp = mu_2d.T @ mu_2d
                 tmp[np.diag_indices_from(tmp)] += sum(v_2d, axis=0)
                 a[:, y_dim] = solve(tmp, mu_2d.T @ (
-                y_2d[:, y_dim] - x_2d[y_dim, :] @ b[:, y_dim]), sym_pos=True)
+                    y_2d[:, y_dim] - x_2d[y_dim, :] @ b[:, y_dim]),
+                                    sym_pos=True)
 
                 # b's least squares solution for Gaussian channel
                 # (H'H)^-1 H'(y - ma)
                 b[:, y_dim] = solve(x_2d[y_dim, :].T @ x_2d[y_dim, :],
                                     x_2d[y_dim, :].T @ (
-                                    y_2d[:, y_dim] - mu_2d @ a[:, y_dim]),
+                                        y_2d[:, y_dim] - mu_2d @ a[:, y_dim]),
                                     sym_pos=True)
                 b[1:, y_dim] = 0
                 # TODO: only make history filter components zeros
@@ -640,7 +644,7 @@ def update_v(model):
                 try:
                     model['v'][trial, :, z_dim] = (
                         G * (G - G @ GtWG + G @ (
-                        GtWG @ solve(Ir + GtWG, GtWG, sym_pos=True)))).sum(
+                            GtWG @ solve(Ir + GtWG, GtWG, sym_pos=True)))).sum(
                         axis=1)
                 except LinAlgError:
                     warnings.warn("singular I + G'WG")
@@ -656,12 +660,19 @@ def constrain_mu(model):
     mu_2d = model['mu'].reshape((-1, z_ndim))
     mean_over_trials = mu_2d.mean(axis=0, keepdims=True)
     std_over_trials = mu_2d.std(axis=0, keepdims=True)
-    # compensate bias, commented to isolated from changing external variables
-    model['b'][0, :] += np.squeeze(mean_over_trials @ model['a'])
-    mu_2d -= mean_over_trials
 
-    if options['constrain_mu'] == 'scale':
+    if options['constrain_mu'] == 'location' or options[
+        'constrain_mu'] == 'both':
+        mu_2d -= mean_over_trials
+        # compensate bias
+        # commented to isolated from changing external variables
+        model['b'][0, :] += np.squeeze(mean_over_trials @ model['a'])
+
+    if options['constrain_mu'] == 'scale' or options['constrain_mu'] == 'both':
         mu_2d /= std_over_trials
+        # compensate loading
+        # commented to isolated from changing external variables
+        model['a'] *= std_over_trials.T
 
     model['mu'] = mu_2d.reshape(shape)
 

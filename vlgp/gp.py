@@ -19,9 +19,11 @@ logger = logging.getLogger(__name__)
 
 def se_kernel(x, params):
     """kernel matrix and derivatives"""
-    sigma2, omega, eps = np.exp(params)  # input parameters are logged for unconstrained optimization
+    sigma2, omega, eps = np.exp(
+        params)  # input parameters are logged for unconstrained optimization
 
-    dists = pdist(x.reshape(-1, 1), metric='sqeuclidean')  # vector of pairwise squared distance
+    dists = pdist(x.reshape(-1, 1),
+                  metric='sqeuclidean')  # vector of pairwise squared distance
     Dsq = squareform(dists)  # distance matrix
     K = exp(- omega * Dsq)  # kernel matrix
     dK_dsigma2 = K
@@ -132,7 +134,8 @@ def optim(obj, t, mu, w, params0, bounds, mask, return_f=False):
         return -ll, -dll
 
     try:
-        opt, fval, info = fmin_l_bfgs_b(obj_func, log_param0, bounds=log_bounds)
+        opt, fval, info = fmin_l_bfgs_b(obj_func, log_param0,
+                                        bounds=log_bounds)
     except Exception as e:
         opt = log_param0
         logger.exception(repr(e), exc_info=True)
@@ -238,21 +241,30 @@ def slice_sweep(particle, slice_fn, slice_width=1, step_out=True):
         elif particle['position'] < x_cur:
             x_l = particle['position']
         else:
-            raise ValueError('BUG DETECTED: Shrunk to current position and still not acceptable.')
+            raise ValueError(
+                'BUG DETECTED: Shrunk to current position and still not acceptable.')
 
 
 def gp_slice_sampling(model, slice_width=10):
     options = model['options']
-    log_prior_theta = lambda l: 0.0 if options['omega_bound'][0] < l < options['omega_bound'][1] else -np.inf
+    log_prior_theta = lambda l: 0.0 if options['omega_bound'][0] < l < \
+                                       options['omega_bound'][1] else -np.inf
     ntrial, nbin, z_ndim = model['mu'].shape
     for z_dim in range(z_ndim):
         theta = model['omega'][z_dim]
-        params = {'position': theta, 'f': model['mu'][:, :, z_dim], 'sigma': model['sigma'][z_dim]}
-        update_params(params, lpstar_min=-np.inf, log_prior_theta=log_prior_theta, n=nbin, rank=model['rank'])
+        params = {'position': theta, 'f': model['mu'][:, :, z_dim],
+                  'sigma': model['sigma'][z_dim]}
+        update_params(params, lpstar_min=-np.inf,
+                      log_prior_theta=log_prior_theta, n=nbin,
+                      rank=model['rank'])
         step_out = slice_width > 0
         slice_sweep(params,
-                    slice_fn=lambda pp, lpstar_min: update_params(pp, lpstar_min, log_prior_theta, n=nbin,
-                                                                  rank=model['rank']),
+                    slice_fn=lambda pp, lpstar_min: update_params(pp,
+                                                                  lpstar_min,
+                                                                  log_prior_theta,
+                                                                  n=nbin,
+                                                                  rank=model[
+                                                                      'rank']),
                     slice_width=slice_width,
                     step_out=step_out)
         model['omega'][z_dim] = params['position']
@@ -305,15 +317,18 @@ def gp_small_segments(model):
         mask = np.array([0, 1, 0])
 
         sigmasq, omega_new, _ = optim(options[HOBJ],
-                                         np.arange(seg_len),
-                                         mu[:, segment, z_dim].reshape(-1, seg_len).T,
-                                         w[:, segment, z_dim].reshape(-1, seg_len).T,
-                                         hparam0,
-                                         bounds,
-                                         mask=mask,
-                                         return_f=False)
+                                      np.arange(seg_len),
+                                      mu[:, segment, z_dim].reshape(-1,
+                                                                    seg_len).T,
+                                      w[:, segment, z_dim].reshape(-1,
+                                                                   seg_len).T,
+                                      hparam0,
+                                      bounds,
+                                      mask=mask,
+                                      return_f=False)
         if not np.any(np.isclose(omega_new, options['omega_bound'])):
             omega[z_dim] = omega_new
         sigma[z_dim] = sqrt(sigmasq)
     model[PRIORICHOL] = np.array(
-        [ichol_gauss(nbin, omega[dyn_dim], rank) * sigma[dyn_dim] for dyn_dim in range(z_ndim)])
+        [ichol_gauss(nbin, omega[dyn_dim], rank) * sigma[dyn_dim] for dyn_dim
+         in range(z_ndim)])

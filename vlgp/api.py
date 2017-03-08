@@ -146,6 +146,7 @@ def _fit(y,
     printer = Printer()
     callbacks.extend([printer.print])
 
+    saver = None
     if path is not None:
         saver = Saver()
         callbacks.extend([saver.save])
@@ -155,7 +156,8 @@ def _fit(y,
     finally:
         # print('\nExiting...\n')
         printer.print(model)
-        saver.save(model, force=True)
+        if saver is not None:
+            saver.save(model, force=True)
 
     return model
 
@@ -197,6 +199,9 @@ def predict(z, a, b, y=None, v=None, maxrate=None):
             h = add_constant(lagmat(y[trial, :, y_dim], lag=history_filter))
             hb[trial, :, y_dim] = h @ b[:, y_dim]
     eta = z.reshape((-1, z_ndim)) @ a + hb.reshape((-1, y_ndim))
-    r = sexp(eta + 0.5 * v.reshape((-1, z_ndim)) @ (a ** 2)) if v is not None else sexp(eta)
+    if v is not None:
+        r = np.exp(eta + 0.5 * v.reshape((-1, z_ndim)) @ (a ** 2))
+    else:
+        r = np.exp(eta)
     np.clip(r, 0, maxrate, out=r)
     return np.reshape(r, shape_out)
