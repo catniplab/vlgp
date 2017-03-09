@@ -38,6 +38,7 @@ class Printer:
     @staticmethod
     def print(model):
         stat = dict()
+        stat['it'] = model['it']
         stat['E-step'] = model['e_elapsed'] and model['e_elapsed'][-1]
         stat['M-step'] = model['m_elapsed'] and model['m_elapsed'][-1]
         stat['H-step'] = model['h_elapsed'] and model['h_elapsed'][-1]
