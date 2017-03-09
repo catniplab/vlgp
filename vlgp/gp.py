@@ -246,9 +246,8 @@ def slice_sweep(particle, slice_fn, slice_width=1, step_out=True):
 
 
 def gp_slice_sampling(model, slice_width=10):
-    options = model['options']
-    log_prior_theta = lambda l: 0.0 if options['omega_bound'][0] < l < \
-                                       options['omega_bound'][1] else -np.inf
+    log_prior_theta = lambda l: 0.0 if model['omega_bound'][0] < l < \
+                                       model['omega_bound'][1] else -np.inf
     ntrial, nbin, z_ndim = model['mu'].shape
     for z_dim in range(z_ndim):
         theta = model['omega'][z_dim]
@@ -292,16 +291,15 @@ def update_params(params, lpstar_min, log_prior_theta, n, rank):
 
 
 def gp_small_segments(model):
-    options = model['options']
 
     ntrial, nbin, z_ndim = model['mu'].shape
     prior = model['chol']
     rank = prior[0].shape[-1]
     mu = model['mu']
     w = model['w']
-    seg_len = options['seg_len']
+    seg_len = model['seg_len']
     segment = model['segment']
-    # subsample_size = options[TRIALLET]
+    # subsample_size = model[TRIALLET]
     # if subsample_size is None:
     #     subsample_size = nbin // 2
     # if subsample_size > nbin:
@@ -310,13 +308,13 @@ def gp_small_segments(model):
     omega = model['omega']
     for z_dim in range(z_ndim):
         # subsample = gp.subsample(nbin, subsample_size)
-        hparam0 = (sigma[z_dim] ** 2, omega[z_dim], options['gp_noise'])
+        hparam0 = (sigma[z_dim] ** 2, omega[z_dim], model['gp_noise'])
         bounds = ((1e-3, 1),
-                  options['omega_bound'],
-                  (options['gp_noise'] / 2, options['gp_noise'] * 2))
+                  model['omega_bound'],
+                  (model['gp_noise'] / 2, model['gp_noise'] * 2))
         mask = np.array([0, 1, 0])
 
-        sigmasq, omega_new, _ = optim(options[HOBJ],
+        sigmasq, omega_new, _ = optim(model[HOBJ],
                                       np.arange(seg_len),
                                       mu[:, segment, z_dim].reshape(-1,
                                                                     seg_len).T,
@@ -326,7 +324,7 @@ def gp_small_segments(model):
                                       bounds,
                                       mask=mask,
                                       return_f=False)
-        if not np.any(np.isclose(omega_new, options['omega_bound'])):
+        if not np.any(np.isclose(omega_new, model['omega_bound'])):
             omega[z_dim] = omega_new
         sigma[z_dim] = sqrt(sigmasq)
     model[PRIORICHOL] = np.array(

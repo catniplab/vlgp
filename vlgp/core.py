@@ -3,43 +3,18 @@ import logging
 import warnings
 
 import numpy as np
-from numpy import identity, einsum, trace, empty, diag, var, asarray, \
-    zeros_like, \
-    empty_like, sum, reshape
+from numpy import identity, einsum, trace, empty, diag, var, empty_like, sum, reshape
 from numpy.core.umath import sqrt, PINF, log
 from numpy.linalg import slogdet
 from scipy.linalg import lstsq, eigh, solve, norm, svd, LinAlgError
-from sklearn.decomposition import FactorAnalysis
 
-from vlgp.gp import gp_small_segments, gp_slice_sampling
 from .constant import *
 from .evaluation import timer
-from .math import ichol_gauss, sexp
+from .gp import gp_small_segments, gp_slice_sampling
+from .math import sexp
 from .name import *
 
 logger = logging.getLogger(__name__)
-
-
-def check_options(kwargs):
-    """
-    Fill missing options with default values
-
-    Parameters
-    ----------
-    kwargs : dict
-        options with missing values
-
-    Returns
-    -------
-    dict
-        full options
-    """
-    options = dict(kwargs)
-    for k, v in DEFAULT_OPTIONS.items():
-        # If key is in the dictionary, return its value.
-        # If not, insert key with a value of default and return default.
-        options.setdefault(k, v)
-    return options
 
 
 def elbo(model):
@@ -57,8 +32,7 @@ def elbo(model):
     ll : double
         log likelihood
     """
-    y_ndim, ntrial, nbin, nreg = model[
-        'h'].shape  # neuron, trial, time, regression
+    y_ndim, ntrial, nbin, nreg = model['h'].shape  # neuron, trial, time, regression
     z_ndim = model['mu'].shape[-1]
     prior = model['chol']
     rank = prior[0].shape[-1]
@@ -130,126 +104,6 @@ def elbo(model):
     return lb, ll
 
 
-def check_model(model):
-    from .constant import MODEL_FIELDS, PREREQUISITE_FIELDS, DEFAULT_OPTIONS
-    for field in MODEL_FIELDS:
-        model.setdefault(field, None)
-
-    missing_fields = [field for field in PREREQUISITE_FIELDS if
-                      model.get(field) is None]
-    if missing_fields:
-        raise ValueError('{} missed'.format(missing_fields))
-
-    for k, v in DEFAULT_OPTIONS.items():
-        # If key is in the dictionary, return its value.
-        # If not, insert key with a value of default and return default.
-        model['options'].setdefault(k, v)
-
-    model[Y_TYPE] = check_y_type(model[Y_TYPE])
-
-
-def initialize(model):
-    check_model(model)
-    options = model['options']
-
-    y = model['y']
-    h = model['h']
-    a = model['a']
-    b = model['b']
-    mu = model['mu']
-    sigma = model['sigma']
-    omega = model['omega']
-
-    ntrial, nbin, y_ndim = y.shape
-    history_filter = model['history_filter']
-    z_ndim = model['dyn_ndim']
-
-    y_ = y.reshape((-1, y_ndim))
-
-    eps = options['eps']
-
-    # Initialize posterior and loading
-    # Use factor analysis if both missing initial values
-    # Use least squares if missing one of loading and latent
-    if a is None and mu is None:
-        fa = FactorAnalysis(n_components=z_ndim, svd_method='lapack')
-        y_ = y.reshape((-1, y_ndim))
-        y0 = y[0, :]
-        fa.fit(y0)
-        a = fa.components_
-        mu = fa.transform(y_)
-
-        # constrain loading and center latent
-        # scale = norm(a, ord=inf, axis=1, keepdims=True) + eps
-        # a /= scale
-        # mu *= scale.squeeze()  # compensate latent
-        # mu -= mu.mean(axis=0)
-
-        mu = mu.reshape((ntrial, nbin, z_ndim))
-
-        # noinspection PyTupleAssignmentBalance
-        # U, s, Vh = svd(a, full_matrices=False)
-        # mu = np.reshape(mu @ a @ Vh.T, (ntrial, nbin, nlatent))
-        # a[:] = Vh
-    else:
-        if mu is None:
-            mu = lstsq(a.T, y.reshape((-1, y_ndim)).T)[0].T.reshape(
-                (ntrial, nbin, z_ndim))
-        elif a is None:
-            a = lstsq(mu.reshape((-1, z_ndim)), y.reshape((-1, y_ndim)))[0]
-
-    # initialize regression
-    # if b is None:
-    #     b = leastsq(h, y)
-    spike_dims = model[Y_TYPE] == SPIKE
-
-    if b is None:
-        b = empty((1 + history_filter, y_ndim), dtype=float)
-        for y_dim in np.arange(y_ndim)[spike_dims]:
-            b[:, y_dim] = \
-                lstsq(h.reshape((y_ndim, -1, 1 + history_filter))[y_dim, :],
-                      y.reshape((-1, y_ndim))[:, y_dim])[0]
-
-    # initialize noises of LFP
-    model['noise'] = var(y_, axis=0, ddof=0)
-    model[Y_TYPE][model['noise'] == 0] = INACTIVE  # inactive neurons
-    a[:, model[Y_TYPE] == INACTIVE] = 0
-    b[:, model[Y_TYPE] == INACTIVE] = 0
-
-    ####################
-    # initialize prior #
-    ####################
-
-    # make Cholesky of prior
-    if model['rank'] is None:
-        model['rank'] = nbin
-    rank = model['rank']
-
-    prior = np.array(
-        [ichol_gauss(nbin, omega[z_dim], rank) * sigma[z_dim] for z_dim in
-         range(z_ndim)])
-
-    # fill model fields
-    model['a'] = a
-    model['b'] = b
-    model['mu'] = mu
-    model['w'] = zeros_like(mu, dtype=float)
-    model['v'] = zeros_like(mu, dtype=float)
-    model['chol'] = prior
-
-    model['dmu'] = zeros_like(model['mu'])
-    model['da'] = zeros_like(model['a'])
-    model['db'] = zeros_like(model['b'])
-
-    update_w(model)
-    update_v(model)
-
-    # cut trials
-    from vlgp.util import cut_trials
-    model['segment'] = cut_trials(nbin, ntrial,
-                                  seg_len=model['options']['seg_len'])
-
-
 def leastsq(x, y):
     y_ndim = y.shape[-1]
     p = x.shape[-1]
@@ -261,9 +115,7 @@ def leastsq(x, y):
 
 def estep(model: dict):
     """Update variational distribution q (E step)"""
-    options = model['options']
-
-    if not options[ESTEP]:
+    if not model[ESTEP]:
         return
 
     # See the explanation in mstep.
@@ -276,8 +128,8 @@ def estep(model: dict):
     a = model['a']
     b = model['b']
     noise = model['noise']
-    spike_dims = model[Y_TYPE] == SPIKE
-    lfp_dims = model[Y_TYPE] == LFP
+    spike = model[Y_TYPE] == SPIKE
+    lfp = model[Y_TYPE] == LFP
 
     Ir = identity(rank)
     residual = empty((nbin, y_ndim), dtype=float)
@@ -290,7 +142,8 @@ def estep(model: dict):
     v = model['v']
     dmu = model['dmu']
 
-    for i in range(options['e_niter']):
+    for i in range(model['e_niter']):
+        # TODO: combine trials
         for trial in range(ntrial):
             xb = einsum('ijk, ki -> ji', x[:, trial, :, :], b)
             eta = mu[trial, :, :] @ a + xb
@@ -301,11 +154,8 @@ def estep(model: dict):
                 # working residuals
                 # extensible to many other distributions
                 # similar form to GLM
-                residual[:, spike_dims] = y[trial, ...][:, spike_dims] - r[:,
-                                                                         spike_dims]
-                residual[:, lfp_dims] = (y[trial, ...][:, lfp_dims] - eta[:,
-                                                                      lfp_dims]) / \
-                                        noise[lfp_dims]
+                residual[:, spike] = y[trial, ...][:, spike] - r[:, spike]
+                residual[:, lfp] = (y[trial, ...][:, lfp] - eta[:, lfp]) / noise[lfp]
 
                 wadj = w[trial, :, z_dim, np.newaxis]  # keep dimension
                 GtWG = G.T @ (wadj * G)
@@ -314,7 +164,7 @@ def estep(model: dict):
                 try:
                     block = solve(Ir + GtWG, (wadj * G).T @ u, sym_pos=True)
                     delta_mu = u - G @ ((wadj * G).T @ u) + G @ (GtWG @ block)
-                    clip(delta_mu, options['dmu_bound'])
+                    clip(delta_mu, model['dmu_bound'])
                 except Exception as e:
                     logger.exception(repr(e), exc_info=True)
                     delta_mu = 0
@@ -324,10 +174,10 @@ def estep(model: dict):
 
             eta = mu[trial, :, :] @ a + xb
             r = sexp(eta + 0.5 * v[trial, :, :] @ (a ** 2))
-            U[:, spike_dims] = r[:, spike_dims]
-            U[:, lfp_dims] = 1 / noise[lfp_dims]
+            U[:, spike] = r[:, spike]
+            U[:, lfp] = 1 / noise[lfp]
             w[trial, :, :] = U @ (a.T ** 2)
-            if options['method'] == 'VB':
+            if model['method'] == 'VB':
                 for z_dim in range(z_ndim):
                     G = prior[z_dim]
                     GtWG = G.T @ (w[trial, :, z_dim, np.newaxis] * G)
@@ -341,15 +191,13 @@ def estep(model: dict):
         # center over all trials if not only infer posterior
         # constrain_mu(model)
 
-        if norm(dmu) < options['tol'] * norm(mu):
+        if norm(dmu) < model['tol'] * norm(mu):
             break
 
 
 def mstep(model: dict):
     """Optimize loading and regression (M step)"""
-    options = model['options']
-
-    if not options[MSTEP]:
+    if not model[MSTEP]:
         return
 
     # It's more reasonable to constrain the latent before mstep.
@@ -373,7 +221,7 @@ def mstep(model: dict):
     mu_2d = model['mu'].reshape((-1, z_ndim))
     v_2d = model['v'].reshape((-1, z_ndim))
 
-    for i in range(options['m_niter']):
+    for i in range(model['m_niter']):
         eta = mu_2d @ a + einsum('ijk, ki -> ji', x_2d, b)
         # (neuron, time, regression) x (regression, neuron) -> (time, neuron)
         r = sexp(eta + 0.5 * v_2d @ (a ** 2))
@@ -383,42 +231,39 @@ def mstep(model: dict):
             if y_types[y_dim] == SPIKE:
                 # loading
                 mu_plus_v_times_a = mu_2d + v_2d * a[:, y_dim]
-                grad_a = mu_2d.T @ y_2d[:, y_dim] - mu_plus_v_times_a.T @ r[:,
-                                                                          y_dim]
+                grad_a = mu_2d.T @ y_2d[:, y_dim] - mu_plus_v_times_a.T @ r[:, y_dim]
 
-                if options['hessian']:
-                    neghess_a = mu_plus_v_times_a.T @ (
-                        r[:, y_dim, np.newaxis] * mu_plus_v_times_a)
-                    neghess_a[np.diag_indices_from(neghess_a)] += r[:,
-                                                                  y_dim] @ v_2d
+                if model['hessian']:
+                    neghess_a = mu_plus_v_times_a.T @ (r[:, y_dim, np.newaxis] * mu_plus_v_times_a)
+                    neghess_a[np.diag_indices_from(neghess_a)] += r[:, y_dim] @ v_2d
 
                     try:
                         delta_a = solve(neghess_a, grad_a, sym_pos=True)
                     except Exception as e:
                         logger.exception(repr(e), exc_info=True)
-                        delta_a = options['learning_rate'] * grad_a
+                        delta_a = model['learning_rate'] * grad_a
                 else:
-                    delta_a = options['learning_rate'] * grad_a
+                    delta_a = model['learning_rate'] * grad_a
 
-                clip(delta_a, options['da_bound'])
+                clip(delta_a, model['da_bound'])
                 da[:, y_dim] = delta_a
                 a[:, y_dim] += delta_a
 
                 # regression
                 grad_b = x_2d[y_dim, :].T @ (y_2d[:, y_dim] - r[:, y_dim])
 
-                if options['hessian']:
+                if model['hessian']:
                     neghess_b = x_2d[y_dim, :].T @ (
                         r[:, y_dim, np.newaxis] * x_2d[y_dim, :])
                     try:
                         delta_b = solve(neghess_b, grad_b, sym_pos=True)
                     except Exception as e:
                         logger.exception(repr(e), exc_info=True)
-                        delta_b = options['learning_rate'] * grad_b
+                        delta_b = model['learning_rate'] * grad_b
                 else:
-                    delta_b = options['learning_rate'] * grad_b
+                    delta_b = model['learning_rate'] * grad_b
 
-                clip(delta_b, options['db_bound'])
+                clip(delta_b, model['db_bound'])
                 db[:, y_dim] = delta_b
                 b[:, y_dim] += delta_b
             elif y_types[y_dim] == LFP:
@@ -433,8 +278,7 @@ def mstep(model: dict):
                 # b's least squares solution for Gaussian channel
                 # (H'H)^-1 H'(y - ma)
                 b[:, y_dim] = solve(x_2d[y_dim, :].T @ x_2d[y_dim, :],
-                                    x_2d[y_dim, :].T @ (
-                                        y_2d[:, y_dim] - mu_2d @ a[:, y_dim]),
+                                    x_2d[y_dim, :].T @ (y_2d[:, y_dim] - mu_2d @ a[:, y_dim]),
                                     sym_pos=True)
                 b[1:, y_dim] = 0
                 # TODO: only make history filter components zeros
@@ -444,23 +288,21 @@ def mstep(model: dict):
         # normalize loading by latent and rescale latent
         # constrain_a(model)
 
-        if norm(da) < options['tol'] * norm(a) and norm(db) < options[
-            'tol'] * norm(b):
+        if norm(da) < model['tol'] * norm(a) and norm(db) < model['tol'] * norm(b):
             break
 
 
 def hstep(model: dict):
     """Optimize hyperparameters"""
-    options = model['options']
-    if not options[HSTEP]:
+    if not model[HSTEP]:
         return
 
-    if model[ITER] % options[HPERIOD] != 0:
+    if model[ITER] % model[HPERIOD] != 0:
         return
 
-    if options['gp'] == 'cutting':
+    if model['gp'] == 'cutting':
         gp_small_segments(model)
-    elif options['gp'] == 'sampling':
+    elif model['gp'] == 'sampling':
         gp_slice_sampling(model)
     else:
         raise ValueError('Unsupported hyperparameter method')
@@ -468,9 +310,8 @@ def hstep(model: dict):
 
 def vem(model, callbacks=None):
     callbacks = callbacks or []
-    options = model['options']
-    tol = options['tol']
-    niter = options['niter']
+    tol = model['tol']
+    niter = model['niter']
 
     model.setdefault('it', 0)
     model.setdefault('e_elapsed', [])
@@ -485,7 +326,9 @@ def vem(model, callbacks=None):
     #######################
     # iterative algorithm #
     #######################
-    gc.disable()  # disable gabbage collection during the iterative procedure
+
+    # disable gabbage collection during the iterative procedure
+    gc.disable()
     for it in range(model['it'], niter):
         model['it'] += 1
 
@@ -529,8 +372,7 @@ def vem(model, callbacks=None):
         da = model['da']
         db = model['db']
 
-        converged = norm(dmu) < tol * norm(mu) and norm(da) < tol * norm(
-            a) and norm(db) < tol * norm(b)
+        converged = norm(dmu) < tol * norm(mu) and norm(da) < tol * norm(a) and norm(db) < tol * norm(b)
         stop = converged
 
         if stop:
@@ -540,40 +382,6 @@ def vem(model, callbacks=None):
     # end of iterative procedure #
     ##############################
     gc.enable()  # enable gabbage collection
-
-
-def check_y_type(types):
-    types = asarray(types)
-    if np.issubdtype(types.dtype, np.integer):
-        return types
-    coded_types = np.empty_like(types, dtype=int)
-    for i, type_ in enumerate(types):
-        if type_ == 'spike':
-            coded_types[i] = SPIKE
-        elif type_ == 'lfp':
-            coded_types[i] = LFP
-        else:
-            coded_types[i] = UNUSED
-    return coded_types
-
-
-def postprocess(model):
-    """
-    Remove intermediate and empty variables, and compute decomposition of posterior covariance.
-
-    Parameters
-    ----------
-    model : dict
-        raw fit
-
-    Returns
-    -------
-    dict
-        fit that contains prior, posterior, loading and regression
-    """
-    # calc_post_cov(model)
-    model.pop('h')
-    model.pop('stat')
 
 
 def calc_post_cov(model):
@@ -634,7 +442,7 @@ def update_w(model):
 
 
 def update_v(model):
-    if model['options']['method'] == VB:
+    if model['method'] == VB:
         prior = model['chol']
         rank = prior[0].shape[-1]
         Ir = identity(rank)
@@ -655,8 +463,7 @@ def update_v(model):
 
 
 def constrain_mu(model):
-    options = model['options']
-    if not options['constrain_mu']:
+    if not model['constrain_mu']:
         return
 
     z_ndim = model['dyn_ndim']
@@ -665,14 +472,13 @@ def constrain_mu(model):
     mean_over_trials = mu_2d.mean(axis=0, keepdims=True)
     std_over_trials = mu_2d.std(axis=0, keepdims=True)
 
-    if options['constrain_mu'] == 'location' or options[
-        'constrain_mu'] == 'both':
+    if model['constrain_mu'] == 'location' or model['constrain_mu'] == 'both':
         mu_2d -= mean_over_trials
         # compensate bias
         # commented to isolated from changing external variables
         model['b'][0, :] += np.squeeze(mean_over_trials @ model['a'])
 
-    if options['constrain_mu'] == 'scale' or options['constrain_mu'] == 'both':
+    if model['constrain_mu'] == 'scale' or model['constrain_mu'] == 'both':
         mu_2d /= std_over_trials
         # compensate loading
         # commented to isolated from changing external variables
@@ -682,12 +488,11 @@ def constrain_mu(model):
 
 
 def constrain_a(model):
-    options = model['options']
-    if not options['constrain_a']:
+    if not model['constrain_a']:
         return
 
-    method = options['constrain_a']
-    eps = options['eps']
+    method = model['constrain_a']
+    eps = model['eps']
 
     shape_mu = model['mu'].shape
     mu_2d = model['mu'].reshape((-1, shape_mu[-1]))

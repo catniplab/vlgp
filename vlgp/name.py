@@ -27,4 +27,4 @@ PRIORTIMESCALE = 'omega'
 MAXITER = 'niter'
 ITER = 'it'
 
-Y_TYPE = 'channel'
+Y_TYPE = 'y_type'

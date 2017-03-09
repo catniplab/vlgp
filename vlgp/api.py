@@ -1,9 +1,10 @@
 import numpy as np
 from numpy import asarray, newaxis, empty
 
+from .preprocess import build_model
 from .callback import Saver, Printer
-from .core import initialize, vem
-from .math import sexp
+from .core import vem
+from vlgp.preprocess import initialize
 from .util import add_constant, lagmat
 
 
@@ -11,45 +12,8 @@ __all__ = ['fit', 'predict']
 
 
 def fit(**kwargs):
-    # TODO: add a function that accepts model dict directly
-    # y = kwargs.get('y')
-    # dyn_ndim = kwargs.get('dyn_ndim')
-    # x = kwargs.get('x')
-    # obs_types = kwargs.get('obs_types')
-    # a = kwargs.get('a')
-    # b = kwargs.get('b')
-    # mu = kwargs.get('mu')
-    # history_filter = kwargs.get('history_filter')
-    # alpha = kwargs.get('alpha')
-    # beta = kwargs.get('beta')
-    # z = kwargs.get('z')
-    # sigma = kwargs.get('sigma')
-    # omega = kwargs.get('omega')
-    # rank = kwargs.get('rank')
-    # path = kwargs.get('path')
-    # kwargs.setdefault('y', None)
-    return _fit(**kwargs)
-
-
-def _fit(y,
-        dyn_ndim,
-        x=None,
-        obs_types=None,
-        a=None,
-        b=None,
-        mu=None,
-        history_filter=0,
-        z=None,
-        alpha=None,
-        beta=None,
-        sigma=None,
-        omega=None,
-        rank=None,
-        path=None,
-        callbacks=None,
-        **kwargs):
     """
-    vlgp main function
+    vLGP API
 
     Parameters
     ----------
@@ -73,8 +37,8 @@ def _fit(y,
         true value of loading
     beta : ndarray, optional
         true value of regression
-    history_filter : int, optional
-        history_filter length
+    history : int, optional
+        history filter length
     rank : int, optional
         rank of incomplete Cholesky
     eps : double, optional
@@ -85,8 +49,6 @@ def _fit(y,
         path to the save file
     callbacks : list, optional
         callbacks
-    kwargs : dict, optional
-        algorithm options. See fill_options()
 
     Returns
     -------
@@ -94,59 +56,17 @@ def _fit(y,
         fit
     """
 
-    # TODO: record trial numbers and neuron IDs
+    callbacks = kwargs.pop('callbacks', [])
 
-    y = asarray(y)
-    y = y.astype(float)
-    if y.ndim < 2:
-        y = y[..., newaxis]
-    if y.ndim < 3:
-        y = y[newaxis, ...]
-
-    # obs_types = check_y_type(obs_types)
-    ntrial, nbin, obs_ndim = y.shape
-
-    if obs_types is None:
-        obs_types = ['spike'] * obs_ndim
-
-    # obs_types = obs_types if len(obs_types) > 0 else ['spike'] * obs_ndim  # all are spike trains by default
-    # print(obs_types)
-
-    # make design matrix of regression
-    h = empty((obs_ndim, ntrial, nbin, 1 + history_filter), dtype=float)
-    for obs_dim in range(obs_ndim):
-        for trial in range(ntrial):
-            h[obs_dim, trial, :] = add_constant(lagmat(y[trial, :, obs_dim], lag=history_filter))
-
-    # Initialize posterior and loading
-    # Use factor analysis if both missing initial values
-    # Use least squares if missing one of loading and latent
-
-    model = dict(y=y,
-                 channel=obs_types,
-                 dyn_ndim=dyn_ndim,
-                 history_filter=history_filter,
-                 h=h,
-                 mu=mu,
-                 a=a,
-                 b=b,
-                 sigma=sigma,
-                 omega=omega,
-                 rank=rank,
-                 x=z,
-                 alpha=alpha,
-                 beta=beta,
-                 path=path,
-                 options=kwargs)
+    model = build_model(**kwargs)
 
     initialize(model)
-
-    callbacks = callbacks or []
 
     printer = Printer()
     callbacks.extend([printer.print])
 
     saver = None
+    path = model.get('path')
     if path is not None:
         saver = Saver()
         callbacks.extend([saver.save])
@@ -154,7 +74,6 @@ def _fit(y,
     try:
         vem(model, callbacks)
     finally:
-        # print('\nExiting...\n')
         printer.print(model)
         if saver is not None:
             saver.save(model, force=True)
@@ -162,7 +81,7 @@ def _fit(y,
     return model
 
 
-def predict(z, a, b, y=None, v=None, maxrate=None):
+def predict(z, a, b, v=None, maxrate=None, y=None):
     """
     Predict firing rate
 
@@ -174,10 +93,12 @@ def predict(z, a, b, y=None, v=None, maxrate=None):
         loading
     b : ndarray
         history filter
-    y : ndarray
-        spike trains for history filter
     v : ndarray
         posterior variance
+    maxrate : float
+        maximum predicted firing rate
+    y : ndarray
+        spike trains for history filter
 
     Returns
     -------
@@ -186,7 +107,7 @@ def predict(z, a, b, y=None, v=None, maxrate=None):
     """
     ntrial, nbin, z_ndim = z.shape
     y_ndim = a.shape[1]
-    history_filter = b.shape[0] - 1
+    history = b.shape[0] - 1
 
     shape_out = (ntrial, nbin, y_ndim)
     # regression (h dot b) part
@@ -196,7 +117,7 @@ def predict(z, a, b, y=None, v=None, maxrate=None):
     hb = empty(shape_out)
     for y_dim in range(y_ndim):
         for trial in range(ntrial):
-            h = add_constant(lagmat(y[trial, :, y_dim], lag=history_filter))
+            h = add_constant(lagmat(y[trial, :, y_dim], lag=history))
             hb[trial, :, y_dim] = h @ b[:, y_dim]
     eta = z.reshape((-1, z_ndim)) @ a + hb.reshape((-1, y_ndim))
     if v is not None:
