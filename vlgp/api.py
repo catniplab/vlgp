@@ -4,7 +4,7 @@ from numpy import asarray, newaxis, empty
 from .preprocess import build_model
 from .callback import Saver, Printer
 from .core import vem
-from vlgp.preprocess import initialize
+from vlgp.initialization import factanal
 from .util import add_constant, lagmat
 
 
@@ -19,7 +19,7 @@ def fit(**kwargs):
     ----------
     y : ndarray
         obserbation
-    obs_types : ndarray
+    y_type : ndarray
         types of observation dimensions, 'spike' or 'lfp'
     dyn_ndim : int
         number of latent dimensions
@@ -60,7 +60,7 @@ def fit(**kwargs):
 
     model = build_model(**kwargs)
 
-    initialize(model)
+    factanal(model)
 
     printer = Printer()
     callbacks.extend([printer.print])
@@ -92,7 +92,7 @@ def predict(z, a, b, v=None, maxrate=None, y=None):
     a : ndarray
         loading
     b : ndarray
-        history filter
+        regression
     v : ndarray
         posterior variance
     maxrate : float

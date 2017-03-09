@@ -1,14 +1,9 @@
 import numpy as np
-from numpy import empty, var, zeros_like
-from scipy.linalg import lstsq
-from sklearn.decomposition import FactorAnalysis
 
-from .constant import SPIKE, UNUSED
-from .core import update_w, update_v
-from .math import ichol_gauss
-from .util import add_constant, lagmat
+from vlgp.math import ichol_gauss
 from .constant import REQUIRED_FIELDS, TYPE_CODE, DEFAULT_VALUES
 from .name import Y_TYPE
+from .util import add_constant, lagmat
 
 
 def build_model(**kwargs):
@@ -43,9 +38,10 @@ def check_model(model):
     ntrial, nbin, y_ndim = model['y'].shape
 
     # sanity check
-    if y_ndim < model['dyn_ndim']:
+    z_ndim = model['dyn_ndim']
+    if y_ndim < z_ndim:
         raise ValueError("The number of observation dimensions, {}, is less "
-                         "than that of latent dimensions, {}.".format(y_ndim, model['dyn_ndim']))
+                         "than that of latent dimensions, {}.".format(y_ndim, z_ndim))
 
     types = model.get(Y_TYPE)
     if types is None:
@@ -99,93 +95,12 @@ def check_model(model):
         model['omega'] = np.empty(model['dyn_ndim'])
         model['omega'][:] = np.asarray(omega)
 
-
-def initialize(model):
-    y = model['y']
-    h = model['h']
-    a = model['a']
-    b = model['b']
-    mu = model['mu']
-    sigma = model['sigma']
-    omega = model['omega']
-
-    ntrial, nbin, y_ndim = y.shape
-    history = model['history']
-    z_ndim = model['dyn_ndim']
-
-    y_2d = y.reshape((-1, y_ndim))
-
-    # Initialize posterior and loading
-    # Use factor analysis if both missing initial values
-    # Use least squares if missing one of loading and latent
-    if a is None and mu is None:
-        fa = FactorAnalysis(n_components=z_ndim, svd_method='lapack')
-        y0 = y[0, :]
-        fa.fit(y0)
-        a = fa.components_
-        mu_2d = fa.transform(y_2d)
-
-        # constrain loading and center latent
-        # scale = norm(a, ord=inf, axis=1, keepdims=True) + eps
-        # a /= scale
-        # mu *= scale.squeeze()  # compensate latent
-        # mu -= mu.mean(axis=0)
-
-        mu = mu_2d.reshape((ntrial, nbin, z_ndim))
-
-        # noinspection PyTupleAssignmentBalance
-        # U, s, Vh = svd(a, full_matrices=False)
-        # mu = np.reshape(mu @ a @ Vh.T, (ntrial, nbin, nlatent))
-        # a[:] = Vh
-    else:
-        if mu is None:
-            mu = lstsq(a.T, y_2d.T)[0].T.reshape((ntrial, nbin, z_ndim))
-        elif a is None:
-            a = lstsq(mu.reshape((-1, z_ndim)), y_2d)[0]
-
-    # initialize regression
-    # if b is None:
-    #     b = leastsq(h, y)
-    spike = model[Y_TYPE] == SPIKE
-
-    if b is None:
-        b = empty((1 + history, y_ndim), dtype=float)
-        for y_dim in np.arange(y_ndim)[spike]:
-            b[:, y_dim] = \
-                lstsq(h.reshape((y_ndim, -1, 1 + history))[y_dim, :],
-                      y.reshape((-1, y_ndim))[:, y_dim])[0]
-
-    # initialize noises of LFP
-    model['noise'] = var(y_2d, axis=0, ddof=0)
-    model[Y_TYPE][model['noise'] == 0] = UNUSED
-    a[:, model[Y_TYPE] == UNUSED] = 0
-    b[:, model[Y_TYPE] == UNUSED] = 0
-
-    ####################
-    # initialize prior #
-    ####################
-
     rank = model['rank']
 
-    prior = np.array(
-        [ichol_gauss(nbin, omega[z_dim], rank) * sigma[z_dim] for z_dim in
-         range(z_ndim)])
-
-    # fill model fields
-    model['a'] = a
-    model['b'] = b
-    model['mu'] = mu
-    model['w'] = zeros_like(mu, dtype=float)
-    model['v'] = zeros_like(mu, dtype=float)
-    model['chol'] = prior
-
-    model['dmu'] = zeros_like(model['mu'])
-    model['da'] = zeros_like(model['a'])
-    model['db'] = zeros_like(model['b'])
-
-    update_w(model)
-    update_v(model)
+    model['chol'] = np.array([ichol_gauss(nbin, w, rank) * s for s, w in
+                              zip(model['sigma'], model['omega'])])
 
     # cut trials
     from .util import cut_trials
-    model['segment'] = cut_trials(nbin, ntrial, seg_len=model['seg_len'])
+    if model.get('segment') is None:
+        model['segment'] = cut_trials(nbin, ntrial, seg_len=model['seg_len'])
