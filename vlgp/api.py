@@ -1,12 +1,11 @@
 import numpy as np
-from numpy import asarray, newaxis, empty
+from numpy import empty
 
-from .preprocess import build_model
+from .initialization import factanal
 from .callback import Saver, Printer
 from .core import vem
-from vlgp.initialization import factanal
+from .preprocess import build_model
 from .util import add_constant, lagmat
-
 
 __all__ = ['fit', 'predict']
 

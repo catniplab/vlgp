@@ -11,7 +11,7 @@ from scipy.linalg import cholesky, LinAlgError, cho_solve, lstsq
 from scipy.optimize import fmin_l_bfgs_b
 from scipy.spatial.distance import pdist, squareform
 
-from vlgp.name import HOBJ, PRIORICHOL
+from .name import HOBJ, PRIORICHOL
 from .math import ichol_gauss
 
 logger = logging.getLogger(__name__)
