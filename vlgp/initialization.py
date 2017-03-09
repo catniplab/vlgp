@@ -3,9 +3,9 @@ from numpy import empty, var, zeros_like
 from scipy.linalg import lstsq
 from sklearn.decomposition import FactorAnalysis
 
-from vlgp.constant import SPIKE, UNUSED
-from vlgp.core import update_w, update_v
-from vlgp.name import Y_TYPE
+from .constant import SPIKE, UNUSED
+from .core import update_w, update_v
+from .name import Y_TYPE
 
 
 def factanal(model):

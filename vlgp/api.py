@@ -60,7 +60,12 @@ def fit(**kwargs):
 
     model = build_model(**kwargs)
 
-    factanal(model)
+    if model['initialize'] == 'fa':
+        initialize = factanal
+    else:
+        raise NotImplementedError(model['initialize'])
+
+    initialize(model)
 
     printer = Printer()
     callbacks.extend([printer.print])

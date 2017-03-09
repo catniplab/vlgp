@@ -1,6 +1,6 @@
 import numpy as np
 
-from vlgp.math import ichol_gauss
+from .math import ichol_gauss
 from .constant import REQUIRED_FIELDS, TYPE_CODE, DEFAULT_VALUES
 from .name import Y_TYPE
 from .util import add_constant, lagmat
