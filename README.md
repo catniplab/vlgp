@@ -8,6 +8,12 @@ It has been developed and implemented with the goal of recovering dynamics from 
 
 The code is written in Python 3.5. It needs further testing and is subject to change.
 
+## Changes
+* New fit function that requires only observation and the number of latent, 
+and return a single dict containing all results, e.g. 
+result = fit(y=y, dyn_ndim=2).
+* Changes to default options
+
 ## Usage
 
 To get started, see the examples in notebook: ./tutorial.ipynb. 
@@ -27,9 +33,10 @@ Each element of array is the spike count in that time bin of certain neuron and 
 
 | module     | function                                                                                      |
 |:-----------|-----------------------------------------------------------------------------------------------|
-| core       | model fitting, prediction                                                                     |
-| selection  | model selection, CV, leave-one-out                                                            |
-| hyper      | hyperparameter optimization, kernel                                                           |
+| api        | user interface                                                                                |
+| core       | algorithm                                                                                     |
+| ~~selection~~ | ~~model selection, CV, leave-one-out~~                                                     |
+| gp         | hyperparameter optimization, kernel                                                           |
 | math       | link functions, incomplelte Cholesky decompostion, angle between subspaces, orthogonalization |
 | plot       | raster and dynamics                                                                           |
 | simulation | simulation of Gaussian process, Lorenz dynamics and spike trains                              |
