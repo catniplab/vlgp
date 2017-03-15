@@ -10,6 +10,7 @@ from .name import LIK, Z_DIM
 
 def factanal(model):
     """Initialization using factor analysis"""
+
     y = model['y']
     x = model['x']
     a = model['a']

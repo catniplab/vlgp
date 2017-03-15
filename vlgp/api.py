@@ -58,14 +58,18 @@ def fit(**kwargs):
 
     callbacks = kwargs.pop('callbacks', [])
 
-    model = build_model(**kwargs)
+    model = kwargs.pop('model', None)
+
+    if model is None:
+        model = build_model(**kwargs)
 
     if model['initialize'] == 'fa':
         initialize = factanal
     else:
         raise NotImplementedError(model['initialize'])
 
-    initialize(model)
+    if not model.get('initialized', False):
+        initialize(model)
 
     printer = Printer()
     callbacks.extend([printer.print])
@@ -86,12 +90,14 @@ def fit(**kwargs):
     return model
 
 
-def predict(z, a, b, v=None, maxrate=None, y=None):
+def predict(**kwargs):
     """
     Predict firing rate
 
     Parameters
     ----------
+    model : dict
+        fitted model
     z : ndarray
         latent
     a : ndarray
@@ -110,6 +116,21 @@ def predict(z, a, b, v=None, maxrate=None, y=None):
     ndarray
         predicted firing rate
     """
+
+    model = kwargs.get('model')
+    if model is not None:
+        z = model['mu']
+        y = model['y']
+        a = model['a']
+        b = model['b']
+        v = model['v']
+    else:
+        z = kwargs.get('z')
+        y = kwargs.get('y')
+        a = kwargs.get('a')
+        b = kwargs.get('b')
+        v = kwargs.get('v')
+
     ntrial, nbin, z_dim = z.shape
     y_dim = a.shape[1]
     history = b.shape[0] - 1
@@ -129,5 +150,6 @@ def predict(z, a, b, v=None, maxrate=None, y=None):
         r = np.exp(eta + 0.5 * v.reshape((-1, z_dim)) @ (a ** 2))
     else:
         r = np.exp(eta)
+    maxrate = model.get('maxrate', np.exp(20))
     np.clip(r, 0, maxrate, out=r)
     return np.reshape(r, shape_out)
