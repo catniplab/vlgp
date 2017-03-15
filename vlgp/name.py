@@ -1,4 +1,4 @@
-"""key names"""
+"""keys"""
 
 VB = 'VB'
 MAP = 'MAP'
@@ -20,11 +20,14 @@ HSTEP = 'learn_hyper'
 HPERIOD = 'nhyper'
 HOBJ = 'hyper_obj'
 TRIALLET = 'subsample_size'
-PRIORICHOL = 'chol'
+PRIOR = 'chol'
 PRIORSTD = 'sigma'
 PRIORTIMESCALE = 'omega'
 
 MAXITER = 'niter'
 ITER = 'it'
 
-Y_TYPE = 'y_type'
+LIK = 'lik'
+
+Z_DIM = 'z_dim'
+Y_DIM = 'y_dim'

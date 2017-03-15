@@ -336,8 +336,8 @@ def regmat(y, x=None, lag=0):
     """
     automat = auto(y, lag)
     big_x = np.concatenate(x, axis=0)  # along time
-    y_ndim = automat.shape[0]
-    return np.concatenate([automat, np.stack([big_x] * y_ndim)], axis=2)
+    y_dim = automat.shape[0]
+    return np.concatenate([automat, np.stack([big_x] * y_dim)], axis=2)
 
 
 def smooth_1d(x, sigma=10):

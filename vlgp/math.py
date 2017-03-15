@@ -37,6 +37,8 @@ def sexp(x, lbound=MIN_EXP, ubound=MAX_EXP):
     ndarray
         exp(max(x, lbound) and min(x, ubound))
     """
+    if np.any(x > ubound):
+        warnings.warn('Extremely large firing rate detected!')
     return np.exp(np.clip(x, lbound, ubound))
 
 

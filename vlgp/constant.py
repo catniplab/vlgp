@@ -3,16 +3,17 @@
 # coding observation dimensions
 from collections import defaultdict
 
+from .name import Z_DIM, Y
 
-UNUSED = 0  # dimension not to use
-SPIKE = 1  # spike train
-LFP = 2  # local field potential
+NA = 0  # dimension not to use
+POISSON = 1  # spike train
+GAUSSIAN = 2  # local field potential
 
-TYPE_CODE = defaultdict(int,
-                        spike=1,
-                        lfp=2)
+LIK_CODE = defaultdict(int,
+                       poisson=POISSON,
+                       gaussian=GAUSSIAN)
 
-REQUIRED_FIELDS = ['y', 'dyn_ndim']
+REQUIRED_FIELDS = [Y, Z_DIM]
 
 # default options
 DEFAULT_VALUES = {'learning_rate': 1.0,

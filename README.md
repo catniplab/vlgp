@@ -11,7 +11,7 @@ The code is written in Python 3.5. It needs further testing and is subject to ch
 ## Changes
 * New fit function that requires only observation and the number of latent, 
 and return a single dict containing all results, e.g. 
-result = fit(y=y, dyn_ndim=2).
+result = fit(y=y, z_dim=2).
 * Changes to default options
 
 ## Usage

@@ -7,6 +7,7 @@ from .core import vem
 from .preprocess import build_model
 from .util import add_constant, lagmat
 
+
 __all__ = ['fit', 'predict']
 
 
@@ -18,9 +19,9 @@ def fit(**kwargs):
     ----------
     y : ndarray
         obserbation
-    y_type : ndarray
+    lik : ndarray
         types of observation dimensions, 'spike' or 'lfp'
-    dyn_ndim : int
+    z_dim : int
         number of latent dimensions
     x : ndarray, optional
         external factors
@@ -109,23 +110,23 @@ def predict(z, a, b, v=None, maxrate=None, y=None):
     ndarray
         predicted firing rate
     """
-    ntrial, nbin, z_ndim = z.shape
-    y_ndim = a.shape[1]
+    ntrial, nbin, z_dim = z.shape
+    y_dim = a.shape[1]
     history = b.shape[0] - 1
 
-    shape_out = (ntrial, nbin, y_ndim)
+    shape_out = (ntrial, nbin, y_dim)
     # regression (h dot b) part
     if y is None:
         y = np.zeros(shape_out)
 
     hb = empty(shape_out)
-    for y_dim in range(y_ndim):
+    for n in range(y_dim):
         for trial in range(ntrial):
-            h = add_constant(lagmat(y[trial, :, y_dim], lag=history))
-            hb[trial, :, y_dim] = h @ b[:, y_dim]
-    eta = z.reshape((-1, z_ndim)) @ a + hb.reshape((-1, y_ndim))
+            h = add_constant(lagmat(y[trial, :, n], lag=history))
+            hb[trial, :, n] = h @ b[:, n]
+    eta = z.reshape((-1, z_dim)) @ a + hb.reshape((-1, y_dim))
     if v is not None:
-        r = np.exp(eta + 0.5 * v.reshape((-1, z_ndim)) @ (a ** 2))
+        r = np.exp(eta + 0.5 * v.reshape((-1, z_dim)) @ (a ** 2))
     else:
         r = np.exp(eta)
     np.clip(r, 0, maxrate, out=r)
