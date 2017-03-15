@@ -1,12 +1,11 @@
 import numpy as np
 from numpy import empty
 
-from .initialization import factanal
 from .callback import Saver, Printer
 from .core import vem
+from .initialization import factanal
 from .preprocess import build_model
 from .util import add_constant, lagmat
-
 
 __all__ = ['fit', 'predict']
 
