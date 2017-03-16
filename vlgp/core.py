@@ -1,3 +1,10 @@
+"""
+Symbols
+-------
+y : observation, typically spike count or lfp
+x : regression variable, typically history
+z : latent process
+"""
 import gc
 import logging
 import warnings
