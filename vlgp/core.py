@@ -64,7 +64,7 @@ def elbo(model):
     poiss = lik == POISSON
     gauss = lik == GAUSSIAN
 
-    eta = mu @ a + einsum('jki, ki -> ji', x_2d, b)
+    eta = mu @ a + einsum('ijk, jk -> ik', x_2d, b)
     r = sexp(eta + 0.5 * v @ (a ** 2))
     # Possibly useless calculation here.
     # LFP has no firing rate and spike (Poisson) has no extra noise parameter.
@@ -159,7 +159,7 @@ def estep(model: dict):
     for i in range(model['e_niter']):
         # TODO: combine trials
         for trl in range(ntrial):
-            xb = einsum('jki, ki -> ji', x[trl, ...], b)
+            xb = einsum('ijk, jk -> ik', x[trl, ...], b)
             eta = mu[trl, :, :] @ a + xb
             r = sexp(eta + 0.5 * v[trl, :, :] @ (a ** 2))
 
@@ -240,7 +240,7 @@ def mstep(model: dict):
     v_2d = model['v'].reshape((-1, z_dim))
 
     for i in range(model['m_niter']):
-        eta = mu_2d @ a + einsum('jki, ki -> ji', x_2d, b)
+        eta = mu_2d @ a + einsum('ijk, jk -> ik', x_2d, b)
         # (neuron, time, regression) x (regression, neuron) -> (time, neuron)
         r = sexp(eta + 0.5 * v_2d @ (a ** 2))
         model['noise'] = var(y_2d - eta, axis=0, ddof=0)  # MLE
@@ -451,7 +451,7 @@ def update_w(model):
     shape_w = model['w'].shape
 
     # (neuron, time, regression) x (regression, neuron) -> (time, neuron)
-    eta = mu_2d @ model['a'] + einsum('jki, ki -> ji', x_2d, model['b'])
+    eta = mu_2d @ model['a'] + einsum('ijk, jk -> ik', x_2d, model['b'])
     r = sexp(eta + 0.5 * v_2d @ (model['a'] ** 2))
     U = empty_like(r)
 
