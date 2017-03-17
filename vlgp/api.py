@@ -149,6 +149,6 @@ def predict(**kwargs):
         r = np.exp(eta + 0.5 * v.reshape((-1, z_dim)) @ (a ** 2))
     else:
         r = np.exp(eta)
-    maxrate = model.get('maxrate', np.exp(20))
+    maxrate = kwargs.get('maxrate', np.exp(20))
     np.clip(r, 0, maxrate, out=r)
     return np.reshape(r, shape_out)

@@ -44,11 +44,9 @@ def check_model(model):
                          "than that of latent dimensions, {}.".format(y_dim,
                                                                       z_dim))
 
-    lik = model.get(LIK)
-    if lik is None:
-        lik = 'spike'
+    lik = model.get(LIK, 'poisson')
 
-    if lik == 'spike' or lik == 'lfp':
+    if lik == 'poisson' or lik == 'gaussian':
         lik = [lik] * y_dim
 
     encoded_lik = np.empty(y_dim, dtype=int)

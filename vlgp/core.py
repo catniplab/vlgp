@@ -134,8 +134,6 @@ def estep(model: dict):
     a = model['a']
     b = model['b']
     noise = model['noise']
-    poiss = model[LIK] == POISSON
-    gauss = model[LIK] == GAUSSIAN
 
     Ir = identity(rank)
     residual = empty((nbin, y_dim), dtype=float)
@@ -148,21 +146,35 @@ def estep(model: dict):
     v = model['v']
     dmu = model['dmu']
 
+    poiss = model[LIK] == POISSON
+    gauss = model[LIK] == GAUSSIAN
+
+    # boolean indexing creates copies
+    # pull indexing out of the loop for performance
+    # TODO: rearrange y by likelihood in order to replace bool with slicing
+    y_poiss = y[:, :, poiss]
+    y_gauss = y[:, :, gauss]
+    noise_gauss = noise[gauss]
+
     for i in range(model['e_niter']):
         # TODO: combine trials
         for trl in range(ntrial):
             xb = einsum('ijk, ki -> ji', x[:, trl, :, :], b)
             eta = mu[trl, :, :] @ a + xb
             r = sexp(eta + 0.5 * v[trl, :, :] @ (a ** 2))
+
+            eta_gauss = eta[:, gauss]
+            r_poiss = r[:, poiss]
+
             for l in range(z_dim):
                 G = prior[l]
 
                 # working residuals
                 # extensible to many other distributions
                 # similar form to GLM
-                residual[:, poiss] = y[trl, :, poiss] - r[:, poiss]
-                residual[:, gauss] = (y[trl, :, gauss] - eta[:, gauss]) / \
-                                     noise[gauss]
+
+                residual[:, poiss] = y_poiss[trl, :, :] - r_poiss
+                residual[:, gauss] = (y_gauss[trl, :, :] - eta_gauss) / noise_gauss
 
                 wadj = w[trl, :, l, np.newaxis]  # keep dimension
                 GtWG = G.T @ (wadj * G)
@@ -182,7 +194,7 @@ def estep(model: dict):
             eta = mu[trl, :, :] @ a + xb
             r = sexp(eta + 0.5 * v[trl, :, :] @ (a ** 2))
             U[:, poiss] = r[:, poiss]
-            U[:, gauss] = 1 / noise[gauss]
+            U[:, gauss] = 1 / noise_gauss
             w[trl, :, :] = U @ (a.T ** 2)
             if model['method'] == 'VB':
                 for l in range(z_dim):
