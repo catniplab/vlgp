@@ -21,7 +21,7 @@ def factanal(model):
     x_dim = x.shape[-1]
     z_dim = model[Z_DIM]
 
-    x_2d = x.reshape((y_dim, -1, x_dim))
+    x_2d = x.reshape((-1, x_dim, y_dim))
     y_2d = y.reshape((-1, y_dim))
 
     # Initialize posterior and loading
@@ -60,7 +60,7 @@ def factanal(model):
     if b is None:
         b = empty((x_dim, y_dim), dtype=float)
         for n in np.arange(y_dim)[poisson]:
-            b[:, n] = lstsq(x_2d[n, :], y_2d[:, n])[0]
+            b[:, n] = lstsq(x_2d[..., n], y_2d[:, n])[0]
 
     # initialize noises of GAUSSIAN
     model['noise'] = var(y_2d, axis=0, ddof=0)

@@ -72,11 +72,11 @@ def check_model(model):
     x = model.get('x')
     if x is None:
         history = model['history']
-        x = np.empty((y_dim, ntrial, nbin, 1 + history), dtype=float)
-        for y_dim in range(y_dim):
-            for trial in range(ntrial):
-                x[y_dim, trial, :] = add_constant(
-                    lagmat(y[trial, :, y_dim], lag=history))
+        x_dim = 1 + history
+        x = np.empty((ntrial, nbin, x_dim, y_dim), dtype=float)
+        for n in range(y_dim):
+            for trl in range(ntrial):
+                x[trl, :, :, n] = add_constant(lagmat(y[trl, :, n], lag=history))
         model['x'] = x
 
     # GP

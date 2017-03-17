@@ -41,7 +41,7 @@ def elbo(model):
         log likelihood
     """
     # neuron, trial, time, regression
-    y_dim, ntrial, nbin, x_dim = model['x'].shape
+    ntrial, nbin, x_dim, y_dim = model['x'].shape
     z_dim = model['mu'].shape[-1]
     prior = model[PRIOR]
     rank = prior[0].shape[-1]
@@ -49,7 +49,7 @@ def elbo(model):
     Ir = identity(rank)
 
     y_2d = model['y'].reshape((-1, y_dim))  # concatenate trials
-    x_2d = model['x'].reshape((y_dim, -1, x_dim))  # concatenate trials
+    x_2d = model['x'].reshape((-1, x_dim, y_dim))  # concatenate trials
     lik = model[LIK]
 
     prior = model[PRIOR]
@@ -64,7 +64,7 @@ def elbo(model):
     poiss = lik == POISSON
     gauss = lik == GAUSSIAN
 
-    eta = mu @ a + einsum('ijk, ki -> ji', x_2d, b)
+    eta = mu @ a + einsum('jki, ki -> ji', x_2d, b)
     r = sexp(eta + 0.5 * v @ (a ** 2))
     # Possibly useless calculation here.
     # LFP has no firing rate and spike (Poisson) has no extra noise parameter.
@@ -112,10 +112,10 @@ def elbo(model):
 
 def leastsq(x, y):
     y_dim = y.shape[-1]
-    x_dim = x.shape[-1]
-    x_2d = x.reshape((y_dim, -1, x_dim))
+    x_dim = x.shape[-2]
+    x_2d = x.reshape((-1, x_dim, y_dim))
     y_2d = y.reshape((-1, y_dim))
-    b = np.array([lstsq(x_2d[n, :], y_2d[:, n])[0] for n in range(y_dim)])
+    b = np.array([lstsq(x_2d[..., n], y_2d[:, n])[0] for n in range(y_dim)])
     return b
 
 
@@ -159,7 +159,7 @@ def estep(model: dict):
     for i in range(model['e_niter']):
         # TODO: combine trials
         for trl in range(ntrial):
-            xb = einsum('ijk, ki -> ji', x[:, trl, :, :], b)
+            xb = einsum('jki, ki -> ji', x[trl, ...], b)
             eta = mu[trl, :, :] @ a + xb
             r = sexp(eta + 0.5 * v[trl, :, :] @ (a ** 2))
 
@@ -224,7 +224,7 @@ def mstep(model: dict):
     # Besides, the constraint modifies the loading and bias.
     constrain_mu(model)
 
-    y_dim, ntrial, nbin, x_dim = model['x'].shape
+    ntrial, nbin, x_dim, y_dim = model['x'].shape
     ntrial, nbin, z_dim = model['mu'].shape
     lik = model[LIK]
 
@@ -234,13 +234,13 @@ def mstep(model: dict):
     db = model['db']
 
     y_2d = model['y'].reshape((-1, y_dim))  # concatenate trials
-    x_2d = model['x'].reshape((y_dim, -1, x_dim))  # concatenate trials
+    x_2d = model['x'].reshape((-1, x_dim, y_dim))  # concatenate trials
 
     mu_2d = model['mu'].reshape((-1, z_dim))
     v_2d = model['v'].reshape((-1, z_dim))
 
     for i in range(model['m_niter']):
-        eta = mu_2d @ a + einsum('ijk, ki -> ji', x_2d, b)
+        eta = mu_2d @ a + einsum('jki, ki -> ji', x_2d, b)
         # (neuron, time, regression) x (regression, neuron) -> (time, neuron)
         r = sexp(eta + 0.5 * v_2d @ (a ** 2))
         model['noise'] = var(y_2d - eta, axis=0, ddof=0)  # MLE
@@ -269,10 +269,10 @@ def mstep(model: dict):
                 a[:, n] += delta_a
 
                 # regression
-                grad_b = x_2d[n, :].T @ (y_2d[:, n] - r[:, n])
+                grad_b = x_2d[..., n].T @ (y_2d[:, n] - r[:, n])
 
                 if model['hessian']:
-                    nhess_b = x_2d[n, :].T @ (r[:, n, np.newaxis] * x_2d[n, :])
+                    nhess_b = x_2d[..., n].T @ (r[:, np.newaxis, n] * x_2d[..., n])
                     try:
                         delta_b = solve(nhess_b, grad_b, sym_pos=True)
                     except Exception as e:
@@ -290,13 +290,13 @@ def mstep(model: dict):
                 M = mu_2d.T @ mu_2d
                 M[np.diag_indices_from(M)] += sum(v_2d, axis=0)
                 a[:, n] = solve(M, mu_2d.T @ (
-                    y_2d[:, n] - x_2d[n, :] @ b[:, n]),
+                    y_2d[:, n] - x_2d[..., n] @ b[:, n]),
                                 sym_pos=True)
 
                 # b's least squares solution for Gaussian channel
                 # (H'H)^-1 H'(y - ma)
-                b[:, n] = solve(x_2d[n, :].T @ x_2d[n, :],
-                                x_2d[n, :].T @ (y_2d[:, n] - mu_2d @ a[:, n]),
+                b[:, n] = solve(x_2d[..., n].T @ x_2d[..., n],
+                                x_2d[..., n].T @ (y_2d[:, n] - mu_2d @ a[:, n]),
                                 sym_pos=True)
                 b[1:, n] = 0
                 # TODO: only make history filter components zeros
@@ -439,19 +439,19 @@ def clip(a, lbound, ubound=None):
 
 
 def update_w(model):
-    y_dim, ntrial, nbin, nreg = model['x'].shape
+    ntrial, nbin, x_dim, y_dim = model['x'].shape
     z_dim = model['mu'].shape[-1]
 
     poiss = model[LIK] == POISSON
     gauss = model[LIK] == GAUSSIAN
 
     mu_2d = model['mu'].reshape((-1, z_dim))
-    x_2d = model['x'].reshape((y_dim, -1, nreg))  # concatenate trials
+    x_2d = model['x'].reshape((-1, x_dim, y_dim))  # concatenate trials
     v_2d = model['v'].reshape((-1, z_dim))
     shape_w = model['w'].shape
 
     # (neuron, time, regression) x (regression, neuron) -> (time, neuron)
-    eta = mu_2d @ model['a'] + einsum('ijk, ki -> ji', x_2d, model['b'])
+    eta = mu_2d @ model['a'] + einsum('jki, ki -> ji', x_2d, model['b'])
     r = sexp(eta + 0.5 * v_2d @ (model['a'] ** 2))
     U = empty_like(r)
 
