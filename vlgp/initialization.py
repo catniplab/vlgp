@@ -18,7 +18,7 @@ def factanal(model):
     mu = model['mu']
 
     ntrial, nbin, y_dim = y.shape
-    x_dim = x.shape[-1]
+    x_dim = x.shape[-2]
     z_dim = model[Z_DIM]
 
     x_2d = x.reshape((-1, x_dim, y_dim))

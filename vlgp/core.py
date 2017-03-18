@@ -64,6 +64,7 @@ def elbo(model):
     poiss = lik == POISSON
     gauss = lik == GAUSSIAN
 
+    # einsum is faster than matmul
     eta = mu @ a + einsum('ijk, jk -> ik', x_2d, b)
     r = sexp(eta + 0.5 * v @ (a ** 2))
     # Possibly useless calculation here.
