@@ -47,3 +47,4 @@ DEFAULT_VALUES = {'learning_rate': 1.0,
                   # misc
                   'verbose': False,
                   'saving_interval': 3600}
+
