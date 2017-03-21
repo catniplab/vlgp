@@ -101,5 +101,7 @@ def check_model(model):
 
     # cut trials
     from .util import cut_trials
+    if model['seg_len'] > nbin:
+        model['seg_len'] = nbin
     if model.get('segment') is None:
         model['segment'] = cut_trials(nbin, ntrial, seg_len=model['seg_len'])

@@ -375,7 +375,7 @@ def hdf5_to_dict(hdf):
     return d
 
 
-def cut_trials(nbin, ntrial, seg_len=20):
+def cut_trials(nbin, ntrial, seg_len):
     """
     Cut trials into small segments of equal length
 

@@ -326,5 +326,4 @@ def gp_small_segments(model):
             omega[l] = omega_new
         sigma[l] = sqrt(sigmasq)
     model[PRIOR] = np.array(
-        [ichol_gauss(nbin, omega[dyn_dim], rank) * sigma[dyn_dim] for dyn_dim
-         in range(z_dim)])
+        [ichol_gauss(nbin, omega[l], rank) * sigma[l] for l in range(z_dim)])
