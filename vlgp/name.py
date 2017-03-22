@@ -29,5 +29,5 @@ ITER = 'it'
 
 LIK = 'lik'
 
-Z_DIM = 'z_dim'
+Z_DIM = 'lat_dim'
 Y_DIM = 'y_dim'
