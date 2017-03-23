@@ -20,7 +20,7 @@ def fit(**kwargs):
         obserbation
     lik : ndarray
         types of observation dimensions, 'spike' or 'lfp'
-    z_dim : int
+    lat_dim : int
         number of latent dimensions
     x : ndarray, optional
         external factors
@@ -64,11 +64,14 @@ def fit(**kwargs):
 
     if model['initialize'] == 'fa':
         initialize = factanal
+    elif model['initialize'] is callable:
+        initialize = model['initialize']
     else:
         raise NotImplementedError(model['initialize'])
 
     if not model.get('initialized', False):
         initialize(model)
+        model['initialized'] = True
 
     printer = Printer()
     callbacks.extend([printer.print])

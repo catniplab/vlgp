@@ -12,7 +12,7 @@ This package requires Python >= 3.5.
 
 - New *fit* function now only requires observation and the number of latent as argument, 
 and returns a single dict containing all results. Usage: 
-result = fit(y=y, z_dim=2).
+result = fit(y=y, lat_dim=2).
 - It saves intermediate results if *path* is passed to *fit*.
 - One can now add any function to the list argument *callbacks* to measure the iterations.
 
