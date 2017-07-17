@@ -28,7 +28,7 @@ class App:
 
         print('Fitting')
 
-        api.fit(y=y, lik=lik, path=outfile, **kwargs)
+        api.fit(y=y, lik=lik, path=outfile, lat_dim=lat_dim, **kwargs)
 
         print('Done')
 

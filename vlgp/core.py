@@ -319,6 +319,9 @@ def hstep(model: dict):
     if model[ITER] % model[HPERIOD] != 0:
         return
 
+    if model['verbose']:
+        print('Optimize hyperparameter')
+
     if model['gp'] == 'cutting':
         gp_small_segments(model)
     elif model['gp'] == 'sampling':
@@ -431,7 +434,7 @@ def calc_post_cov(model):
 
 def clip(a, lbound, ubound=None):
     if ubound is None:
-        assert (lbound > 0)
+        assert lbound > 0
         ubound = lbound
         lbound = -lbound
     else:
