@@ -2,7 +2,7 @@ import numpy as np
 
 from .constant import REQUIRED_FIELDS, LIK_CODE, DEFAULT_VALUES
 from .math import ichol_gauss
-from .name import LIK, Z_DIM, PRIOR
+from .constant import PRIOR, LIK, Z_DIM
 from .util import add_constant, lagmat
 
 
@@ -48,6 +48,9 @@ def check_model(model):
 
     if lik == 'poisson' or lik == 'gaussian':
         lik = [lik] * y_dim
+
+    if model['verbose']:
+        print('Likelihood', lik)
 
     encoded_lik = np.empty(y_dim, dtype=int)
     for i, t in enumerate(lik):

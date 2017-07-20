@@ -20,25 +20,21 @@ def rectify(x):
     return x.clip(0, np.inf)
 
 
-def sexp(x, lbound=-20, ubound=20):
+def trunc_exp(x, ubound=10):
     """
     Truncated exp
 
     Parameters
     ----------
     x : ndarray
-    lbound : double
-        lower bound of x
     ubound : double
         upper bound of x
     Returns
     -------
     ndarray
-        exp(max(x, lbound) and min(x, ubound))
+        exp(min(x, ubound))
     """
-    if np.any(x > ubound):
-        warnings.warn('Extremely large firing rate detected!')
-    return np.exp(np.clip(x, lbound, ubound))
+    return np.exp(np.minimum(x, ubound))
 
 
 def lexp(x, c=20):

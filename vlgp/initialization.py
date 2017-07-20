@@ -3,9 +3,8 @@ from numpy import empty, var, zeros_like
 from scipy.linalg import lstsq
 from sklearn.decomposition import FactorAnalysis
 
-from .constant import POISSON, NA
+from .constant import POISSON, NA, LIK, Z_DIM
 from .core import update_w, update_v
-from .name import LIK, Z_DIM
 
 
 def factanal(model):

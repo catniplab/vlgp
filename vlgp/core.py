@@ -19,8 +19,7 @@ from scipy.linalg import lstsq, eigh, solve, norm, svd, LinAlgError
 from .constant import *
 from .evaluation import timer
 from .gp import gp_small_segments, gp_slice_sampling
-from .math import sexp
-from .name import *
+from .math import trunc_exp
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +65,7 @@ def elbo(model):
 
     # einsum is faster than matmul
     eta = mu @ a + einsum('ijk, jk -> ik', x_2d, b)
-    r = sexp(eta + 0.5 * v @ (a ** 2))
+    r = trunc_exp(eta + 0.5 * v @ (a ** 2))
     # Possibly useless calculation here.
     # LFP has no firing rate and spike (Poisson) has no extra noise parameter.
     # Unused dims could be removed to save computational time and space.
@@ -162,7 +161,7 @@ def estep(model: dict):
         for trl in range(ntrial):
             xb = einsum('ijk, jk -> ik', x[trl, ...], b)
             eta = mu[trl, :, :] @ a + xb
-            r = sexp(eta + 0.5 * v[trl, :, :] @ (a ** 2))
+            r = trunc_exp(eta + 0.5 * v[trl, :, :] @ (a ** 2))
 
             eta_gauss = eta[:, gauss]
             r_poiss = r[:, poiss]
@@ -193,7 +192,7 @@ def estep(model: dict):
                 mu[trl, :, l] += delta_mu
 
             eta = mu[trl, :, :] @ a + xb
-            r = sexp(eta + 0.5 * v[trl, :, :] @ (a ** 2))
+            r = trunc_exp(eta + 0.5 * v[trl, :, :] @ (a ** 2))
             U[:, poiss] = r[:, poiss]
             U[:, gauss] = 1 / noise_gauss
             w[trl, :, :] = U @ (a.T ** 2)
@@ -243,7 +242,7 @@ def mstep(model: dict):
     for i in range(model['m_niter']):
         eta = mu_2d @ a + einsum('ijk, jk -> ik', x_2d, b)
         # (neuron, time, regression) x (regression, neuron) -> (time, neuron)
-        r = sexp(eta + 0.5 * v_2d @ (a ** 2))
+        r = trunc_exp(eta + 0.5 * v_2d @ (a ** 2))
         model['noise'] = var(y_2d - eta, axis=0, ddof=0)  # MLE
 
         for n in range(y_dim):
@@ -319,8 +318,8 @@ def hstep(model: dict):
     if model[ITER] % model[HPERIOD] != 0:
         return
 
-    if model['verbose']:
-        print('Optimize hyperparameter')
+    # if model['verbose']:
+    #     print('Optimize hyperparameter')
 
     if model['gp'] == 'cutting':
         gp_small_segments(model)
@@ -456,7 +455,7 @@ def update_w(model):
 
     # (neuron, time, regression) x (regression, neuron) -> (time, neuron)
     eta = mu_2d @ model['a'] + einsum('ijk, jk -> ik', x_2d, model['b'])
-    r = sexp(eta + 0.5 * v_2d @ (model['a'] ** 2))
+    r = trunc_exp(eta + 0.5 * v_2d @ (model['a'] ** 2))
     U = empty_like(r)
 
     U[:, poiss] = r[:, poiss]

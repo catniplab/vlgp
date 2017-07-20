@@ -8,7 +8,7 @@ from numpy.random import random, multivariate_normal
 from scipy import stats
 from scipy.linalg import toeplitz
 
-from .math import sexp, identity, ichol_gauss
+from .math import trunc_exp, identity, ichol_gauss
 
 
 def sqexp(t, omega):
@@ -79,7 +79,7 @@ def gp_mvn(omega, std, nbin, ndim, eps=1e-8):
     return x
 
 
-def spikes(x, a, b, link=sexp, seed=None):
+def spikes(x, a, b, link=trunc_exp, seed=None):
     """Simulate spike trains driven by latent processes
 
     Args:
@@ -121,7 +121,7 @@ def spikes(x, a, b, link=sexp, seed=None):
     return y, h, rate
 
 
-def spike(x, a, b, link=sexp, seed=None):
+def spike(x, a, b, link=trunc_exp, seed=None):
     """Simulate spike trains driven by latent processes
 
     Args:
