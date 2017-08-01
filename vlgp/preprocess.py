@@ -50,7 +50,7 @@ def check_model(model):
         lik = [lik] * y_dim
 
     if model['verbose']:
-        print('Likelihood', lik)
+        print('Likelihood\n', lik)
 
     encoded_lik = np.empty(y_dim, dtype=int)
     for i, t in enumerate(lik):
