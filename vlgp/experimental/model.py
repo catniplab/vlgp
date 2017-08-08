@@ -1,11 +1,16 @@
 import abc
 import json
 import os
+import gc
 from copy import copy
 from pathlib import Path
 
 import numpy as np
+from scipy.linalg import norm
+
 from vlgp.constant import DEFAULT_VALUES
+from vlgp.evaluation import timer
+from vlgp.experimental.core import estep, mstep, hstep
 
 
 class Model:
@@ -66,7 +71,78 @@ class VLGP(Model):
         pass
 
     def vem(self, data):
-        pass
+        # callbacks = []
+        tol = self.config['tol']
+        niter = self.config['niter']
+
+        job = {'trials': data}
+
+        job.setdefault('it', 0)
+        job.setdefault('e_elapsed', [])
+        job.setdefault('m_elapsed', [])
+        job.setdefault('h_elapsed', [])
+        job.setdefault('em_elapsed', [])
+
+        #######################
+        # iterative algorithm #
+        #######################
+
+        # disable gabbage collection during the iterative procedure
+        gc.disable()
+        for it in range(job['it'], niter):
+            job['it'] += 1
+
+            with timer() as em_elapsed:
+                ##########
+                # E step #
+                ##########
+                with timer() as estep_elapsed:
+                    estep(job)
+
+                ##########
+                # M step #
+                ##########
+                with timer() as mstep_elapsed:
+                    mstep(job)
+
+                ###################
+                # hyperparam step #
+                ###################
+                with timer() as hstep_elapsed:
+                    hstep(job)
+
+            job['e_elapsed'].append(estep_elapsed())
+            job['m_elapsed'].append(mstep_elapsed())
+            job['h_elapsed'].append(hstep_elapsed())
+            job['em_elapsed'].append(em_elapsed())
+
+            # for callback in callbacks:
+            #     try:
+            #         callback(model)
+            #     finally:
+            #         pass
+
+            #####################
+            # convergence check #
+            #####################
+            # mu = model['mu']
+            a = self.model['a']
+            b = self.model['b']
+            # dmu = model['dmu']
+            da = job['da']
+            db = job['db']
+
+            converged = norm(da) < tol * norm(a) and norm(db) < tol * norm(b)
+            should_stop = converged
+
+            if should_stop:
+                break
+
+        gc.enable()  # enable gabbage collection
+
+        ##############################
+        # end of iterative procedure #
+        ##############################
 
     def save(self):
         np.save(self.result_dir.joinpath('model.npy'), self.model)

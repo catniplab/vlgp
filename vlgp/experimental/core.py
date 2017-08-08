@@ -9,108 +9,18 @@ and optional fields such as
     z : latent process
     id : trial id
 """
-import gc
 import logging
 import warnings
 
 import numpy as np
-from numpy import identity, einsum, trace, empty, diag, var, empty_like, sum, reshape, newaxis
-from numpy.core.umath import sqrt, PINF, log
-from numpy.linalg import slogdet
-from scipy.linalg import lstsq, eigh, solve, norm, svd, LinAlgError
+from numpy import identity, einsum, var, empty_like, sum, reshape, newaxis
+from scipy.linalg import lstsq, solve, norm, svd, LinAlgError
 
 from vlgp.constant import *
-from vlgp.evaluation import timer
 from vlgp.gp import gp_small_segments, gp_slice_sampling
 from vlgp.math import trunc_exp
 
 logger = logging.getLogger(__name__)
-
-
-def elbo(model):
-    """
-    Evidence Lower BOund (ELBO)
-
-    Parameters
-    ----------
-    model : dict
-
-    Returns
-    -------
-    lb : double
-        lower bound
-    ll : double
-        log likelihood
-    """
-    # neuron, trial, time, regression
-    ntrial, nbin, x_dim, y_dim = model['x'].shape
-    z_dim = model['mu'].shape[-1]
-    prior = model[PRIOR]
-    rank = prior[0].shape[-1]
-
-    Ir = identity(rank)
-
-    y_2d = model['y'].reshape((-1, y_dim))  # concatenate trials
-    x_2d = model['x'].reshape((-1, x_dim, y_dim))  # concatenate trials
-    lik = model[LIK]
-
-    prior = model[PRIOR]
-
-    mu = model['mu'].reshape((-1, z_dim))
-    v = model['v'].reshape((-1, z_dim))
-
-    a = model['a']
-    b = model['b']
-    noise = model['noise']
-
-    poiss = lik == POISSON
-    gauss = lik == GAUSSIAN
-
-    # einsum is faster than matmul
-    eta = mu @ a + einsum('ijk, jk -> ik', x_2d, b)
-    r = trunc_exp(eta + 0.5 * v @ (a ** 2))
-    # Possibly useless calculation here.
-    # LFP has no firing rate and spike (Poisson) has no extra noise parameter.
-    # Unused dims could be removed to save computational time and space.
-
-    llspike = sum(y_2d[:, poiss] * eta[:, poiss] - r[:, poiss])
-    # verified by predict()
-
-    # noinspection PyTypeChecker
-    lllfp = - 0.5 * sum(
-        ((y_2d[:, gauss] - eta[:, gauss]) ** 2 + v @ (a[:, gauss] ** 2)) /
-        noise[gauss] + log(noise[gauss]))
-
-    ll = llspike + lllfp
-
-    lb = ll
-
-    eps = 1e-3
-
-    for trl in range(ntrial):
-        mu = model['mu'][trl, :]
-        w = model['w'][trl, :]
-        for l in range(z_dim):
-            G = prior[l]
-            GtWG = G.T @ (w[trl, :, l, newaxis] * G)
-            # TODO: a better approximate of mu^T K^{-1} mu than least squares.
-            # G_mldiv_mu = lstsq(G, mu[:, dyn_dim])[0]
-            # mu_Kinv_mu = inner(G_mldiv_mu, G_mldiv_mu)
-
-            # mu^T (K + eI)^-1 mu
-            mu_Kinv_mu = mu[:, l] @ (
-                mu[:, l] - G @ solve(eps * Ir + G.T @ G,
-                                     G.T @ mu[:, l],
-                                     sym_pos=True)) / eps
-
-            # expected to be nonsingular
-            M = GtWG @ solve(Ir + GtWG, GtWG, sym_pos=True)
-            trl = nbin - trace(GtWG) + trace(M)
-            lndet = slogdet(Ir - GtWG + M)[1]
-
-            lb += -0.5 * mu_Kinv_mu - 0.5 * trl + 0.5 * lndet + 0.5 * nbin
-
-    return lb, ll
 
 
 def leastsq(x, y):
@@ -122,29 +32,29 @@ def leastsq(x, y):
     return b
 
 
-def estep(model: dict):
+def estep(job: dict):
     """Update variational distribution q (E step)"""
-    if not model[ESTEP]:
+    if not job[ESTEP]:
         return
 
     # See the explanation in mstep.
-    constrain_a(model)
+    constrain_loading(job)
 
-    z_dim = model['z_dim']
-    a = model['a']
-    b = model['b']
-    noise = model['noise']
+    z_dim = job['z_dim']
+    a = job['a']
+    b = job['b']
+    noise = job['noise']
 
-    poiss = model[LIK] == POISSON
-    gauss = model[LIK] == GAUSSIAN
+    poiss = job[LIK] == POISSON
+    gauss = job[LIK] == GAUSSIAN
 
     # boolean indexing creates copies
     # pull indexing out of the loop for performance
     # TODO: rearrange y by likelihood in order to replace bool with slicing
     noise_gauss = noise[gauss]
 
-    for i in range(model['e_niter']):
-        for trial in model['trials']:
+    for i in range(job['e_niter']):
+        for trial in job['trials']:
             y = trial['y']
             x = trial['x']
             mu = trial['mu']
@@ -185,7 +95,7 @@ def estep(model: dict):
                 try:
                     M = solve(Ir + GtWG, (wadj * G).T @ u, sym_pos=True)
                     delta_mu = u - G @ ((wadj * G).T @ u) + G @ (GtWG @ M)
-                    clip(delta_mu, model['dmu_bound'])
+                    clip_grad(delta_mu, job['dmu_bound'])
                 except Exception as e:
                     logger.exception(repr(e), exc_info=True)
                     delta_mu = 0
@@ -198,7 +108,7 @@ def estep(model: dict):
             U[:, poiss] = r[:, poiss]
             U[:, gauss] = 1 / noise_gauss
             w = U @ (a.T ** 2)
-            if model['method'] == 'VB':
+            if job['method'] == 'VB':
                 for l in range(z_dim):
                     G = prior[l]
                     GtWG = G.T @ (w[:, l, newaxis] * G)
@@ -210,42 +120,42 @@ def estep(model: dict):
                         logger.exception(repr(e), exc_info=True)
 
         # center over all trials if not only infer posterior
-        # constrain_mu(model)
+        # constrain_mu(job)
 
-        # if norm(dmu) < model['tol'] * norm(mu):
+        # if norm(dmu) < job['tol'] * norm(mu):
         #     break
 
 
-def mstep(model: dict):
+def mstep(job: dict):
     """Optimize loading and regression (M step)"""
-    if not model[MSTEP]:
+    if not job[MSTEP]:
         return
 
     # It's more reasonable to constrain the latent before mstep.
     # If the parameters are fixed, there's no need to optimize the posterior.
     # Besides, the constraint modifies the loading and bias.
-    constrain_mu(model)
+    constrain_latent(job)
 
-    lik = model[LIK]
-    y_dim = model['y_dim']
+    lik = job[LIK]
+    y_dim = job['y_dim']
 
-    a = model['a']
-    b = model['b']
-    da = model['da']
-    db = model['db']
+    a = job['a']
+    b = job['b']
+    da = job['da']
+    db = job['db']
 
     # concatenate trials
     # TODO: possibly not to concatenate?
-    y_2d = np.concatenate([trial['y'] for trial in model['trials']], axis=0)
-    x_2d = np.concatenate([trial['x'] for trial in model['trials']], axis=0)
-    mu_2d = np.concatenate([trial['mu'] for trial in model['trials']], axis=0)
-    v_2d = np.concatenate([trial['v'] for trial in model['trials']], axis=0)
+    y_2d = np.concatenate([trial['y'] for trial in job['trials']], axis=0)
+    x_2d = np.concatenate([trial['x'] for trial in job['trials']], axis=0)
+    mu_2d = np.concatenate([trial['mu'] for trial in job['trials']], axis=0)
+    v_2d = np.concatenate([trial['v'] for trial in job['trials']], axis=0)
 
-    for i in range(model['m_niter']):
+    for i in range(job['m_niter']):
         eta = mu_2d @ a + einsum('ijk, jk -> ik', x_2d, b)
         # (neuron, time, regression) x (regression, neuron) -> (time, neuron)
         r = trunc_exp(eta + 0.5 * v_2d @ (a ** 2))
-        model['noise'] = var(y_2d - eta, axis=0, ddof=0)  # MLE
+        job['noise'] = var(y_2d - eta, axis=0, ddof=0)  # MLE
 
         for n in range(y_dim):
             if lik[n] == POISSON:
@@ -253,7 +163,7 @@ def mstep(model: dict):
                 mu_plus_v_times_a = mu_2d + v_2d * a[:, n]
                 grad_a = mu_2d.T @ y_2d[:, n] - mu_plus_v_times_a.T @ r[:, n]
 
-                if model['hessian']:
+                if job['hessian']:
                     nhess_a = mu_plus_v_times_a.T @ (
                         r[:, n, newaxis] * mu_plus_v_times_a)
                     nhess_a[np.diag_indices_from(nhess_a)] += r[:, n] @ v_2d
@@ -262,28 +172,28 @@ def mstep(model: dict):
                         delta_a = solve(nhess_a, grad_a, sym_pos=True)
                     except Exception as e:
                         logger.exception(repr(e), exc_info=True)
-                        delta_a = model['learning_rate'] * grad_a
+                        delta_a = job['learning_rate'] * grad_a
                 else:
-                    delta_a = model['learning_rate'] * grad_a
+                    delta_a = job['learning_rate'] * grad_a
 
-                clip(delta_a, model['da_bound'])
+                clip_grad(delta_a, job['da_bound'])
                 da[:, n] = delta_a
                 a[:, n] += delta_a
 
                 # regression
                 grad_b = x_2d[..., n].T @ (y_2d[:, n] - r[:, n])
 
-                if model['hessian']:
+                if job['hessian']:
                     nhess_b = x_2d[..., n].T @ (r[:, newaxis, n] * x_2d[..., n])
                     try:
                         delta_b = solve(nhess_b, grad_b, sym_pos=True)
                     except Exception as e:
                         logger.exception(repr(e), exc_info=True)
-                        delta_b = model['learning_rate'] * grad_b
+                        delta_b = job['learning_rate'] * grad_b
                 else:
-                    delta_b = model['learning_rate'] * grad_b
+                    delta_b = job['learning_rate'] * grad_b
 
-                clip(delta_b, model['db_bound'])
+                clip_grad(delta_b, job['db_bound'])
                 db[:, n] = delta_b
                 b[:, n] += delta_b
             elif lik[n] == GAUSSIAN:
@@ -305,174 +215,74 @@ def mstep(model: dict):
             else:
                 pass
 
-        if norm(da) < model['tol'] * norm(a) and norm(db) < model['tol'] * norm(b):
+        if norm(da) < job['tol'] * norm(a) and norm(db) < job['tol'] * norm(b):
             break
 
 
-def hstep(model: dict):
+def hstep(job: dict):
     """Optimize hyperparameters"""
-    if not model[HSTEP]:
+    if not job[HSTEP]:
         return
 
-    if model[ITER] % model[HPERIOD] != 0:
+    if job[ITER] % job[HPERIOD] != 0:
         return
 
     # if model['verbose']:
     #     print('Optimize hyperparameter')
 
-    if model['gp'] == 'cutting':
-        gp_small_segments(model)
-    elif model['gp'] == 'sampling':
-        gp_slice_sampling(model)
+    if job['gp'] == 'cutting':
+        gp_small_segments(job)
+    elif job['gp'] == 'sampling':
+        gp_slice_sampling(job)
     else:
         raise ValueError('Unsupported hyperparameter method')
 
 
-def vem(model, callbacks=None):
-    callbacks = callbacks or []
-    tol = model['tol']
-    niter = model['niter']
-
-    model.setdefault('it', 0)
-    model.setdefault('e_elapsed', [])
-    model.setdefault('m_elapsed', [])
-    model.setdefault('h_elapsed', [])
-    model.setdefault('em_elapsed', [])
-
-    model.setdefault('da', np.zeros_like(model['a']))
-    model.setdefault('db', np.zeros_like(model['b']))
-    model.setdefault('dmu', np.zeros_like(model['mu']))
-
-    #######################
-    # iterative algorithm #
-    #######################
-
-    # disable gabbage collection during the iterative procedure
-    gc.disable()
-    for it in range(model['it'], niter):
-        model['it'] += 1
-
-        with timer() as em_elapsed:
-            ##########
-            # E step #
-            ##########
-            with timer() as estep_elapsed:
-                estep(model)
-
-            ##########
-            # M step #
-            ##########
-            with timer() as mstep_elapsed:
-                mstep(model)
-
-            ###################
-            # hyperparam step #
-            ###################
-            with timer() as hstep_elapsed:
-                hstep(model)
-
-        model['e_elapsed'].append(estep_elapsed())
-        model['m_elapsed'].append(mstep_elapsed())
-        model['h_elapsed'].append(hstep_elapsed())
-        model['em_elapsed'].append(em_elapsed())
-
-        for callback in callbacks:
-            try:
-                callback(model)
-            finally:
-                pass
-
-        #####################
-        # convergence check #
-        #####################
-        mu = model['mu']
-        a = model['a']
-        b = model['b']
-        dmu = model['dmu']
-        da = model['da']
-        db = model['db']
-
-        converged = norm(dmu) < tol * norm(mu) and norm(da) < tol * norm(a) and norm(db) < tol * norm(b)
-        stop = converged
-
-        if stop:
-            break
-
-    ##############################
-    # end of iterative procedure #
-    ##############################
-    gc.enable()  # enable gabbage collection
-
-
-def calc_post_cov(model):
-    ntrial, nbin, z_dim = model['mu'].shape
-    prior = model[PRIOR]
-    rank = prior[0].shape[-1]
-    w = model['w']
-    Ir = identity(rank)
-    L = empty((ntrial, z_dim, nbin, rank))
-    for trl in range(ntrial):
-        for l in range(z_dim):
-            G = prior[l]
-            GtWG = G.T @ (w[trl, :, l, newaxis].T * G)
-            try:
-                M = Ir - GtWG + GtWG @ solve(Ir + GtWG, GtWG, sym_pos=True)
-                # A should be PD but numerically not
-            except Exception as e:
-                # warnings.warn('Singular matrix. Use least squares instead.')
-                logger.exception(repr(e), exc_info=True)
-                M = Ir - GtWG + GtWG @ lstsq(Ir + GtWG, GtWG)[0]
-            eigval, eigvec = eigh(M)
-            eigval.clip(0, PINF, out=eigval)  # remove negative eigenvalues
-            L[trl, l, :] = G @ (eigvec @ diag(sqrt(eigval)))
-    model['L'] = L
-
-
-def clip(a, lbound, ubound=None):
+def clip_grad(grad, lbound, ubound=None):
     if ubound is None:
         assert lbound > 0
         ubound = lbound
         lbound = -lbound
     else:
         assert ubound > lbound
-    np.clip(a, lbound, ubound, out=a)
+    np.clip(grad, lbound, ubound, out=grad)
 
 
-def update_w(model):
-    ntrial, nbin, x_dim, y_dim = model['x'].shape
-    z_dim = model['mu'].shape[-1]
+def update_w(job):
+    ntrial, nbin, x_dim, y_dim = job['x'].shape
+    z_dim = job['mu'].shape[-1]
 
-    poiss = model[LIK] == POISSON
-    gauss = model[LIK] == GAUSSIAN
+    poiss = job[LIK] == POISSON
+    gauss = job[LIK] == GAUSSIAN
 
-    mu_2d = model['mu'].reshape((-1, z_dim))
-    x_2d = model['x'].reshape((-1, x_dim, y_dim))  # concatenate trials
-    v_2d = model['v'].reshape((-1, z_dim))
-    shape_w = model['w'].shape
+    mu_2d = job['mu'].reshape((-1, z_dim))
+    x_2d = job['x'].reshape((-1, x_dim, y_dim))  # concatenate trials
+    v_2d = job['v'].reshape((-1, z_dim))
+    shape_w = job['w'].shape
 
     # (neuron, time, regression) x (regression, neuron) -> (time, neuron)
-    eta = mu_2d @ model['a'] + einsum('ijk, jk -> ik', x_2d, model['b'])
-    r = trunc_exp(eta + 0.5 * v_2d @ (model['a'] ** 2))
+    eta = mu_2d @ job['a'] + einsum('ijk, jk -> ik', x_2d, job['b'])
+    r = trunc_exp(eta + 0.5 * v_2d @ (job['a'] ** 2))
     U = empty_like(r)
 
     U[:, poiss] = r[:, poiss]
-    U[:, gauss] = 1 / model['noise'][gauss]
-    model['w'] = reshape(U @ (model['a'].T ** 2), shape_w)
+    U[:, gauss] = 1 / job['noise'][gauss]
+    job['w'] = reshape(U @ (job['a'].T ** 2), shape_w)
 
 
-def update_v(model):
-    if model['method'] == VB:
-        prior = model[PRIOR]
+def update_v(job):
+    if job['method'] == VB:
+        prior = job[PRIOR]
         Ir = identity(prior[0].shape[-1])
-        ntrial, nbin, z_dim = model['mu'].shape
+        ntrial, nbin, z_dim = job['mu'].shape
 
         for trl in range(ntrial):
-            w = model['w'][trl, :]
+            w = job['w'][trl, :]
             for l in range(z_dim):
                 G = prior[l]
                 GtWG = G.T @ (w[:, l, newaxis] * G)
                 try:
-                    model['v'][trl, :, l] = (
+                    job['v'][trl, :, l] = (
                         G * (G - G @ GtWG + G @ (
                             GtWG @ solve(Ir + GtWG, GtWG, sym_pos=True)))).sum(
                         axis=1)
@@ -480,50 +290,50 @@ def update_v(model):
                     warnings.warn("singular I + G'WG")
 
 
-def constrain_mu(model):
-    if not model['constrain_mu']:
+def constrain_latent(job):
+    if not job['constrain_mu']:
         return
 
-    mu_shape = model['mu'].shape
+    mu_shape = job['mu'].shape
     z_dim = mu_shape[-1]
-    mu_2d = model['mu'].reshape((-1, z_dim))
+    mu_2d = job['mu'].reshape((-1, z_dim))
     mean_over_trials = mu_2d.mean(axis=0, keepdims=True)
     std_over_trials = mu_2d.std(axis=0, keepdims=True)
 
-    if model['constrain_mu'] == 'location' or model['constrain_mu'] == 'both':
+    if job['constrain_mu'] == 'location' or job['constrain_mu'] == 'both':
         mu_2d -= mean_over_trials
         # compensate bias
         # commented to isolated from changing external variables
-        model['b'][0, :] += np.squeeze(mean_over_trials @ model['a'])
+        job['b'][0, :] += np.squeeze(mean_over_trials @ job['a'])
 
-    if model['constrain_mu'] == 'scale' or model['constrain_mu'] == 'both':
+    if job['constrain_mu'] == 'scale' or job['constrain_mu'] == 'both':
         mu_2d /= std_over_trials
         # compensate loading
         # commented to isolated from changing external variables
-        model['a'] *= std_over_trials.T
+        job['a'] *= std_over_trials.T
 
-    model['mu'] = mu_2d.reshape(mu_shape)
+    job['mu'] = mu_2d.reshape(mu_shape)
 
 
-def constrain_a(model):
-    if not model['constrain_a']:
+def constrain_loading(job):
+    if not job['constrain_a']:
         return
 
-    method = model['constrain_a']
-    eps = model['eps']
+    method = job['constrain_a']
+    eps = job['eps']
 
-    mu_shape = model['mu'].shape
+    mu_shape = job['mu'].shape
     z_dim = mu_shape[-1]
-    mu_2d = model['mu'].reshape((-1, z_dim))
-    a = model['a']
+    mu_2d = job['mu'].reshape((-1, z_dim))
+    a = job['a']
     if method == 'none':
         return
     if method == 'svd':
         # SVD is not good as above
         # noinspection PyTupleAssignmentBalance
         U, s, Vh = svd(a, full_matrices=False)
-        model['mu'] = np.reshape(mu_2d @ a @ Vh.T, mu_shape)
-        model['a'] = Vh
+        job['mu'] = np.reshape(mu_2d @ a @ Vh.T, mu_shape)
+        job['a'] = Vh
     else:
         s = norm(a, ord=method, axis=1, keepdims=True) + eps
         a /= s
