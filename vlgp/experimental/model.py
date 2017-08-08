@@ -1,3 +1,6 @@
+# A job contains current values of parameters, hyperparameters and latents.
+# Latents are trial-wise, and (hyper-)parameters are model-wise.
+
 import abc
 import json
 import os
