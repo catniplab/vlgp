@@ -75,13 +75,10 @@ class VLGP(Model):
         tol = self.config['tol']
         niter = self.config['niter']
 
-        job = {'trials': data}
+        job = {'model': self.model, 'trials': data}
+        # initialize a job
 
-        job.setdefault('it', 0)
-        job.setdefault('e_elapsed', [])
-        job.setdefault('m_elapsed', [])
-        job.setdefault('h_elapsed', [])
-        job.setdefault('em_elapsed', [])
+        self.initialize(job)
 
         #######################
         # iterative algorithm #
@@ -92,29 +89,27 @@ class VLGP(Model):
         for it in range(job['it'], niter):
             job['it'] += 1
 
-            with timer() as em_elapsed:
-                ##########
-                # E step #
-                ##########
-                with timer() as estep_elapsed:
-                    estep(job)
+            ##########
+            # E step #
+            ##########
+            with timer() as estep_elapsed:
+                estep(job)
 
-                ##########
-                # M step #
-                ##########
-                with timer() as mstep_elapsed:
-                    mstep(job)
+            ##########
+            # M step #
+            ##########
+            with timer() as mstep_elapsed:
+                mstep(job)
 
-                ###################
-                # hyperparam step #
-                ###################
-                with timer() as hstep_elapsed:
-                    hstep(job)
+            ###################
+            # hyperparam step #
+            ###################
+            with timer() as hstep_elapsed:
+                hstep(job)
 
             job['e_elapsed'].append(estep_elapsed())
             job['m_elapsed'].append(mstep_elapsed())
             job['h_elapsed'].append(hstep_elapsed())
-            job['em_elapsed'].append(em_elapsed())
 
             # for callback in callbacks:
             #     try:
@@ -143,6 +138,17 @@ class VLGP(Model):
         ##############################
         # end of iterative procedure #
         ##############################
+
+    def initialize(self, job):
+        job.setdefault('it', 0)
+        job.setdefault('e_elapsed', [])
+        job.setdefault('m_elapsed', [])
+        job.setdefault('h_elapsed', [])
+        job.setdefault('em_elapsed', [])
+        job.setdefault('dir', self.result_dir)
+
+        trials = job['trials']
+        # TODO: build arrays of latents, parameters and hyperparameters
 
     def save(self):
         np.save(self.result_dir.joinpath('model.npy'), self.model)
