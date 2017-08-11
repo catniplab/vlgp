@@ -80,3 +80,22 @@ def factanal(model):
 
     update_w(model)
     update_v(model)
+
+
+def load(model):
+    path = model['initialize']
+    init = np.load(path)
+
+    model['mu'] = init['mu']
+    model['a'] = init['a']
+    model['b'] = init['b']
+
+    model['w'] = zeros_like(model['mu'], dtype=float)
+    model['v'] = zeros_like(model['mu'], dtype=float)
+
+    model['dmu'] = zeros_like(model['mu'])
+    model['da'] = zeros_like(model['a'])
+    model['db'] = zeros_like(model['b'])
+
+    update_w(model)
+    update_v(model)

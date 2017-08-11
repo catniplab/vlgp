@@ -1,9 +1,11 @@
+import os
+
 import numpy as np
 from numpy import empty
 
 from .callback import Saver, Printer
 from .core import vem
-from .initialization import factanal
+from . import initialization
 from .preprocess import build_model
 from .util import add_constant, lagmat
 
@@ -63,9 +65,11 @@ def fit(**kwargs):
         model = build_model(**kwargs)
 
     if model['initialize'] == 'fa':
-        initialize = factanal
+        initialize = initialization.factanal
     elif model['initialize'] is callable:
         initialize = model['initialize']
+    elif os.path.exists(model['initialize']):
+        initialize = initialization.load
     else:
         raise NotImplementedError(model['initialize'])
 
