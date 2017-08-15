@@ -85,10 +85,12 @@ def factanal(model):
 def load(model):
     path = model['initialize']
     init = np.load(path)
+    init = init.tolist()
 
     model['mu'] = init['mu']
     model['a'] = init['a']
     model['b'] = init['b']
+    model['noise'] = init['noise']
 
     model['w'] = zeros_like(model['mu'], dtype=float)
     model['v'] = zeros_like(model['mu'], dtype=float)

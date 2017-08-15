@@ -490,13 +490,13 @@ def constrain_mu(model):
     mean_over_trials = mu_2d.mean(axis=0, keepdims=True)
     std_over_trials = mu_2d.std(axis=0, keepdims=True)
 
-    if model['constrain_mu'] == 'location' or model['constrain_mu'] == 'both':
+    if model['constrain_mu'] in ('location', 'both'):
         mu_2d -= mean_over_trials
         # compensate bias
         # commented to isolated from changing external variables
         model['b'][0, :] += np.squeeze(mean_over_trials @ model['a'])
 
-    if model['constrain_mu'] == 'scale' or model['constrain_mu'] == 'both':
+    if model['constrain_mu'] in ('scale', 'both'):
         mu_2d /= std_over_trials
         # compensate loading
         # commented to isolated from changing external variables
