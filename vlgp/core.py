@@ -524,6 +524,10 @@ def constrain_a(model):
         U, s, Vh = svd(a, full_matrices=False)
         model['mu'] = np.reshape(mu_2d @ a @ Vh.T, mu_shape)
         model['a'] = Vh
+    elif method == 'f':
+        s = norm(a, ord='fro')
+        a /= s
+        model['mu'] *= s
     else:
         s = norm(a, ord=method, axis=1, keepdims=True) + eps
         a /= s
