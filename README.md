@@ -31,7 +31,7 @@ The data are expected to be spike counts (Poisson) or/and LFP channels (Gaussian
 
 | module     | function                                                                                      |
 |:-----------|-----------------------------------------------------------------------------------------------|
-| api        | user interface                                                                                |
+| api        | *use it*                                                                                      |
 | core       | algorithm                                                                                     |
 | ~~selection~~ | ~~model selection, CV, leave-one-out~~                                                     |
 | gp         | hyperparameter optimization, kernel                                                           |
