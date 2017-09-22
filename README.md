@@ -1,34 +1,32 @@
-# README #
+# variational Latent Gaussian Process
 
-## Welcome
+[![python 3.5](https://img.shields.io/badge/python-3.5-blue.svg?style=flat-square)]()
+[![license](https://img.shields.io/github/license/mashape/apistatus.svg?style=flat-square)]()
 
-This package is written by Yuan Zhao ([yuan.zhao@stonybrook.edu](yuan.zhao@stonybrook.edu])). 
-It contains methods of variational Latent Gaussian Process (vLGP) model based on Yuan Zhao and Il Memming Park's ([memming.park@stonybrook.edu](memming.park@stonybrook.edu)) work.
+## Introduction
+
+It contains methods of variational Latent Gaussian Process (vLGP) model based on 
+Yuan Zhao ([yuan.zhao@stonybrook.edu](yuan.zhao@stonybrook.edu])) and 
+Il Memming Park's ([memming.park@stonybrook.edu](memming.park@stonybrook.edu)) work.
 It has been developed and implemented with the goal of recovering dynamics from population spike trains. 
 
-The code requires Python 3.5. 
-
 ## Changes
-* New fit function that requires only observation and the number of latent, 
-and return a single dict containing all results, e.g. 
-result = fit(y=y, dyn_ndim=2).
-* Changes to default options
+
+- New *fit* function now only requires observation and the number of latent as argument, 
+and returns a single dict containing all results. Usage: 
+result = fit(y=y, lat_dim=2).
+- It saves intermediate results if *path* is passed to *fit*.
+- One can now add any function to the list argument *callbacks* to measure the iterations.
 
 ## Usage
 
-To get started, see the examples in notebook: ./tutorial.ipynb. 
-There are 5 Lorenz simulations and 5 LDS simulations in './data' for the tutorial. The corresponding inference and cross-validation results are in './output'. 
-You may skip the code in tutorial and load them directly to save time.
+To get started, see the examples in the [tutorial](tutorial.ipynb).
 
 The default options controlling algorithm are recommended for the purpose of stability but not necessarily the optimal.
-If you encounter any numerical error (most likely singular matrix errors), try to change the prior and enable the Hessian adjustment.
+If you encounter any numerical error (most likely singular matrix errors), try to change the prior and other options.
 
-This package heavily depends on NumPy. All nonscalar data are expected to be in ndarray-compatible type. 
-
-The data for training models are expected to be spike trains (LFP channels will be supported in future). 
-The spike trains should be binned and shaped into array as (trial, bin, neuron) before passing to the functions.
-Each element of array is the spike count in that time bin of certain neuron and trial.
-
+The data are expected to be spike counts (Poisson) or/and LFP channels (Gaussian) in time bins of shape (trial, bin, neuron).
+ 
 ## Modules
 
 | module     | function                                                                                      |
@@ -41,9 +39,3 @@ Each element of array is the spike count in that time bin of certain neuron and 
 | plot       | raster and dynamics                                                                           |
 | simulation | simulation of Gaussian process, Lorenz dynamics and spike trains                              |
 | util       | lag matrix construction, rotation, load and save                                              |
-
-## Contact
-
-If you notice a bug, want to request a feature, or have a question or feedback, please send an email to [yuan.zhao@stonybrook.edu](yuan.zhao@stonybrook.edu). We love to hear from people using our code.
-
-The code is published under the MIT License.
