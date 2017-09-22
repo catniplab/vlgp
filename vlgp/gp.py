@@ -11,7 +11,7 @@ from scipy.linalg import cholesky, LinAlgError, cho_solve, lstsq
 from scipy.optimize import fmin_l_bfgs_b
 from scipy.spatial.distance import pdist, squareform
 
-from .name import HOBJ, PRIORICHOL
+from .constant import HOBJ, PRIOR
 from .math import ichol_gauss
 
 logger = logging.getLogger(__name__)
@@ -38,7 +38,7 @@ def se_kernel(x, params):
 
 
 def gpr_marginal(params, mask, *args):
-    t, mu, *_ = args
+    t, mu, *args = args
     K, dK = se_kernel(t, params)
     dK *= mask[np.newaxis, np.newaxis, :]
     try:
@@ -248,11 +248,11 @@ def slice_sweep(particle, slice_fn, slice_width=1, step_out=True):
 def gp_slice_sampling(model, slice_width=10):
     log_prior_theta = lambda l: 0.0 if model['omega_bound'][0] < l < \
                                        model['omega_bound'][1] else -np.inf
-    ntrial, nbin, z_ndim = model['mu'].shape
-    for z_dim in range(z_ndim):
-        theta = model['omega'][z_dim]
-        params = {'position': theta, 'f': model['mu'][:, :, z_dim],
-                  'sigma': model['sigma'][z_dim]}
+    ntrial, nbin, z_dim = model['mu'].shape
+    for l in range(z_dim):
+        theta = model['omega'][l]
+        params = {'position': theta, 'f': model['mu'][:, :, l],
+                  'sigma': model['sigma'][l]}
         update_params(params, lpstar_min=-np.inf,
                       log_prior_theta=log_prior_theta, n=nbin,
                       rank=model['rank'])
@@ -266,8 +266,8 @@ def gp_slice_sampling(model, slice_width=10):
                                                                       'rank']),
                     slice_width=slice_width,
                     step_out=step_out)
-        model['omega'][z_dim] = params['position']
-        model['chol'][z_dim] = params['ichol']
+        model['omega'][l] = params['position']
+        model[PRIOR][l] = params['ichol']
 
 
 def update_params(params, lpstar_min, log_prior_theta, n, rank):
@@ -292,8 +292,8 @@ def update_params(params, lpstar_min, log_prior_theta, n, rank):
 
 def gp_small_segments(model):
 
-    ntrial, nbin, z_ndim = model['mu'].shape
-    prior = model['chol']
+    ntrial, nbin, z_dim = model['mu'].shape
+    prior = model[PRIOR]
     rank = prior[0].shape[-1]
     mu = model['mu']
     w = model['w']
@@ -306,9 +306,9 @@ def gp_small_segments(model):
     #     subsample_size = nbin
     sigma = model['sigma']
     omega = model['omega']
-    for z_dim in range(z_ndim):
+    for l in range(z_dim):
         # subsample = gp.subsample(nbin, subsample_size)
-        hparam0 = (sigma[z_dim] ** 2, omega[z_dim], model['gp_noise'])
+        hparam0 = (sigma[l] ** 2, omega[l], model['gp_noise'])
         bounds = ((1e-3, 1),
                   model['omega_bound'],
                   (model['gp_noise'] / 2, model['gp_noise'] * 2))
@@ -316,17 +316,14 @@ def gp_small_segments(model):
 
         sigmasq, omega_new, _ = optim(model[HOBJ],
                                       np.arange(seg_len),
-                                      mu[:, segment, z_dim].reshape(-1,
-                                                                    seg_len).T,
-                                      w[:, segment, z_dim].reshape(-1,
-                                                                   seg_len).T,
+                                      mu[:, segment, l].reshape(-1, seg_len).T,
+                                      w[:, segment, l].reshape(-1, seg_len).T,
                                       hparam0,
                                       bounds,
                                       mask=mask,
                                       return_f=False)
         if not np.any(np.isclose(omega_new, model['omega_bound'])):
-            omega[z_dim] = omega_new
-        sigma[z_dim] = sqrt(sigmasq)
-    model[PRIORICHOL] = np.array(
-        [ichol_gauss(nbin, omega[dyn_dim], rank) * sigma[dyn_dim] for dyn_dim
-         in range(z_ndim)])
+            omega[l] = omega_new
+        sigma[l] = sqrt(sigmasq)
+    model[PRIOR] = np.array(
+        [ichol_gauss(nbin, omega[l], rank) * sigma[l] for l in range(z_dim)])

@@ -1,8 +1,8 @@
 import numpy as np
 
+from .constant import REQUIRED_FIELDS, LIK_CODE, DEFAULT_VALUES
 from .math import ichol_gauss
-from .constant import REQUIRED_FIELDS, TYPE_CODE, DEFAULT_VALUES
-from .name import Y_TYPE
+from .constant import PRIOR, LIK, Z_DIM
 from .util import add_constant, lagmat
 
 
@@ -35,26 +35,28 @@ def check_model(model):
         y = y[np.newaxis, ...]
 
     # y-dependent arguments
-    ntrial, nbin, y_ndim = model['y'].shape
+    ntrial, nbin, y_dim = model['y'].shape
 
     # sanity check
-    z_ndim = model['dyn_ndim']
-    if y_ndim < z_ndim:
+    z_dim = model[Z_DIM]
+    if y_dim < z_dim:
         raise ValueError("The number of observation dimensions, {}, is less "
-                         "than that of latent dimensions, {}.".format(y_ndim, z_ndim))
+                         "than that of latent dimensions, {}.".format(y_dim,
+                                                                      z_dim))
 
-    types = model.get(Y_TYPE)
-    if types is None:
-        types = 'spike'
+    lik = model.get(LIK, 'poisson')
 
-    if types == 'spike' or types == 'lfp':
-        types = [types] * y_ndim
+    if lik == 'poisson' or lik == 'gaussian':
+        lik = [lik] * y_dim
 
-    encoded_types = np.empty(y_ndim, dtype=int)
-    for i, t in enumerate(types):
-        encoded_types[i] = TYPE_CODE[t]
+    if model['verbose']:
+        print('Likelihood\n', lik)
 
-    model[Y_TYPE] = encoded_types
+    encoded_lik = np.empty(y_dim, dtype=int)
+    for i, t in enumerate(lik):
+        encoded_lik[i] = LIK_CODE[t]
+
+    model[LIK] = encoded_lik
 
     # parameters
     model.setdefault('a', None)
@@ -64,43 +66,45 @@ def check_model(model):
     # IDs of trials and neurons or lfp channels
     # for identification in case of bad data
     model.setdefault('trial_id', np.arange(ntrial))
-    model.setdefault('obs_id', np.arange(y_ndim))
+    model.setdefault('obs_id', np.arange(y_dim))
 
     # length of history filter
     model.setdefault('history', 0)
 
     # make design matrix of regression
-    h = model.get('h')
-    if h is None:
+    x = model.get('x')
+    if x is None:
         history = model['history']
-        h = np.empty((y_ndim, ntrial, nbin, 1 + history), dtype=float)
-        for y_dim in range(y_ndim):
-            for trial in range(ntrial):
-                h[y_dim, trial, :] = add_constant(
-                    lagmat(y[trial, :, y_dim], lag=history))
-        model['h'] = h
+        x_dim = 1 + history
+        x = np.empty((ntrial, nbin, x_dim, y_dim), dtype=float)
+        for n in range(y_dim):
+            for trl in range(ntrial):
+                x[trl, :, :, n] = add_constant(lagmat(y[trl, :, n], lag=history))
+        model['x'] = x
 
     # GP
     model.setdefault('rank', nbin // 5)
 
-    sigma = np.empty(model['dyn_ndim'])
+    sigma = np.empty(model[Z_DIM])
     sigma[:] = np.asarray(model['sigma'])
     model['sigma'] = sigma
 
     omega = model.get('omega')
     if omega is None:
-        model['omega'] = np.full(model['dyn_ndim'],
+        model['omega'] = np.full(model[Z_DIM],
                                  fill_value=0.5 / (model['tau'] ** 2))
     else:
-        model['omega'] = np.empty(model['dyn_ndim'])
+        model['omega'] = np.empty(model[Z_DIM])
         model['omega'][:] = np.asarray(omega)
 
     rank = model['rank']
 
-    model['chol'] = np.array([ichol_gauss(nbin, w, rank) * s for s, w in
-                              zip(model['sigma'], model['omega'])])
+    model[PRIOR] = np.array([ichol_gauss(nbin, w, rank) * s for s, w in
+                             zip(model['sigma'], model['omega'])])
 
     # cut trials
     from .util import cut_trials
+    if model['seg_len'] > nbin:
+        model['seg_len'] = nbin
     if model.get('segment') is None:
         model['segment'] = cut_trials(nbin, ntrial, seg_len=model['seg_len'])

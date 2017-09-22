@@ -7,10 +7,9 @@ import numpy as np
 from scipy import linalg
 from scipy.linalg import svd
 
-MIN_EXP = -20
-MAX_EXP = 20
 
-
+############################
+# link functions
 def rectify(x):
     """
     rectangular linear link
@@ -21,23 +20,25 @@ def rectify(x):
     return x.clip(0, np.inf)
 
 
-def sexp(x, lbound=MIN_EXP, ubound=MAX_EXP):
+def trunc_exp(x, ubound=10):
     """
     Truncated exp
 
     Parameters
     ----------
     x : ndarray
-    lbound : double
-        lower bound of x
     ubound : double
         upper bound of x
     Returns
     -------
     ndarray
-        exp(max(x, lbound) and min(x, ubound))
+        exp(min(x, ubound))
     """
-    return np.exp(np.clip(x, lbound, ubound))
+    return np.exp(np.minimum(x, ubound))
+
+
+def lexp(x, c=20):
+    return np.exp(x) if x < c else np.exp(c) * (1 - c + x)
 
 
 def identity(x):
@@ -68,6 +69,7 @@ def log1exp(x):
     ndarray
     """
     return np.log1p(np.exp(x))
+################################
 
 
 def ichol_gauss(n, omega, r, tol=1e-6):

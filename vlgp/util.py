@@ -157,7 +157,7 @@ def lagmat(x, lag):
 
 
 # TODO: consider persistence by joblib dump/load, or keep HDF5 for interoperability?
-# One advantage of HDF5 is that one can add/remove/modify any field in file without loading/saving all fields.
+# TODO: numpy.save supports dict
 def save(obj, fname):
     """
     Save inference object in HDF5
@@ -336,8 +336,8 @@ def regmat(y, x=None, lag=0):
     """
     automat = auto(y, lag)
     big_x = np.concatenate(x, axis=0)  # along time
-    y_ndim = automat.shape[0]
-    return np.concatenate([automat, np.stack([big_x] * y_ndim)], axis=2)
+    y_dim = automat.shape[0]
+    return np.concatenate([automat, np.stack([big_x] * y_dim)], axis=2)
 
 
 def smooth_1d(x, sigma=10):
@@ -375,7 +375,7 @@ def hdf5_to_dict(hdf):
     return d
 
 
-def cut_trials(nbin, ntrial, seg_len=20):
+def cut_trials(nbin, ntrial, seg_len):
     """
     Cut trials into small segments of equal length
 

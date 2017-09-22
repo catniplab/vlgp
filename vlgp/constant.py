@@ -1,18 +1,44 @@
 """constants"""
 
-# coding observation dimensions
 from collections import defaultdict
 
+# names
+VB = 'VB'
+MAP = 'MAP'
+X = 'x'
+Z = 'z'
+MU = 'mu'
+W = 'w'
+V = 'v'
+dMU = 'dmu'
+dA = 'da'
+dB = 'db'
+ESTEP = 'learn_post'
+MSTEP = 'learn_param'
+HSTEP = 'learn_hyper'
+HPERIOD = 'nhyper'
+HOBJ = 'hyper_obj'
+TRIALLET = 'subsample_size'
+PRIOR = 'chol'
+PRIORSTD = 'sigma'
+PRIORTIMESCALE = 'omega'
+MAXITER = 'niter'
+ITER = 'it'
+LIK = 'lik'
+Y_DIM = 'y_dim'
+#
 
-UNUSED = 0  # dimension not to use
-SPIKE = 1  # spike train
-LFP = 2  # local field potential
+NA = 0  # dimension not to use
+POISSON = 1
+GAUSSIAN = 2
 
-TYPE_CODE = defaultdict(int,
-                        spike=1,
-                        lfp=2)
+LIK_CODE = defaultdict(int,
+                       poisson=POISSON,
+                       gaussian=GAUSSIAN)
 
-REQUIRED_FIELDS = ['y', 'dyn_ndim']
+Y = 'y'
+Z_DIM = 'lat_dim'
+REQUIRED_FIELDS = [Y, Z_DIM]
 
 # default options
 DEFAULT_VALUES = {'learning_rate': 1.0,
@@ -46,3 +72,5 @@ DEFAULT_VALUES = {'learning_rate': 1.0,
                   # misc
                   'verbose': False,
                   'saving_interval': 3600}
+
+
