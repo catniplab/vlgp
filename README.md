@@ -1,12 +1,14 @@
-# README #
+# variational Latent Gaussian Process
 
-## Welcome
+[![python 3.5](https://img.shields.io/badge/python-3.5-blue.svg?style=flat-square)]()
+[![license](https://img.shields.io/github/license/mashape/apistatus.svg?style=flat-square)]()
 
-This package is written by Yuan Zhao ([yuan.zhao@stonybrook.edu](yuan.zhao@stonybrook.edu])). 
-It contains methods of variational Latent Gaussian Process (vLGP) model based on Yuan Zhao and Il Memming Park's ([memming.park@stonybrook.edu](memming.park@stonybrook.edu)) work.
+## Introduction
+
+It contains methods of variational Latent Gaussian Process (vLGP) model based on 
+Yuan Zhao ([yuan.zhao@stonybrook.edu](yuan.zhao@stonybrook.edu])) and 
+Il Memming Park's ([memming.park@stonybrook.edu](memming.park@stonybrook.edu)) work.
 It has been developed and implemented with the goal of recovering dynamics from population spike trains. 
-
-This package requires Python >= 3.5.
 
 ## Changes
 
@@ -37,9 +39,3 @@ The data are expected to be spike counts (Poisson) or/and LFP channels (Gaussian
 | plot       | raster and dynamics                                                                           |
 | simulation | simulation of Gaussian process, Lorenz dynamics and spike trains                              |
 | util       | lag matrix construction, rotation, load and save                                              |
-
-## Contact
-
-If you notice a bug, want to request a feature, or have a question or feedback, please send an email to [yuan.zhao@stonybrook.edu](yuan.zhao@stonybrook.edu). We love to hear from people using our code.
-
-The code is published under the MIT License.
