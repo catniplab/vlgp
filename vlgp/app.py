@@ -1,11 +1,8 @@
 import os
-import sys
 
 import fire
 import h5py
 import numpy as np
-
-sys.path.insert(0, os.path.expanduser('~/vlgp'))
 
 from vlgp import api
 
