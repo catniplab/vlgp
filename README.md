@@ -5,10 +5,10 @@
 
 ## Introduction
 
-It contains methods of variational Latent Gaussian Process (vLGP) model based on 
+It contains the method of variational Latent Gaussian Process (vLGP) based on 
 Yuan Zhao ([yuan.zhao@stonybrook.edu](yuan.zhao@stonybrook.edu])) and 
 Il Memming Park's ([memming.park@stonybrook.edu](memming.park@stonybrook.edu)) work.
-It has been developed and implemented with the goal of recovering dynamics from population spike trains. 
+It has been developed with the goal of recovering dynamics from population spike trains. 
 
 ## Changes
 
