@@ -1,18 +1,17 @@
 """
 Symbols
 -------
-y : observation, typically spike count or lfp
-x : regression variable, typically history
-z : latent process
+y : observation, spike count or LFP
+x : regression variable, e.g. spike history
+z : latent
+mu : mean of z
 """
 import gc
 import logging
 import warnings
 
 import numpy as np
-from numpy import identity, einsum, trace, empty, diag, var, empty_like, sum, \
-    reshape
-from numpy.core.umath import sqrt, PINF, log
+from numpy import identity, einsum, trace, empty, diag, var, empty_like, sum, reshape, sqrt, PINF, log
 from numpy.linalg import slogdet
 from scipy.linalg import lstsq, eigh, solve, norm, svd, LinAlgError
 
@@ -125,7 +124,7 @@ def estep(model: dict):
         return
 
     # See the explanation in mstep.
-    constrain_a(model)
+    constrain_loading(model)
 
     y_dim = model['y'].shape[-1]
     ntrial, nbin, z_dim = model['mu'].shape
@@ -346,7 +345,6 @@ def vem(model, callbacks=None):
     #######################
 
     # disable gabbage collection during the iterative procedure
-    gc.disable()
     for it in range(model['it'], niter):
         model['it'] += 1
 
@@ -393,15 +391,15 @@ def vem(model, callbacks=None):
         converged = norm(dmu) < tol * norm(mu) and \
                     norm(da) < tol * norm(a) and \
                     norm(db) < tol * norm(b)
-        stop = converged
 
-        if stop:
+        should_stop = converged
+
+        if should_stop:
             break
 
     ##############################
     # end of iterative procedure #
     ##############################
-    gc.enable()  # enable gabbage collection
 
 
 def calc_post_cov(model):
@@ -505,7 +503,7 @@ def constrain_mu(model):
     model['mu'] = mu_2d.reshape(mu_shape)
 
 
-def constrain_a(model):
+def constrain_loading(model):
     if not model['constrain_a']:
         return
 
