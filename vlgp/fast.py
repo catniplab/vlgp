@@ -12,8 +12,11 @@ epsilon: state noise variance
 """
 import logging
 import math
+import itertools
 
 import numpy as np
+import scipy as sp
+
 
 logger = logging.getLogger(__name__)
 
@@ -185,3 +188,119 @@ def gp_loss(log_params, mask, trials, unique_lengths):
                     big_kern_inv_cov @ big_kern_inv) @ big_kern_deriv
 
     return loss, dloss
+
+
+def mstep(model):
+    """
+
+    :param model:
+    :return:
+    """
+    from numpy import einsum
+    from scipy.linalg import solve, norm
+    from vlgp.math import trunc_exp
+
+    if not model['mstep']:
+        return
+
+    # It's more reasonable to constrain the latent before mstep.
+    # If the parameters are fixed, there's no need to optimize the posterior.
+    # Besides, the constraint modifies the loading and bias.
+    # constrain_mu(model)
+    config = model['config']
+    niter = config['niter']
+    tol = config['tol']
+    hessian = config['hessian']
+
+    ydim = model['ydim']
+    lik = model['likelihood']
+
+    a = model['a']
+    b = model['b']
+    da = model['da']
+    db = model['db']
+
+    subtrials = model['subtrials']
+
+    y = np.concatenate((trial['y'] for trial in subtrials), axis=0)
+    x = np.concatenate((trial['x'] for trial in subtrials), axis=0)
+    mu = np.concatenate((trial['mu'] for trial in subtrials), axis=0)
+    v = np.concatenate((np.diagonal(trial['cov']) for trial in subtrials), axis=0)
+
+    should_stop = False
+    i = itertools.count(1)
+    while not should_stop:
+        # TODO: change regression layout to (neuron, time, variable) * (neuron, variable, 1) -> (neuron, time, 1)
+        # matmul implements the semantics of the @ operato
+        eta = mu @ a + np.squeeze(x @ b, axis=-1)
+        r = trunc_exp(eta + 0.5 * v @ (a ** 2))
+        gnoise = np.var(y - eta, axis=0, ddof=0)
+
+        for n in range(ydim):
+            if lik[n] == 'poisson':
+                # loading
+                mu_plus_v_times_a = mu + v * a[:, n]
+                grad_a = mu.T @ y[:, n] - mu_plus_v_times_a.T @ r[:, n]
+
+                if hessian:
+                    nhess_a = mu_plus_v_times_a.T @ (r[:, n, np.newaxis] * mu_plus_v_times_a)
+                    nhess_a[np.diag_indices_from(nhess_a)] += r[:, n] @ v
+
+                    try:
+                        delta_a = solve(nhess_a, grad_a, sym_pos=True)
+                    except Exception as e:
+                        logger.exception(repr(e), exc_info=True)
+                        delta_a = model['learning_rate'] * grad_a
+                else:
+                    delta_a = model['learning_rate'] * grad_a
+
+                clip_grad(delta_a, model['da_bound'])
+                da[:, n] = delta_a
+                a[:, n] += delta_a
+
+                # regression
+                grad_b = x[..., n].T @ (y[:, n] - r[:, n])
+
+                if hessian:
+                    nhess_b = x[..., n].T @ (r[:, np.newaxis, n] * x[..., n])
+                    try:
+                        delta_b = solve(nhess_b, grad_b, sym_pos=True)
+                    except Exception as e:
+                        logger.exception(repr(e), exc_info=True)
+                        delta_b = model['learning_rate'] * grad_b
+                else:
+                    delta_b = model['learning_rate'] * grad_b
+
+                clip_grad(delta_b, model['db_bound'])
+                db[:, n] = delta_b
+                b[:, n] += delta_b
+            elif lik[n] == 'gaussian':
+                # a's least squares solution for Gaussian channel
+                # (m'm + diag(j'v))^-1 m'(y - Hb)
+                M = mu.T @ mu
+                M[np.diag_indices_from(M)] += sum(v, axis=0)
+                a[:, n] = solve(M, mu.T @ (
+                    y[:, n] - x[..., n] @ b[:, n]),
+                                sym_pos=True)
+
+                # b's least squares solution for Gaussian channel
+                # (H'H)^-1 H'(y - ma)
+                b[:, n] = solve(x[..., n].T @ x[..., n],
+                                x[..., n].T @ (y[:, n] - mu @ a[:, n]),
+                                sym_pos=True)
+                b[1:, n] = 0
+                # TODO: only make history filter components zeros
+            else:
+                pass
+
+        if norm(da) < tol * norm(a) and norm(db) < tol * norm(b):
+            should_stop = True
+
+        if next(i) > niter:
+            should_stop = True
+
+    model['gnoise'] = gnoise
+
+
+def clip_grad(grad, bound):
+    np.clip(grad, -bound, bound, out=grad)
