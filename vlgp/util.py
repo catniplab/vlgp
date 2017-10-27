@@ -1,6 +1,8 @@
 """
 Tool functions
 """
+import functools
+import logging
 import math
 import warnings
 
@@ -12,6 +14,8 @@ from scipy.linalg import svd, lstsq, toeplitz, solve
 from scipy.ndimage.filters import gaussian_filter1d
 
 from .math import ichol_gauss
+
+logger = logging.getLogger(__name__)
 
 
 def makeregressor(obs, p):
@@ -401,3 +405,12 @@ def cut_trials(nbin, ntrial, seg_len):
     else:
         offset = np.cumsum(np.append([0], np.random.multinomial(overlap, np.ones(nseg - 1) / (nseg - 1))))
         return np.array([np.arange(s, s + seg_len) for s in start - offset])
+
+
+def log(f):
+    @functools.wraps(f)
+    def wrapper(*args, **kwargs):
+        logger.info('{:s} is called'.format(f.__name__))
+        return f(*args, **kwargs)
+
+    return wrapper
