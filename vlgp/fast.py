@@ -10,13 +10,15 @@ sigma: variance, usual sigma squared
 omega: timescale, usual 0.5 / tau^2
 epsilon: state noise variance
 """
+import concurrent.futures
+import itertools
 import logging
 import math
-import itertools
 
 import numpy as np
-import scipy as sp
 
+from vlgp import util
+from vlgp.core import constrain_mu
 
 logger = logging.getLogger(__name__)
 
@@ -35,10 +37,15 @@ def cut_trial(trial: dict, length=50):
     nsub = math.ceil(nbin / length)  # number of subtrials
     subys = np.array_split(y, nsub, axis=0)
 
+    # cut the regressor matrix as well
+    x = trial['x']  # supposed to be (neuron, time, variable)
+    subxs = np.array_split(x, nsub, axis=1)
+
     # the subtrials should inherit the other properties of the trial
     template_trial = trial.copy()
     del template_trial['y']
-    subtrials = (dict(y=suby, **template_trial) for suby in subys)
+    del template_trial['x']
+    subtrials = (dict(y=suby, x=subx, **template_trial) for suby, subx in zip(subys, subxs))  # generator or list?
 
     return subtrials
 
@@ -50,7 +57,19 @@ def cut_trials(trials):
     :return: subtrials
     """
     from itertools import chain
-    return chain([cut_trial(trial) for trial in trials])
+    return chain((cut_trial(trial) for trial in trials))
+
+
+def merge(trials):
+    """
+
+    :param trials:
+    :return:
+    """
+    # need this?
+    # group by trial numbers if they are kept in fast trials
+    ids = [trial['id'] for trial in trials]
+    raise NotImplementedError()
 
 
 def kernel(x, log_params):
@@ -190,35 +209,79 @@ def gp_loss(log_params, mask, trials, unique_lengths):
     return loss, dloss
 
 
-def mstep(model):
+@util.log
+def maximization(model):
     """
 
     :param model:
     :return:
     """
-    from numpy import einsum
-    from scipy.linalg import solve, norm
-    from vlgp.math import trunc_exp
+    from scipy import optimize
+    from scipy.linalg import solve
+
+    def estimate(y, x, z, v, a, b, lik):
+        """
+
+        :param y:
+        :param x:
+        :param z:
+        :param v:
+        :param a:
+        :param b:
+        :param lik:
+        :return:
+        """
+        def poisson_loss(param, y, x, z, v):
+            zdim = z.shape[-1]
+            a, b = param[:zdim], param[zdim:]
+            eta = z @ a + x @ b
+            r = np.exp(eta) + 0.5 * v @ a ** 2
+            zprime = z + v * a
+            loglik = np.sum(eta * y - r)
+            grad_a = z.T @ y - zprime.T @ r
+            grad_b = x.T @ (y - r)
+            grad = np.concatenate([grad_a, grad_b])
+            return -loglik, -grad
+
+        if lik == 'poisson':
+            zdim = z.shape[-1]
+            res = optimize.minimize(poisson_loss, np.concatenate([a, b]), args=(y, x, z, v), jac=True)
+            return res.x[:zdim], res.x[zdim:]
+        elif lik == 'guassian':
+            # a's least squares solution for Gaussian channel
+            # (m'm + diag(j'v))^-1 m'(y - Hb)
+            mumu = mu.T @ mu
+            mumu[np.diag_indices_from(mumu)] += sum(v, axis=0)
+            a = solve(mumu, mu.T @ (y - x @ b), sym_pos=True)
+
+            # b's least squares solution for Gaussian channel
+            # (H'H)^-1 H'(y - ma)
+            b = solve(x.T @ x, x.T @ (y - mu @ a), sym_pos=True)
+            # history filer doesn't make sense for Gaussian case
+            return a, b
+        else:
+            raise NotImplementedError(lik)
 
     if not model['mstep']:
         return
 
-    # It's more reasonable to constrain the latent before mstep.
-    # If the parameters are fixed, there's no need to optimize the posterior.
-    # Besides, the constraint modifies the loading and bias.
-    # constrain_mu(model)
-    config = model['config']
-    niter = config['niter']
-    tol = config['tol']
-    hessian = config['hessian']
+    #######################
+    # Constrain Posterior #
+    #######################
+    # Constraining posterior affects the loading matrix and the neuronal bias (while centering the posterior mean).
+    # log(Ey) = Az + b
+    # Either the loading matrix or posterior mean need to be scaled.
+    # It's more convenient to constrain only the posterior so that the loading matrix can be freely estimated.
+    # If z is not centered, z' = z - m where m = \bar{z}
+    # log(Ey) = A(z' + m) A + b = Az' + Am + b = Az' + b' where b' = Az' + b
+    # It's OK not to center z since Az' = b - b' has unique solution at most.
+    constrain_mu(model)
+    #######################
 
-    ydim = model['ydim']
     lik = model['likelihood']
 
     a = model['a']
     b = model['b']
-    da = model['da']
-    db = model['db']
 
     subtrials = model['subtrials']
 
@@ -227,79 +290,31 @@ def mstep(model):
     mu = np.concatenate((trial['mu'] for trial in subtrials), axis=0)
     v = np.concatenate((np.diagonal(trial['cov']) for trial in subtrials), axis=0)
 
-    should_stop = False
-    i = itertools.count(1)
-    while not should_stop:
-        # TODO: change regression layout to (neuron, time, variable) * (neuron, variable, 1) -> (neuron, time, 1)
-        # matmul implements the semantics of the @ operato
-        eta = mu @ a + np.squeeze(x @ b, axis=-1)
-        r = trunc_exp(eta + 0.5 * v @ (a ** 2))
-        gnoise = np.var(y - eta, axis=0, ddof=0)
+    map(estimate, zip(y.T, x, a.T, b, lik))
 
-        for n in range(ydim):
-            if lik[n] == 'poisson':
-                # loading
-                mu_plus_v_times_a = mu + v * a[:, n]
-                grad_a = mu.T @ y[:, n] - mu_plus_v_times_a.T @ r[:, n]
+    with concurrent.futures.ProcessPoolExecutor() as executor:
+        executor.map(estimate, zip(y.T, x, a.T, b, lik))
 
-                if hessian:
-                    nhess_a = mu_plus_v_times_a.T @ (r[:, n, np.newaxis] * mu_plus_v_times_a)
-                    nhess_a[np.diag_indices_from(nhess_a)] += r[:, n] @ v
 
-                    try:
-                        delta_a = solve(nhess_a, grad_a, sym_pos=True)
-                    except Exception as e:
-                        logger.exception(repr(e), exc_info=True)
-                        delta_a = model['learning_rate'] * grad_a
-                else:
-                    delta_a = model['learning_rate'] * grad_a
+@util.log
+def expectation(model):
+    """
 
-                clip_grad(delta_a, model['da_bound'])
-                da[:, n] = delta_a
-                a[:, n] += delta_a
+    :param model:
+    :return:
+    """
+    # trial by trial
 
-                # regression
-                grad_b = x[..., n].T @ (y[:, n] - r[:, n])
+    def posterior(trial):
+        # compute posterior in-place
+        pass
 
-                if hessian:
-                    nhess_b = x[..., n].T @ (r[:, np.newaxis, n] * x[..., n])
-                    try:
-                        delta_b = solve(nhess_b, grad_b, sym_pos=True)
-                    except Exception as e:
-                        logger.exception(repr(e), exc_info=True)
-                        delta_b = model['learning_rate'] * grad_b
-                else:
-                    delta_b = model['learning_rate'] * grad_b
+    map(posterior, model['subtrials'])  # parallelable
 
-                clip_grad(delta_b, model['db_bound'])
-                db[:, n] = delta_b
-                b[:, n] += delta_b
-            elif lik[n] == 'gaussian':
-                # a's least squares solution for Gaussian channel
-                # (m'm + diag(j'v))^-1 m'(y - Hb)
-                M = mu.T @ mu
-                M[np.diag_indices_from(M)] += sum(v, axis=0)
-                a[:, n] = solve(M, mu.T @ (
-                    y[:, n] - x[..., n] @ b[:, n]),
-                                sym_pos=True)
+    with concurrent.futures.ProcessPoolExecutor() as executor:
+        executor.map(posterior, model['subtrials'])
 
-                # b's least squares solution for Gaussian channel
-                # (H'H)^-1 H'(y - ma)
-                b[:, n] = solve(x[..., n].T @ x[..., n],
-                                x[..., n].T @ (y[:, n] - mu @ a[:, n]),
-                                sym_pos=True)
-                b[1:, n] = 0
-                # TODO: only make history filter components zeros
-            else:
-                pass
-
-        if norm(da) < tol * norm(a) and norm(db) < tol * norm(b):
-            should_stop = True
-
-        if next(i) > niter:
-            should_stop = True
-
-    model['gnoise'] = gnoise
+    pass
 
 
 def clip_grad(grad, bound):
