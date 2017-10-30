@@ -45,9 +45,9 @@ def cut_trial(trial: dict, length=50):
     template_trial = trial.copy()
     del template_trial['y']
     del template_trial['x']
-    subtrials = (dict(y=suby, x=subx, **template_trial) for suby, subx in zip(subys, subxs))  # generator or list?
+    fast_trials = (dict(y=suby, x=subx, **template_trial) for suby, subx in zip(subys, subxs))  # generator or list?
 
-    return subtrials
+    return fast_trials
 
 
 def cut_trials(trials):
@@ -68,7 +68,6 @@ def merge(trials):
     """
     # need this?
     # group by trial numbers if they are kept in fast trials
-    ids = [trial['id'] for trial in trials]
     raise NotImplementedError()
 
 
