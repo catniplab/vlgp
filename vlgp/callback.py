@@ -16,7 +16,7 @@ class Saver:
         now = time.perf_counter()
         if force or now - self.last_saving_time > model['saving_interval']:
             logger.info('Saving model to {}'.format(model['path']))
-            save(model, model['path'])
+            save(model['path'], model)
             self.last_saving_time = time.perf_counter()
 
 
