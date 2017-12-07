@@ -2,10 +2,12 @@
 Tool functions
 """
 import math
+import os
 import warnings
 
 import h5py
 import numpy as np
+import pathlib
 from numpy import exp, column_stack, roll
 from numpy import zeros, ones, diag, arange, eye, asarray
 from scipy.linalg import svd, lstsq, toeplitz, solve
@@ -156,27 +158,23 @@ def lagmat(x, lag):
     return mat[startrow:stoprow, ncol:]
 
 
-# TODO: consider persistence by joblib dump/load, or keep HDF5 for interoperability?
-# TODO: numpy.save supports dict
-def save(obj, fname):
-    """
-    Save inference object in HDF5
+def save(path, result):
+    """Save result
 
     Parameters
     ----------
-    obj: dict
-        inference
-    fname: string
-        absolute path and filename
+    path: string
+        path to file
+    result: dict
+        result
     """
-    with h5py.File(fname, 'w') as fout:
-        dict_to_hdf5(obj, fout)
+    path = pathlib.Path(path)
+    path = path.with_suffix('.npy')  # enforce npy
+    np.save(os.fspath(path), result)
 
 
-def load(fname):
-    with h5py.File(fname, 'r') as fin:
-        obj = hdf5_to_dict(fin)
-    return obj
+def load(path):
+    return np.load(path).tolist()
 
 
 def orthomax(A, gamma=1.0, normalize=True, rtol=1e-8, maxit=250):
