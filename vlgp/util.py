@@ -158,19 +158,19 @@ def lagmat(x, lag):
     return mat[startrow:stoprow, ncol:]
 
 
-def save(path, rez):
+def save(path, result):
     """Save result
 
     Parameters
     ----------
     path: string
         path to file
-    rez: dict
+    result: dict
         result
     """
     path = pathlib.Path(path)
     path = path.with_suffix('.npy')  # enforce npy
-    np.save(os.fspath(path), rez)
+    np.save(os.fspath(path), result)
 
 
 def load(path):
