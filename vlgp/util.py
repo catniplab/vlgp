@@ -5,6 +5,7 @@ import functools
 import logging
 import math
 import warnings
+from typing import List, Optional, Callable
 
 import h5py
 import numpy as np
@@ -18,7 +19,7 @@ from .math import ichol_gauss
 logger = logging.getLogger(__name__)
 
 
-def makeregressor(obs, p):
+def makeregressor(obs, p: int):
     """Construct full regressive matrix
 
     Args:
@@ -39,7 +40,7 @@ def makeregressor(obs, p):
     return regressor
 
 
-def sqexpcov(n, w, var=1.0):
+def sqexpcov(n: int, w: float, var: float = 1.0):
     """Construct square exponential covariance matrix
 
     Args:
@@ -48,7 +49,6 @@ def sqexpcov(n, w, var=1.0):
         var: variance
 
     Returns:
-        covariance
     """
 
     # i, j = meshgrid(arange(n), arange(n))
@@ -88,7 +88,7 @@ def promax(x, m=4):
     return z, U
 
 
-def history(obs, lag):
+def history(obs, lag: int):
     """Construct autoregressive matrices
 
     Args:
@@ -108,17 +108,17 @@ def history(obs, lag):
     return h
 
 
-def rotate(obj, ref):
+def rotate(x, y):
     """Rotation
 
     Args:
-        obj:
-        ref:
+        x:
+        y:
 
     Returns:
 
     """
-    return obj @ lstsq(obj, ref)[0]
+    return x @ lstsq(x, y)[0]
 
 
 def add_constant(x):
@@ -135,7 +135,7 @@ def add_constant(x):
     return roll(x, 1, 1)
 
 
-def lagmat(x, lag):
+def lagmat(x, lag: int):
     """Make autoregression matrix
 
     Args:
@@ -162,7 +162,7 @@ def lagmat(x, lag):
 
 # TODO: consider persistence by joblib dump/load, or keep HDF5 for interoperability?
 # TODO: numpy.save supports dict
-def save(obj, fname):
+def save(obj, fname: str):
     """
     Save inference object in HDF5
 
@@ -177,7 +177,7 @@ def save(obj, fname):
         dict_to_hdf5(obj, fout)
 
 
-def load(fname):
+def load(fname: str):
     with h5py.File(fname, 'r') as fin:
         obj = hdf5_to_dict(fin)
     return obj
@@ -288,7 +288,7 @@ def varimax(x, normalize=True, tol=1e-5, niter=1000):
     return z, TT
 
 
-def trial_slices(trial_lengths: list):
+def trial_slices(trial_lengths: List[int]):
     from numpy import cumsum, s_
     ntrial = len(trial_lengths)
     endpoints = [0] + trial_lengths
@@ -322,7 +322,7 @@ def sparse_prior(sigma, omega, trial_lengths, rank):
     return [sparse.block_diag([s * ichol_gauss(l, w, rank) for s, w in zip(sigma, omega)]) for l in trial_lengths]
 
 
-def regmat(y, x=None, lag=0):
+def regmat(y, x: Optional[list], lag=0):
     """
 
     Parameters
@@ -379,7 +379,7 @@ def hdf5_to_dict(hdf):
     return d
 
 
-def cut_trials(nbin, ntrial, seg_len):
+def cut_trials(nbin: int, ntrial: int, seg_len: int):
     """
     Cut trials into small segments of equal length
 
@@ -407,7 +407,7 @@ def cut_trials(nbin, ntrial, seg_len):
         return np.array([np.arange(s, s + seg_len) for s in start - offset])
 
 
-def log(f):
+def log(f: Callable):
     @functools.wraps(f)
     def wrapper(*args, **kwargs):
         logger.info('{:s} is called'.format(f.__name__))

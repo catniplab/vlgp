@@ -14,6 +14,7 @@ import concurrent.futures
 import itertools
 import logging
 import math
+from typing import List, Tuple, Dict
 
 import numpy as np
 
@@ -23,7 +24,7 @@ from vlgp.core import constrain_mu
 logger = logging.getLogger(__name__)
 
 
-def cut_trial(trial: dict, length=50):
+def cut_trial(trial: Dict, length=50):
     """Cut a trial into small segments
 
     :param trial: a trial
@@ -50,7 +51,7 @@ def cut_trial(trial: dict, length=50):
     return fast_trials
 
 
-def cut_trials(trials):
+def cut_trials(trials: List[Dict]):
     """Cut trials into small segments
 
     :param trials: list of trials
@@ -60,7 +61,7 @@ def cut_trials(trials):
     return chain((cut_trial(trial) for trial in trials))
 
 
-def merge(trials):
+def merge(trials: List[Dict]):
     """
 
     :param trials:
@@ -71,7 +72,7 @@ def merge(trials):
     raise NotImplementedError()
 
 
-def kernel(x, log_params):
+def kernel(x, log_params: Tuple):
     """
 
     :param x:
