@@ -4,6 +4,7 @@ Tool functions
 import functools
 import logging
 import math
+import pathlib
 import warnings
 from typing import List, Optional, Callable
 
@@ -160,27 +161,61 @@ def lagmat(x, lag: int):
     return mat[startrow:stoprow, ncol:]
 
 
-# TODO: consider persistence by joblib dump/load, or keep HDF5 for interoperability?
-# TODO: numpy.save supports dict
-def save(obj, fname: str):
-    """
-    Save inference object in HDF5
-
-    Parameters
-    ----------
-    obj: dict
-        inference
-    fname: string
-        absolute path and filename
-    """
-    with h5py.File(fname, 'w') as fout:
-        dict_to_hdf5(obj, fout)
+# def save(obj, fname: str):
+#     """
+#     Save inference object in HDF5
+#
+#     Parameters
+#     ----------
+#     obj: dict
+#         inference
+#     fname: string
+#         absolute path and filename
+#     """
+#     with h5py.File(fname, 'w') as fout:
+#         dict_to_hdf5(obj, fout)
 
 
-def load(fname: str):
-    with h5py.File(fname, 'r') as fin:
-        obj = hdf5_to_dict(fin)
-    return obj
+# def load(fname: str):
+#     with h5py.File(fname, 'r') as fin:
+#         obj = hdf5_to_dict(fin)
+#     return obj
+
+
+def save(path, result, code="npz"):
+    path = pathlib.Path(path)
+
+    if code == "hdf5":
+        path = path.with_suffix("hdf5")
+        with h5py.File(path, 'w') as fout:
+                dict_to_hdf5(result, fout)
+    elif code == "npy":
+        path = path.with_suffix("npy")
+        np.save(path, result)
+    elif code == "npz":
+        path = path.with_suffix("npz")
+        np.savez(path, **result)
+
+
+def load(path):
+    path = pathlib.Path(path)
+    if not path.exists():
+        raise FileNotFoundError(path.as_posix())
+
+    if path.suffix == "hdf5":
+        with h5py.File(path.as_posix(), 'r') as fin:
+            rez = hdf5_to_dict(fin)
+        return rez
+    elif path.suffix == "npy":
+        rez = np.load(path)
+        rez = rez.tolist()
+        return rez
+    elif path.suffix == "npz":
+        rez = np.load(path)
+        rez = {**rez}
+        return rez
+    else:
+        raise NotImplementedError()
 
 
 def orthomax(A, gamma=1.0, normalize=True, rtol=1e-8, maxit=250):
