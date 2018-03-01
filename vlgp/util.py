@@ -182,7 +182,11 @@ def lagmat(x, lag: int):
 #     return obj
 
 
-def save(path, result, code="npz"):
+def save(result, path=None, code="npz"):
+    if path is None:
+        path = result['path']
+    else:
+        result['path'] = path
     path = pathlib.Path(path)
 
     if code == "hdf5":
