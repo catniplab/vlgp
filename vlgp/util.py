@@ -190,14 +190,14 @@ def save(result, path=None, code="npz"):
     path = pathlib.Path(path)
 
     if code == "hdf5":
-        path = path.with_suffix("hdf5")
+        path = path.with_suffix(".hdf5")
         with h5py.File(path, 'w') as fout:
                 dict_to_hdf5(result, fout)
     elif code == "npy":
-        path = path.with_suffix("npy")
+        path = path.with_suffix(".npy")
         np.save(path, result)
     elif code == "npz":
-        path = path.with_suffix("npz")
+        path = path.with_suffix(".npz")
         np.savez(path, **result)
 
 
@@ -209,17 +209,18 @@ def load(path):
     if path.suffix == "hdf5":
         with h5py.File(path.as_posix(), 'r') as fin:
             rez = hdf5_to_dict(fin)
-        return rez
     elif path.suffix == "npy":
         rez = np.load(path)
         rez = rez.tolist()
-        return rez
     elif path.suffix == "npz":
         rez = np.load(path)
         rez = {**rez}
-        return rez
     else:
         raise NotImplementedError()
+
+    rez['path'] = path
+
+    return rez
 
 
 def orthomax(A, gamma=1.0, normalize=True, rtol=1e-8, maxit=250):
