@@ -189,14 +189,14 @@ def save(result, path=None, code="npz"):
         result['path'] = path
     path = pathlib.Path(path)
 
-    if code == "hdf5":
-        path = path.with_suffix(".hdf5")
+    if code == ".h5":
+        path = path.with_suffix(".h5")
         with h5py.File(path, 'w') as fout:
                 dict_to_hdf5(result, fout)
-    elif code == "npy":
+    elif code == ".npy":
         path = path.with_suffix(".npy")
         np.save(path, result)
-    elif code == "npz":
+    elif code == ".npz":
         path = path.with_suffix(".npz")
         np.savez(path, **result)
 
@@ -206,17 +206,17 @@ def load(path):
     if not path.exists():
         raise FileNotFoundError(path.as_posix())
 
-    if path.suffix == "hdf5":
+    if path.suffix == ".h5":
         with h5py.File(path.as_posix(), 'r') as fin:
             rez = hdf5_to_dict(fin)
-    elif path.suffix == "npy":
+    elif path.suffix == ".npy":
         rez = np.load(path)
         rez = rez.tolist()
-    elif path.suffix == "npz":
+    elif path.suffix == ".npz":
         rez = np.load(path)
         rez = {**rez}
     else:
-        raise NotImplementedError()
+        raise NotImplementedError("unknown file type {}".format(path.suffix))
 
     rez['path'] = path
 
