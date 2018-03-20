@@ -10,6 +10,7 @@ def test_clip_grad():
 
     assert np.all(np.logical_and(x >= -1.0, x <= 1.0))
 
+
 def test_cut_trial():
     from vlgp import fast
     y = np.random.randn(100, 10)
