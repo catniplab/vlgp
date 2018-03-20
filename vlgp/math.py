@@ -1,8 +1,6 @@
 """
 Math functions
 """
-import warnings
-
 import numpy as np
 from scipy import linalg
 from scipy.linalg import svd
@@ -192,7 +190,6 @@ def orth(x, a):
     Args:
         x: latent variables
         a: loading matrix
-        normalize_a: use loading or latent to orthogonalize
 
     Returns:
 
