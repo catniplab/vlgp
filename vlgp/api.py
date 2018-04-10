@@ -1,18 +1,12 @@
-import os
-
-import numpy as np
-from numpy import empty
-
-from .callback import Saver, Printer
+from .callback import Saver
 from .core import vem
-from . import initialization
-from .preprocess import build_model
-from .util import add_constant, lagmat
+from .preprocess import check_data
+from .util import get_default_config
 
-__all__ = ['fit', 'predict']
+__all__ = ["fit"]
 
 
-def fit(**kwargs):
+def fit(trials, n_factors, **kwargs):
     """
     vLGP API
 
@@ -56,106 +50,90 @@ def fit(**kwargs):
     dict
         fit
     """
+    config = get_default_config()
+    # TODO: update config
+    # check_config(config, **kwarg)
 
-    callbacks = kwargs.pop('callbacks', [])
+    # initialization
+    trials, params = check_data(trials, config)
 
-    model = kwargs.pop('model', None)
-
-    if model is None:
-        model = build_model(**kwargs)
-
-    if model['initialize'] == 'fa':
-        initialize = initialization.factanal
-    elif model['initialize'] is callable:
-        initialize = model['initialize']
-    elif os.path.exists(model['initialize']):
-        initialize = initialization.load
-    else:
-        raise NotImplementedError(model['initialize'])
-
-    if not model.get('initialized', False):
-        initialize(model)
-        model['initialized'] = True
-
-    printer = Printer()
-    callbacks.extend([printer.print])
-
+    callbacks = config['callbacks']
     saver = None
-    path = model.get('path')
+    path = config.get('path', None)
     if path is not None:
         saver = Saver()
         callbacks.extend([saver.save])
 
     try:
-        vem(model, callbacks)
+        vem(trials, params, config)
     finally:
-        printer.print(model)
+        # printer.print(model)
         if saver is not None:
-            saver.save(model, force=True)
+            saver.save(trials, params, config, force=True)
 
-    return model
+    return
 
 
-def predict(**kwargs):
-    """
-    Predict firing rate
-
-    Parameters
-    ----------
-    model : dict
-        fitted model
-    z : ndarray
-        latent
-    a : ndarray
-        loading
-    b : ndarray
-        regression
-    v : ndarray
-        posterior variance
-    maxrate : float
-        maximum predicted firing rate
-    y : ndarray
-        spike trains for history filter
-
-    Returns
-    -------
-    ndarray
-        predicted firing rate
-    """
-
-    model = kwargs.get('model')
-    if model is not None:
-        z = model['mu']
-        y = model['y']
-        a = model['a']
-        b = model['b']
-        v = model['v']
-    else:
-        z = kwargs.get('z')
-        y = kwargs.get('y')
-        a = kwargs.get('a')
-        b = kwargs.get('b')
-        v = kwargs.get('v')
-
-    ntrial, nbin, z_dim = z.shape
-    y_dim = a.shape[1]
-    history = b.shape[0] - 1
-
-    shape_out = (ntrial, nbin, y_dim)
-    # regression (h dot b) part
-    if y is None:
-        y = np.zeros(shape_out)
-
-    hb = empty(shape_out)
-    for n in range(y_dim):
-        for trial in range(ntrial):
-            h = add_constant(lagmat(y[trial, :, n], lag=history))
-            hb[trial, :, n] = h @ b[:, n]
-    eta = z.reshape((-1, z_dim)) @ a + hb.reshape((-1, y_dim))
-    if v is not None:
-        r = np.exp(eta + 0.5 * v.reshape((-1, z_dim)) @ (a ** 2))
-    else:
-        r = np.exp(eta)
-    maxrate = kwargs.get('maxrate', np.exp(20))
-    np.clip(r, 0, maxrate, out=r)
-    return np.reshape(r, shape_out)
+# def predict(**kwargs):
+#     """
+#     Predict firing rate
+#
+#     Parameters
+#     ----------
+#     model : dict
+#         fitted model
+#     z : ndarray
+#         latent
+#     a : ndarray
+#         loading
+#     b : ndarray
+#         regression
+#     v : ndarray
+#         posterior variance
+#     maxrate : float
+#         maximum predicted firing rate
+#     y : ndarray
+#         spike trains for history filter
+#
+#     Returns
+#     -------
+#     ndarray
+#         predicted firing rate
+#     """
+#
+#     model = kwargs.get('model')
+#     if model is not None:
+#         z = model['mu']
+#         y = model['y']
+#         a = model['a']
+#         b = model['b']
+#         v = model['v']
+#     else:
+#         z = kwargs.get('z')
+#         y = kwargs.get('y')
+#         a = kwargs.get('a')
+#         b = kwargs.get('b')
+#         v = kwargs.get('v')
+#
+#     ntrial, nbin, z_dim = z.shape
+#     y_dim = a.shape[1]
+#     history = b.shape[0] - 1
+#
+#     shape_out = (ntrial, nbin, y_dim)
+#     # regression (h dot b) part
+#     if y is None:
+#         y = np.zeros(shape_out)
+#
+#     hb = empty(shape_out)
+#     for n in range(y_dim):
+#         for trial in range(ntrial):
+#             h = add_constant(lagmat(y[trial, :, n], lag=history))
+#             hb[trial, :, n] = h @ b[:, n]
+#     eta = z.reshape((-1, z_dim)) @ a + hb.reshape((-1, y_dim))
+#     if v is not None:
+#         r = np.exp(eta + 0.5 * v.reshape((-1, z_dim)) @ (a ** 2))
+#     else:
+#         r = np.exp(eta)
+#     maxrate = kwargs.get('maxrate', np.exp(20))
+#     np.clip(r, 0, maxrate, out=r)
+#     return np.reshape(r, shape_out)
