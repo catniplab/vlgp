@@ -182,26 +182,28 @@ def lagmat(x, lag: int):
 #     return obj
 
 
-def save(result, path=None, code="npz"):
+def save(result, path=None, code="npy"):
+    """Save *ANYTHING*"""
     if path is None:
         path = result['path']
     else:
         result['path'] = path
     path = pathlib.Path(path)
 
-    if code == ".h5":
+    if code == "h5":
         path = path.with_suffix(".h5")
         with h5py.File(path, 'w') as fout:
                 dict_to_hdf5(result, fout)
-    elif code == ".npy":
+    elif code == "npy":
         path = path.with_suffix(".npy")
         np.save(path, result)
-    elif code == ".npz":
+    elif code == "npz":
         path = path.with_suffix(".npz")
         np.savez(path, **result)
 
 
 def load(path):
+    """Load result from file"""
     path = pathlib.Path(path)
     if not path.exists():
         raise FileNotFoundError(path.as_posix())
@@ -211,14 +213,12 @@ def load(path):
             rez = hdf5_to_dict(fin)
     elif path.suffix == ".npy":
         rez = np.load(path)
-        rez = rez.tolist()
+        rez = rez[()]
     elif path.suffix == ".npz":
         rez = np.load(path)
         rez = {**rez}
     else:
         raise NotImplementedError("unknown file type {}".format(path.suffix))
-
-    rez['path'] = path
 
     return rez
 
@@ -454,3 +454,43 @@ def log(f: Callable):
         return f(*args, **kwargs)
 
     return wrapper
+
+
+def get_default_config():
+    config = {
+        'constrain_loading': 'fro',
+        'constrain_latent': False,
+        'use_hessian': True,
+        'eps': 1e-8,
+        'tol': 1e-5,  # loose
+        'method': 'VB',
+        'learning_rate': 1.0,  # no for hessian
+        'EMniter': 50,
+        'Eniter': 5,
+        'Mniter': 5,
+        'Hstep': True,
+        'da_bound': 5.0,
+        'db_bound': 5.0,
+        'dmu_bound': 5.0,
+        'omega_bound': (1e-5, 1e-3),
+        'window': 50,
+        'saving_interval': 60 * 30,  # sec
+        'callbacks': []
+    }
+    return config
+#
+def transform(timescale, dt):
+    """
+    Transform timescale to omega
+
+    Parameters
+    ----------
+    timescale : float or array
+    dt : float
+
+    Returns
+    -------
+    float
+    """
+
+    return 0.5 * (dt / timescale) ** 2
