@@ -17,8 +17,6 @@ from .math import trunc_exp, ichol_gauss
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["vem", "cut_trials"]
-
 
 def estep(trials, params, config):
     """Update variational distribution q (E step)"""
@@ -27,11 +25,9 @@ def estep(trials, params, config):
         return
 
     # See the explanation in mstep.
-    constrain_loading(trials, params, config)
+    # constrain_loading(trials, params, config)
 
     # dimenionalities
-    ydim = params['ydim']
-    xdim = params['xdim']
     zdim = params['zdim']
     rank = params['rank']  # rank of prior covariance
     likelihood = params['likelihood']
@@ -171,7 +167,7 @@ def mstep(trials, params, config):
     # It's more proper to constrain the latent before mstep.
     # If the parameters are fixed, it's no need to optimize the posterior.
     # Besides, the constraint modifies the loading and bias.
-    constrain_latent(trials, params, config)
+    # constrain_latent(trials, params, config)
 
     # dimenionalities
     ydim = params['ydim']
@@ -312,18 +308,6 @@ def vem(trials, params, config):
         'em_elapsed': []
     }
 
-    # disposable temporary arrays of updates
-    # TODO: maybe put this outside for space efficiency
-    params.setdefault('da', np.zeros_like(params['a']))
-    params.setdefault('db', np.zeros_like(params['b']))
-    for trial in trials:
-        trial.setdefault('w', np.zeros_like(trial['mu']))
-        trial.setdefault('v', np.zeros_like(trial['mu']))
-        trial.setdefault('dmu', np.zeros_like(trial['mu']))
-    make_cholesky(trials, params, config)
-    update_w(trials, params, config)
-    update_v(trials, params, config)
-
     #######################
     # iterative algorithm #
     #######################
@@ -337,12 +321,14 @@ def vem(trials, params, config):
             # E step #
             ##########
             with timer() as estep_elapsed:
+                constrain_loading(trials, params, config)
                 estep(trials, params, config)
 
             ##########
             # M step #
             ##########
             with timer() as mstep_elapsed:
+                constrain_latent(trials, params, config)
                 mstep(trials, params, config)
 
             ###################
@@ -457,7 +443,6 @@ def constrain_loading(trials, params, config):
 def gp_small_segments(trials, params, config):
     """Optimize hyperparameters"""
     zdim = params['zdim']
-    length = params['length']
     rank = params['rank']
     dt = params['dt']  # binwidth, set to 1 temporarily
 
