@@ -1,6 +1,3 @@
-"""
-Stateful callbacks
-"""
 import logging
 import time
 
@@ -19,3 +16,7 @@ class Saver:
             logger.info('Saving model to {}'.format(config['path']))
             save({'trials': trials, 'params': params, 'config': config})
             self.last_saving_time = time.perf_counter()
+
+
+def show(trials, params, config):
+    pass
