@@ -1,78 +1,57 @@
-from .callback import Saver
-from .core import vem
-from .preprocess import check_data
-from .util import get_default_config
+from .preprocess import get_params, get_config, fill_trials, fill_params
+from .callback import Saver, show
+from .core import vem, cut_trials, estep, make_cholesky, update_w, update_v
+from .preprocess import initialize
 
 __all__ = ["fit"]
 
 
-def fit(trials, n_factors, **kwargs):
+def fit(trials, n_factors, *, history=0, lik="poisson", **kwargs):
     """
-    vLGP API
-
-    Parameters
-    ----------
-    y : ndarray
-        obserbation
-    lik : ndarray
-        types of observation dimensions, 'spike' or 'lfp'
-    lat_dim : int
-        number of latent dimensions
-    x : ndarray, optional
-        external factors
-    a : ndarray, optional
-        initial value of loading
-    b : ndarray, optional
-        initial value of regression
-    mu : ndarray, optional
-        initial value of posterior mean
-    z : ndarray, optional
-        true value of latent
-    alpha : ndarray, optional
-        true value of loading
-    beta : ndarray, optional
-        true value of regression
-    history : int, optional
-        history filter length
-    rank : int, optional
-        rank of incomplete Cholesky
-    eps : double, optional
-        a small positive number
-    tol : double, optional
-        numerical tolerance
-    path : string, optional
-        path to the save file
-    callbacks : list, optional
-        callbacks
-
-    Returns
-    -------
-    dict
-        fit
+    :param trials: list of trials
+    :param n_factors: number of latent factors
+    :param history: length of history filter
+    :param x: external regressors
+    :param lik: likelihood
+    :param kwargs: options
+    :return:
     """
-    config = get_default_config()
-    # TODO: update config
-    # check_config(config, **kwarg)
+    config = get_config(**kwargs)
+
+    # add built-in callbacks
+    callbacks = config['callbacks']
+    saver = Saver()
+    callbacks.extend([show, saver.save])
+    config['callbacks'] = callbacks
+
+    # prepare parameters
+    params = get_params(trials, n_factors, history + 1, lik)
 
     # initialization
-    trials, params = check_data(trials, config)
+    initialize(trials, params, config)
 
-    callbacks = config['callbacks']
-    saver = None
-    path = config.get('path', None)
-    if path is not None:
-        saver = Saver()
-        callbacks.extend([saver.save])
+    # fill arrays
+    fill_params(params)
 
-    try:
-        vem(trials, params, config)
-    finally:
-        # printer.print(model)
-        if saver is not None:
-            saver.save(trials, params, config, force=True)
+    fill_trials(trials)
+    make_cholesky(trials, params, config)
+    update_w(trials, params, config)
+    update_v(trials, params, config)
 
-    return
+    subtrials = cut_trials(trials, params, config)
+    make_cholesky(subtrials, params, config)
 
+    fill_trials(subtrials)
+
+    # VEM
+    vem(subtrials, params, config)
+    # E step only for inference given above estimated parameters and hyperparameters
+    make_cholesky(trials, params, config)
+    update_w(trials, params, config)
+    update_v(trials, params, config)
+    estep(trials, params, config)
+
+    return trials, params, config
 
 # def predict(**kwargs):
 #     """
