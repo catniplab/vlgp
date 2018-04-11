@@ -27,29 +27,32 @@ def initialize(trials, params, config):
             'v': np.zeros((length, zdim))
         })
 
+
+def get_params(trials, zdim, xdim, lik):
+    y = trials[0]['y']
+    ydim = y.shape[-1]
+
+    if not isinstance(lik, list):
+        lik = [lik] * ydim
+    lik = np.asarray(lik)
+
     params = {
         'ydim': ydim,
         'zdim': zdim,
         'xdim': xdim,
-        'length': length,
-        'a': a,
-        'b': b,
-        'noise': noise,
+        'a': np.zeros((zdim, ydim)),
+        'b': np.zeros((xdim, ydim)),
+        'noise': np.ones(ydim),
         'sigma': np.full(zdim, fill_value=1.0),
         'omega': np.full(zdim, fill_value=1e-4),
-        'rank': length // 5,
+        'rank': 50,  # TODO: consider merge with window in config
         'gp_noise': 1e-4,
         'dt': 1,
         'tau': 500,
-        'likelihood': np.array(['poisson'] * ydim)
+        'likelihood': lik
     }
 
-    trials = [{
-        'y': trial['y'],
-        'mu': fa.transform(trial['y']),
-        'x': np.ones((length, 1, ydim)),
-        'w': np.zeros((length, zdim)),
-        'v': np.zeros((length, zdim)),
-    } for trial in data]
+    return params
+
 
     return trials, params
