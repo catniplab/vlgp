@@ -55,4 +55,40 @@ def get_params(trials, zdim, xdim, lik):
     return params
 
 
-    return trials, params
+def get_config(**kwargs):
+    config = {
+        'constrain_loading': 'fro',
+        'constrain_latent': False,
+        'use_hessian': True,
+        'eps': 1e-8,
+        'tol': 1e-5,  # loose
+        'method': 'VB',
+        'learning_rate': 1.0,  # no for hessian
+        'EMniter': 50,
+        'Eniter': 5,
+        'Mniter': 5,
+        'Hstep': True,
+        'da_bound': 5.0,
+        'db_bound': 5.0,
+        'dmu_bound': 5.0,
+        'omega_bound': (1e-5, 1e-3),
+        'window': 50,
+        'saving_interval': 60 * 30,  # sec
+        'callbacks': []
+    }
+
+    config.update(kwargs)
+
+    return config
+
+
+def fill_trials(trials):
+    for trial in trials:
+        trial.setdefault('w', np.zeros_like(trial['mu']))
+        trial.setdefault('v', np.zeros_like(trial['mu']))
+        trial.setdefault('dmu', np.zeros_like(trial['mu']))
+
+
+def fill_params(params):
+    params.setdefault('da', np.zeros_like(params['a']))
+    params.setdefault('db', np.zeros_like(params['b']))
