@@ -20,13 +20,8 @@ def make_toy_data():
     return trials
 
 
-def test_varlen():
-    from vlgp.core import vem, cut_trials
-    from vlgp.preprocess import check_data
-    from vlgp.util import get_default_config
+def test_fit():
+    from vlgp.api import fit
 
     data = make_toy_data()
-    config = get_default_config()
-    trials, params = check_data(data, config)
-    trials = cut_trials(trials, params, config)
-    vem(trials, params, config)
+    fit(data, n_factors=2)
