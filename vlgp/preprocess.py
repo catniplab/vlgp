@@ -1,20 +1,31 @@
 import numpy as np
 
 
-def check_data(data, config):
+def initialize(trials, params, config):
     """Make skeleton"""
     from sklearn.decomposition import FactorAnalysis
 
-    xdim = 0
-    zdim = 2
-    y = np.concatenate([trial['y'] for trial in data], axis=0)
-    length = data[0]['y'] .shape[0]
+    zdim = params['zdim']
+    xdim = params['xdim']
+
+    y = np.concatenate([trial['y'] for trial in trials], axis=0)
     ydim = y.shape[-1]
     fa = FactorAnalysis(n_components=zdim, random_state=0)
     z = fa.fit_transform(y)
     a = fa.components_
     b = np.log(np.mean(y, axis=0, keepdims=True))
     noise = np.var(y - z @ a, ddof=0, axis=0)
+
+    params.update(a=a, b=b, noise=noise)
+
+    for trial in trials:
+        length = trial['y'].shape[0]
+        trial.update({
+            'mu': fa.transform(trial['y']),
+            'x': np.ones((length, xdim, ydim)),
+            'w': np.zeros((length, zdim)),
+            'v': np.zeros((length, zdim))
+        })
 
     params = {
         'ydim': ydim,
