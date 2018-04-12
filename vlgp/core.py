@@ -9,11 +9,12 @@ import warnings
 
 import numpy as np
 from numpy import identity, einsum
-from scipy.linalg import solve, norm, svd, LinAlgError, cholesky, cho_solve
-from scipy.spatial.distance import squareform, pdist
+from scipy.linalg import solve, norm, svd, LinAlgError
 
+from . import gp
+from .util import clip
 from .evaluation import timer
-from .math import trunc_exp, ichol_gauss
+from .math import trunc_exp
 
 logger = logging.getLogger(__name__)
 
@@ -281,7 +282,7 @@ def hstep(trials, params, config):
     if not config['Hstep']:
         return
 
-    gp_small_segments(trials, params, config)
+    gp.optimize(trials, params, config)
 
 
 def vem(trials, params, config):
@@ -376,17 +377,6 @@ def vem(trials, params, config):
     ##############################
 
 
-def clip(a, lbound, ubound=None):
-    """Clip an array by given bounds in place"""
-    if ubound is None:
-        assert lbound > 0
-        ubound = lbound
-        lbound = -lbound
-    else:
-        assert ubound > lbound
-    np.clip(a, lbound, ubound, out=a)
-
-
 def constrain_latent(trials, params, config):
     """Center and scale latent mean"""
     constraint = config['constrain_latent']
@@ -438,190 +428,6 @@ def constrain_loading(trials, params, config):
         params['a'] /= s
         for trial in trials:
             trial['mu'] *= s.T
-
-
-def gp_small_segments(trials, params, config):
-    """Optimize hyperparameters"""
-    zdim = params['zdim']
-    rank = params['rank']
-    dt = params['dt']  # binwidth, set to 1 temporarily
-
-    # priors
-    sigma = params['sigma']
-    omega = params['omega']
-    gp_noise = params['gp_noise']
-
-    # trials
-    mu = np.stack([trial['mu'] for trial in trials])
-    w = np.stack([trial['w'] for trial in trials])
-    window = config['window']
-    t = np.arange(window) * dt  # absolute time
-
-    for l in range(zdim):
-        initial = (sigma[l] ** 2, omega[l], gp_noise)
-        bounds = ((1e-3, 1), config['omega_bound'], (gp_noise / 2, gp_noise * 2))
-        mask = np.array([0, 1, 0])
-
-        # transpose each latent dimension to (window, #trials/segments)
-        (sigmasq, omega_new, _), fun = optimze(t,
-                                               mu[:, :, l].T,
-                                               w[:, :, l].T,
-                                               initial,
-                                               bounds,
-                                               mask=mask)
-        if not np.any(np.isclose(omega_new, config['omega_bound'])):
-            omega[l] = omega_new
-        sigma[l] = np.sqrt(sigmasq)
-
-    params['sigma'] = sigma
-    params['omega'] = omega
-    make_cholesky(trials, params, config)
-
-
-def make_cholesky(trials, params, config):
-    """Make incomplate Cholesky decomposition"""
-    zdim = params['zdim']
-    rank = params['rank']
-    sigma = params['sigma']
-    omega = params['omega']
-    lengths = np.array([trial['y'].shape[0] for trial in trials])
-    unique_lengths = np.unique(lengths)
-    for t in unique_lengths:
-        params['cholesky'] = dict()
-        params['cholesky'][t] = np.array([ichol_gauss(t, omega[l], rank) * sigma[l] for l in range(zdim)])
-
-
-def optimze(t, mu, w, params, bounds, mask):
-    """Optimize hyperparameters of a single dimension"""
-    from scipy.optimize import minimize
-    log_params = np.log(params)
-    log_bounds = np.log(bounds)
-
-    def obj_func(x):
-        expx = np.exp(x)
-        post_cov = construct_posterior_cov(t, w, expx)
-        ll, dll = elbo(expx, mask, t, mu, post_cov)
-        return -ll, -dll
-
-    try:
-        res = minimize(obj_func, log_params, jac=True, bounds=log_bounds)
-        log_params = res.x
-        fun = res.fun
-        # opt, fval, info = fmin_l_bfgs_b(obj_func, log_params,
-        #                                 bounds=log_bounds)
-    finally:
-        pass
-    params = np.exp(log_params)
-
-    return params, fun
-
-
-def elbo(params, mask, *args):
-    """ELBO with full posterior covariance matrix"""
-    t, mu, post_cov = args
-    K, dK = kernel(t, params)
-    dK *= mask[np.newaxis, np.newaxis, :]
-    try:
-        L = cholesky(K, lower=True)
-    except LinAlgError:
-        return -np.inf, np.zeros_like(params)
-
-    Kinv = cho_solve((L, True), np.eye(K.shape[0]))  # K inverse
-
-    if mu.ndim == 1:
-        mu = mu[:, np.newaxis]
-
-    alpha = cho_solve((L, True), mu)
-    ll_dims = -0.5 * np.einsum('ik,ik->k', mu, alpha)
-    tmp = np.einsum('ik,jk->ijk', alpha, alpha)
-    tmp -= Kinv[:, :, np.newaxis]
-
-    for i in range(post_cov.shape[-1]):
-        KinvSigma = cho_solve((L, True), post_cov[:, :, i])
-        ll_dims[i] -= 0.5 * np.trace(KinvSigma)
-        tmp[:, :, i] += KinvSigma @ Kinv
-
-    ll_dims -= np.log(np.diag(L)).sum()
-    ll = ll_dims.sum(-1)
-
-    dll_dims = 0.5 * np.einsum('ijl,ijk->kl', tmp, dK)
-    dll = dll_dims.sum(-1)
-
-    return ll, dll
-
-
-def construct_posterior_cov(t, w, params):
-    """Make full posterior covariance matrix for hyperparameter tuning"""
-    while True:
-        K, dK = kernel(t, params)
-        try:
-            L = cholesky(K, lower=True)
-            break
-        except LinAlgError:
-            # return -np.inf, np.zeros_like(params)
-            params[1] += np.log(10)  # increase omega until Cholesky works
-
-    Kinv = cho_solve((L, True), np.eye(K.shape[0]))  # K inverse
-
-    if w.ndim == 1:
-        w = w[:, np.newaxis]
-
-    S = np.zeros((K.shape[0], K.shape[0], w.shape[-1]))  # Sigma
-    for i in range(w.shape[-1]):
-        L_Sinv = cholesky(Kinv + np.diag(w[:, i]), lower=True)
-        S[:, :, i] = cho_solve((L_Sinv, True), np.eye(K.shape[0]))
-
-    return S
-
-
-def kernel(x, params):
-    """kernel matrix and derivatives"""
-    sigmasq, omega, eps = params
-
-    dists = pdist(x.reshape(-1, 1), metric='sqeuclidean')  # vector of pairwise squared distance
-    Dsq = squareform(dists)  # distance matrix
-    K = np.exp(- omega * Dsq)  # kernel matrix
-    dK_dsigmasq = K
-    # K *= 1.0 - eps  # fix variance = 1 - eps (noise variance)
-    K *= sigmasq
-    dK_dlnomega = - K * Dsq * omega
-    K[np.diag_indices_from(K)] += eps
-    dK_deps = np.eye(K.shape[0]) * eps
-    dK = np.dstack([dK_dsigmasq, dK_dlnomega, dK_deps])
-    return K, dK
-
-
-def cut_trial(trial, window: int):
-    """Cut a trial into small segments"""
-    import math
-
-    y = trial['y']
-    x = trial['x']
-    mu = trial['mu']
-    w = trial['w']
-    v = trial['v']
-
-    length = y.shape[0]
-
-    # allow overlapping segments if the trial length is not a multiplier of window
-    # random sample the segment starting points
-    num_segments = math.ceil(length / window)
-    overlap = num_segments * window - length  # number of overlapping segments
-    start = np.cumsum(np.full(num_segments, fill_value=window, dtype=int)) - window
-    offset = np.cumsum(np.append([0], np.random.multinomial(overlap, np.ones(num_segments - 1) / (num_segments - 1))))
-    start -= offset
-    slices = [np.s_[s:s + window] for s in start]
-    segments = [{'y': y[s, :], 'x': x[s, ...], 'mu': mu[s, :], 'w': w[s, :], 'v': v[s, :]} for s in slices]
-    return segments
-
-
-def cut_trials(trials, params, config):
-    """Cut all trials"""
-    window = config['window']
-    if window and window is not None:
-        return np.concatenate([cut_trial(trial, window) for trial in trials])  # concatenate segments
-    else:
-        return trials
 
 
 def update_w(trials, params, config):

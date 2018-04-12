@@ -1,6 +1,8 @@
 from .preprocess import get_params, get_config, fill_trials, fill_params
 from .callback import Saver, show
-from .core import vem, cut_trials, estep, make_cholesky, update_w, update_v
+from .core import vem, estep, update_w, update_v
+from .util import cut_trials
+from .gp import make_cholesky
 from .preprocess import initialize
 
 __all__ = ["fit"]
