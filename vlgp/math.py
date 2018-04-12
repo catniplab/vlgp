@@ -6,8 +6,6 @@ from scipy import linalg
 from scipy.linalg import svd
 
 
-############################
-# link functions
 def rectify(x):
     """
     rectangular linear link
@@ -18,21 +16,21 @@ def rectify(x):
     return x.clip(0, np.inf)
 
 
-def trunc_exp(x, ubound=10):
+def trunc_exp(x, bound=10):
     """
     Truncated exp
 
     Parameters
     ----------
     x : ndarray
-    ubound : double
+    bound : double
         upper bound of x
     Returns
     -------
     ndarray
         exp(min(x, ubound))
     """
-    return np.exp(np.minimum(x, ubound))
+    return np.exp(np.minimum(x, bound))
 
 
 def lexp(x, c=20):
@@ -67,7 +65,6 @@ def log1exp(x):
     ndarray
     """
     return np.log1p(np.exp(x))
-################################
 
 
 def ichol_gauss(n, omega, r, tol=1e-6):
@@ -91,6 +88,7 @@ def ichol_gauss(n, omega, r, tol=1e-6):
     ndarray
         (n, r) matrix
     """
+    # TODO: more effifient algorithm
     x = np.arange(n)
     diag = np.ones(n, dtype=float)
     pvec = np.arange(n, dtype=int)
@@ -242,6 +240,6 @@ def ichol_gauss2(n, omega):
     return chol[pvec.argsort(), :i]
 
 
-def add_to_diag(m, v):
+def diagadd(m, v):
     """Add a vector to the diagonal of a matrix"""
     np.fill_diagonal(m, m.diagonal() + v)
