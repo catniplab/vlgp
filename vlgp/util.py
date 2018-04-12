@@ -405,7 +405,7 @@ def dict_to_hdf5(d: dict, hdf):
                     hdf.create_dataset(key, data=value, compression="gzip")
                 else:
                     hdf.create_dataset(key, data=value)
-            except:
+            finally:
                 pass
 
 
@@ -415,7 +415,7 @@ def hdf5_to_dict(hdf):
         if isinstance(value, h5py.Group):
             d[key] = hdf5_to_dict(value)
         else:
-            d[key] = np.asarray(value)
+            d[key] = value[()]
     return d
 
 
