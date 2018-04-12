@@ -419,34 +419,6 @@ def hdf5_to_dict(hdf):
     return d
 
 
-def cut_trials(nbin: int, ntrial: int, seg_len: int):
-    """
-    Cut trials into small segments of equal length
-
-    Parameters
-    ----------
-    nbin
-    ntrial
-    seg_len
-
-    Returns
-    -------
-
-    """
-    # TODO: Allow different indexing among trials. Now all trials use the same indexing.
-    if nbin <= seg_len:
-        seg_len = nbin
-
-    nseg = math.ceil(nbin / seg_len)
-    overlap = nseg * seg_len - nbin
-    start = np.cumsum(np.ones(nseg, dtype=int) * seg_len) - seg_len
-    if nseg == 1:
-        return [np.s_[:]] * ntrial
-    else:
-        offset = np.cumsum(np.append([0], np.random.multinomial(overlap, np.ones(nseg - 1) / (nseg - 1))))
-        return np.array([np.arange(s, s + seg_len) for s in start - offset])
-
-
 def log(f: Callable):
     @functools.wraps(f)
     def wrapper(*args, **kwargs):
@@ -471,3 +443,47 @@ def transform(timescale, dt):
     """
 
     return 0.5 * (dt / timescale) ** 2
+
+
+def clip(a, lbound, ubound=None):
+    """Clip an array by given bounds in place"""
+    if ubound is None:
+        assert lbound > 0
+        ubound = lbound
+        lbound = -lbound
+    else:
+        assert ubound > lbound
+    np.clip(a, lbound, ubound, out=a)
+
+
+def cut_trials(trials, params, config):
+    """Cut all trials"""
+    window = config['window']
+    if window and window is not None:
+        return np.concatenate([cut_trial(trial, window) for trial in trials])  # concatenate segments
+    else:
+        return trials
+
+
+def cut_trial(trial, window: int):
+    """Cut a trial into small segments"""
+    import math
+
+    y = trial['y']
+    x = trial['x']
+    mu = trial['mu']
+    w = trial['w']
+    v = trial['v']
+
+    length = y.shape[0]
+
+    # allow overlapping segments if the trial length is not a multiplier of window
+    # random sample the segment starting points
+    num_segments = math.ceil(length / window)
+    overlap = num_segments * window - length  # number of overlapping segments
+    start = np.cumsum(np.full(num_segments, fill_value=window, dtype=int)) - window
+    offset = np.cumsum(np.append([0], np.random.multinomial(overlap, np.ones(num_segments - 1) / (num_segments - 1))))
+    start -= offset
+    slices = [np.s_[s:s + window] for s in start]
+    segments = [{'y': y[s, :], 'x': x[s, ...], 'mu': mu[s, :], 'w': w[s, :], 'v': v[s, :]} for s in slices]
+    return segments
