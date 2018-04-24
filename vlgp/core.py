@@ -315,6 +315,7 @@ def vem(trials, params, config):
 
     # disable gabbage collection during the iterative procedure
     for it in range(niter):
+        print("EM iteration", it + 1)
         runtime['it'] += 1
 
         with timer() as em_elapsed:
@@ -350,7 +351,7 @@ def vem(trials, params, config):
         for callback in callbacks:
             try:
                 callback(trials, params, config)
-            finally:
+            except:
                 pass
 
         #####################
