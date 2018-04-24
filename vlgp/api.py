@@ -22,14 +22,16 @@ def fit(trials, n_factors, *, history=0, lik="poisson", **kwargs):
 
     # add built-in callbacks
     callbacks = config['callbacks']
-    saver = Saver()
-    callbacks.extend([show, saver.save])
+    if config.get('path', None) is not None:
+        saver = Saver()
+        callbacks.extend([show, saver.save])
     config['callbacks'] = callbacks
 
     # prepare parameters
     params = get_params(trials, n_factors, history + 1, lik)
 
     # initialization
+    print("Initializing...")
     initialize(trials, params, config)
 
     # fill arrays
@@ -46,11 +48,13 @@ def fit(trials, n_factors, *, history=0, lik="poisson", **kwargs):
     fill_trials(subtrials)
 
     # VEM
+    print("Fitting")
     vem(subtrials, params, config)
     # E step only for inference given above estimated parameters and hyperparameters
     make_cholesky(trials, params, config)
     update_w(trials, params, config)
     update_v(trials, params, config)
+    print("Inferring")
     estep(trials, params, config)
 
     return trials, params, config
