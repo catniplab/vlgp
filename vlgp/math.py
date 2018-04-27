@@ -1,6 +1,8 @@
 """
 Math functions
 """
+import warnings
+
 import numpy as np
 from scipy import linalg
 from scipy.linalg import svd
@@ -33,7 +35,8 @@ def trunc_exp(x, bound=10):
     return np.exp(np.minimum(x, bound))
 
 
-def lexp(x, c=20):
+def lexp(x, c=0):
+    """Linearized exp"""
     return np.exp(x) if x < c else np.exp(c) * (1 - c + x)
 
 
@@ -137,7 +140,7 @@ def ichol_gauss(n, omega, r, tol=1e-6):
     # TODO: more effifient algorithm
     x = np.arange(n)
     diag = np.ones(n, dtype=float)
-    pvec = np.arange(n, dtype=int)
+    pvec = np.arange(n, dtype=int)  # pivot
     i = 0
     G = np.zeros((n, r), dtype=float)  # preallocation
     while i < r and np.sum(diag[i:]) > tol * n:
@@ -217,6 +220,7 @@ def subspace(a, b, deg=True):
     double
         angle
     """
+    warnings.warn("Deprecated. Use scipy.linalg.subspace_angles instead.", FutureWarning)
     oa = linalg.orth(a)
     ob = linalg.orth(b)
     if oa.shape[1] < ob.shape[1]:
@@ -241,48 +245,6 @@ def orth(x, a):
     a_orth = Vh
     x_orth = x @ a @ Vh.T
     return x_orth, a_orth
-
-
-def ichol_gauss2(n, omega):
-    """
-    Incomplete Cholesky factorization of squared exponential covariance matrix
-    A ~= GG'
-    This version estimates the factorization's rank. However, it requires more space.
-
-    Parameters
-    ----------
-    n : int
-        matrix size
-    omega : double
-        1 / (2 * timescale^2)
-
-    Returns
-    -------
-    matrix
-        (n, ?)
-    """
-    x = np.arange(n)
-    diag = np.ones(n, dtype=float)
-    pvec = np.arange(n, dtype=int)
-    i = 0
-    chol = np.zeros((n, n), dtype=float)
-    while np.sum(diag[i:]) > 0.0:
-        if i > 0:
-            jast = diag[i:].argmax()
-            jast += i
-            # Be caseful! numpy indexing returns a view instead of a copy.
-            pvec[i], pvec[jast] = pvec[jast].copy(), pvec[i].copy()
-            chol[jast, :i + 1], chol[i, :i + 1] = chol[i, :i + 1].copy(), chol[jast, :i + 1].copy()
-        else:
-            jast = 0
-
-        chol[i, i] = np.sqrt(diag[jast])
-        next_col = np.exp(- omega * (x[pvec[i + 1:]] - x[pvec[i]]) ** 2)
-        chol[i + 1:, i] = (next_col - chol[i + 1:, :i] @ chol[i, :i].T) / chol[i, i]
-        diag[i + 1:] = 1 - np.sum((chol[i + 1:, :i + 1]) ** 2, axis=1)
-
-        i += 1
-    return chol[pvec.argsort(), :i]
 
 
 def diagadd(m, v):
