@@ -1,3 +1,5 @@
+import copy
+
 from .preprocess import get_params, get_config, fill_trials, fill_params
 from .callback import Saver, show
 from .core import vem, estep, update_w, update_v
@@ -8,16 +10,18 @@ from .preprocess import initialize
 __all__ = ["fit"]
 
 
-def fit(trials, n_factors, *, history=0, lik="poisson", **kwargs):
+def fit(trials, n_factors, **kwargs):
     """
     :param trials: list of trials
     :param n_factors: number of latent factors
     :param history: length of history filter
     :param x: external regressors
     :param lik: likelihood
+    :param params: initial parameters
     :param kwargs: options
     :return:
     """
+    print("\nvLGP")
     config = get_config(**kwargs)
 
     # add built-in callbacks
@@ -28,7 +32,7 @@ def fit(trials, n_factors, *, history=0, lik="poisson", **kwargs):
     config['callbacks'] = callbacks
 
     # prepare parameters
-    params = get_params(trials, n_factors, history + 1, lik)
+    params = get_params(trials, n_factors, **kwargs)
 
     # initialization
     print("Initializing...")
@@ -47,6 +51,7 @@ def fit(trials, n_factors, *, history=0, lik="poisson", **kwargs):
 
     fill_trials(subtrials)
 
+    # params['initial'] = copy.deepcopy(params)
     # VEM
     print("Fitting")
     vem(subtrials, params, config)
