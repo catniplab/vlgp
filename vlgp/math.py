@@ -67,10 +67,56 @@ def log1exp(x):
     return np.log1p(np.exp(x))
 
 
+def ichol_gauss_old(n, omega, r, tol=1e-6):
+    """
+    Incomplete Cholesky factorization of squared exponential covariance matrix
+    A = GG' + E
+
+    Parameters
+    ----------
+    n : int
+        size of matrix
+    omega : double
+        1 / (2 * timescale^2)
+    r : int
+        rank
+    tol : double
+        numerical tolerance
+
+    Returns
+    -------
+    ndarray
+        (n, r) matrix
+    """
+    x = np.arange(n)
+    diag = np.ones(n, dtype=float)
+    pvec = np.arange(n, dtype=int)
+    i = 0
+    G = np.zeros((n, r), dtype=float)  # preallocation
+    while i < r and np.sum(diag[i:]) > tol * n:
+        if i > 0:
+            jast = diag[i:].argmax()
+            jast += i
+            # Be caseful! numpy indexing returns a view instead of a copy.
+            pvec[i], pvec[jast] = pvec[jast].copy(), pvec[i].copy()
+            G[jast, :i + 1], G[i, :i + 1] = G[i, :i + 1].copy(), G[jast, :i + 1].copy()
+        else:
+            jast = 0
+
+        G[i, i] = np.sqrt(diag[jast])
+        nextcol = np.exp(- omega * (x[pvec[i + 1:]] - x[pvec[i]]) ** 2)
+        G[i + 1:, i] = (nextcol - G[i + 1:, :i] @ G[i, :i].T) / G[i, i]
+        diag[i + 1:] = 1 - np.sum((G[i + 1:, :i + 1]) ** 2, axis=1)
+
+        i += 1
+
+    return G[pvec.argsort(), :]
+
+
 def ichol_gauss(n, omega, r, tol=1e-6):
     """
     Incomplete Cholesky factorization of squared exponential covariance matrix
-    A ~= GG'
+    A = GG' + E
 
     Parameters
     ----------
@@ -93,14 +139,13 @@ def ichol_gauss(n, omega, r, tol=1e-6):
     diag = np.ones(n, dtype=float)
     pvec = np.arange(n, dtype=int)
     i = 0
-    G = np.zeros((n, r), dtype=float)
+    G = np.zeros((n, r), dtype=float)  # preallocation
     while i < r and np.sum(diag[i:]) > tol * n:
         if i > 0:
             jast = diag[i:].argmax()
             jast += i
-            # Be caseful! numpy indexing returns a view instead of a copy.
-            pvec[i], pvec[jast] = pvec[jast].copy(), pvec[i].copy()
-            G[jast, :i + 1], G[i, :i + 1] = G[i, :i + 1].copy(), G[jast, :i + 1].copy()
+            pvec[[i, jast]] = pvec[[jast, i]]
+            G[[i, jast], :i + 1] = G[[jast, i], :i + 1]  # avoid copy
         else:
             jast = 0
 
