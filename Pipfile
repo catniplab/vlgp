@@ -12,3 +12,4 @@ scikit-learn = "*"
 
 [dev-packages]
 pytest = "*"
+ipykernel = "*"
