@@ -154,8 +154,8 @@ def ichol_gauss(n, omega, r, tol=1e-6):
 
         G[i, i] = np.sqrt(diag[jast])
         nextcol = np.exp(- omega * (x[pvec[i + 1:]] - x[pvec[i]]) ** 2)
-        G[i + 1:, i] = (nextcol - G[i + 1:, :i] @ G[i, :i].T) / G[i, i]
-        diag[i + 1:] = 1 - np.sum((G[i + 1:, :i + 1]) ** 2, axis=1)
+        G[i + 1:, i] = (nextcol - np.dot(G[i + 1:, :i], G[i, :i])) / G[i, i]
+        diag[i + 1:] = 1 - np.sum(np.square(G[i + 1:, :i + 1]), axis=1)
 
         i += 1
 

@@ -1,7 +1,7 @@
 import numpy as np
 from scipy.linalg import toeplitz
 
-from vlgp.math import ichol_gauss2, orth, rectify
+from vlgp.math import ichol_gauss, orth, rectify
 
 
 def test_ichol_gauss():
@@ -10,7 +10,7 @@ def test_ichol_gauss():
     dsq = np.arange(n) ** 2
     k = np.exp(- omega * dsq)
     K = toeplitz(k)
-    G = ichol_gauss2(n, omega)
+    G = ichol_gauss(n, omega, n)
     assert np.allclose(K, G @ G.T)
 
 
