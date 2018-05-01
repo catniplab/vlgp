@@ -4,13 +4,11 @@ Tool functions
 import functools
 import logging
 import pathlib
-
 import warnings
-
+from typing import List, Optional, Callable
 
 import h5py
 import numpy as np
-import pathlib
 from numpy import exp, column_stack, roll
 from numpy import zeros, ones, diag, arange, eye, asarray
 from scipy.linalg import svd, lstsq, toeplitz, solve
@@ -18,11 +16,10 @@ from scipy.ndimage.filters import gaussian_filter1d
 
 from .math import ichol_gauss
 
+logger = logging.getLogger(__name__)
 
 
-
-
-def makeregressor(obs, p):
+def makeregressor(obs, p: int):
     """Construct full regressive matrix
 
     Args:
@@ -43,7 +40,7 @@ def makeregressor(obs, p):
     return regressor
 
 
-def sqexpcov(n, w, var=1.0):
+def sqexpcov(n: int, w: float, var: float = 1.0):
     """Construct square exponential covariance matrix
 
     Args:
@@ -52,7 +49,6 @@ def sqexpcov(n, w, var=1.0):
         var: variance
 
     Returns:
-        covariance
     """
 
     # i, j = meshgrid(arange(n), arange(n))
@@ -92,7 +88,7 @@ def promax(x, m=4):
     return z, U
 
 
-def history(obs, lag):
+def history(obs, lag: int):
     """Construct autoregressive matrices
 
     Args:
@@ -112,17 +108,17 @@ def history(obs, lag):
     return h
 
 
-def rotate(obj, ref):
+def rotate(x, y):
     """Rotation
 
     Args:
-        obj:
-        ref:
+        x:
+        y:
 
     Returns:
 
     """
-    return obj @ lstsq(obj, ref)[0]
+    return x @ lstsq(x, y)[0]
 
 
 def add_constant(x):
@@ -139,7 +135,7 @@ def add_constant(x):
     return roll(x, 1, 1)
 
 
-def lagmat(x, lag):
+def lagmat(x, lag: int):
     """Make autoregression matrix
 
     Args:
@@ -164,100 +160,66 @@ def lagmat(x, lag):
     return mat[startrow:stoprow, ncol:]
 
 
-def save(path, result):
-    """Save result
+# def save(obj, fname: str):
+#     """
+#     Save inference object in HDF5
+#
+#     Parameters
+#     ----------
+#     obj: dict
+#         inference
+#     fname: string
+#         absolute path and filename
+#     """
+#     with h5py.File(fname, 'w') as fout:
+#         dict_to_hdf5(obj, fout)
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-    Parameters
-    ----------
-    path: string
-        path to file
-    result: dict
-        result
-    """
-    path = pathlib.Path(path)
-    path = path.with_suffix('.npy')  # enforce npy
-    np.save(os.fspath(path), result)
 
 # def load(fname: str):
 #     with h5py.File(fname, 'r') as fin:
 #         obj = hdf5_to_dict(fin)
 #     return obj
 
+
+def save(result, path=None, code="npy"):
+    """Save *ANYTHING*"""
+    if path is None:
+        path = result['path']
+    else:
+        result['path'] = path
+    path = pathlib.Path(path)
+
+    if code == "h5":
+        path = path.with_suffix(".h5")
+        with h5py.File(path, 'w') as fout:
+                dict_to_hdf5(result, fout)
+    elif code == "npy":
+        path = path.with_suffix(".npy")
+        np.save(path, result)
+    elif code == "npz":
+        path = path.with_suffix(".npz")
+        np.savez(path, **result)
+
+
 def load(path):
-    return np.load(path).tolist()
+    """Load result from file"""
+    path = pathlib.Path(path)
+    if not path.exists():
+        raise FileNotFoundError(path.as_posix())
 
+    if path.suffix == ".h5":
+        with h5py.File(path.as_posix(), 'r') as fin:
+            rez = hdf5_to_dict(fin)
+    elif path.suffix == ".npy":
+        rez = np.load(path)
+        rez = rez[()]
+    elif path.suffix == ".npz":
+        rez = np.load(path)
+        rez = {**rez}
+    else:
+        raise NotImplementedError("unknown file type {}".format(path.suffix))
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+    return rez
 
 
 def orthomax(A, gamma=1.0, normalize=True, rtol=1e-8, maxit=250):
@@ -365,7 +327,7 @@ def varimax(x, normalize=True, tol=1e-5, niter=1000):
     return z, TT
 
 
-def trial_slices(trial_lengths: list):
+def trial_slices(trial_lengths: List[int]):
     from numpy import cumsum, s_
     ntrial = len(trial_lengths)
     endpoints = [0] + trial_lengths
@@ -399,7 +361,7 @@ def sparse_prior(sigma, omega, trial_lengths, rank):
     return [sparse.block_diag([s * ichol_gauss(l, w, rank) for s, w in zip(sigma, omega)]) for l in trial_lengths]
 
 
-def regmat(y, x=None, lag=0):
+def regmat(y, x: Optional[list], lag=0):
     """
 
     Parameters
@@ -456,18 +418,16 @@ def hdf5_to_dict(hdf):
     return d
 
 
-def cut_trials(nbin, ntrial, seg_len):
+def log(f: Callable):
+    @functools.wraps(f)
+    def wrapper(*args, **kwargs):
+        logger.info('{:s} is called'.format(f.__name__))
+        return f(*args, **kwargs)
+
+    return wrapper
 
 
-
-
-
-
-
-
-
-
-
+def transform(timescale, dt):
     """
     Transform timescale to omega
 
@@ -476,95 +436,53 @@ def cut_trials(nbin, ntrial, seg_len):
     timescale : float or array
     dt : float
 
-
     Returns
     -------
     float
     """
-    # TODO: Allow different indexing among trials. Now all trials use the same indexing.
-    if nbin <= seg_len:
-        seg_len = nbin
 
-    nseg = math.ceil(nbin / seg_len)
-    overlap = nseg * seg_len - nbin
-    start = np.cumsum(np.ones(nseg, dtype=int) * seg_len) - seg_len
-    if nseg == 1:
-        return [np.s_[:]] * ntrial
+    return 0.5 * (dt / timescale) ** 2
+
+
+def clip(a, lbound, ubound=None):
+    """Clip an array by given bounds in place"""
+    if ubound is None:
+        assert lbound > 0
+        ubound = lbound
+        lbound = -lbound
     else:
-        offset = np.cumsum(np.append([0], np.random.multinomial(overlap, np.ones(nseg - 1) / (nseg - 1))))
-        return np.array([np.arange(s, s + seg_len) for s in start - offset])
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+        assert ubound > lbound
+    np.clip(a, lbound, ubound, out=a)
+
+
+def cut_trials(trials, params, config):
+    """Cut all trials"""
+    window = config['window']
+    if window and window is not None:
+        return np.concatenate([cut_trial(trial, window) for trial in trials])  # concatenate segments
+    else:
+        return trials
+
+
+def cut_trial(trial, window: int):
+    """Cut a trial into small segments"""
+    import math
+
+    y = trial['y']
+    x = trial['x']
+    mu = trial['mu']
+    w = trial['w']
+    v = trial['v']
+
+    length = y.shape[0]
+
+    # allow overlapping segments if the trial length is not a multiplier of window
+    # random sample the segment starting points
+    num_segments = math.ceil(length / window)
+    overlap = num_segments * window - length  # number of overlapping segments
+    start = np.cumsum(np.full(num_segments, fill_value=window, dtype=int)) - window
+    offset = np.cumsum(np.append([0], np.random.multinomial(overlap, np.ones(num_segments - 1) / (num_segments - 1))))
+    start -= offset
+    slices = [np.s_[s:s + window] for s in start]
+    segments = [{'y': y[s, :], 'x': x[s, ...], 'mu': mu[s, :], 'w': w[s, :], 'v': v[s, :]} for s in slices]
+    return segments
