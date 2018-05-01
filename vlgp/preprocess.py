@@ -89,9 +89,10 @@ def get_config(**kwargs):
         'tol': 1e-5,  # loose
         'method': 'VB',
         'learning_rate': 1.0,  # no for hessian
-        'EMniter': 20,
-        'Eniter': 10,
-        'Mniter': 10,
+        'EMniter': 20,  # outer
+        'Initer': 50,  # infer
+        'Eniter': 20,  # E
+        'Mniter': 20,  # M
         'Hstep': True,
         'da_bound': 5.0,
         'db_bound': 5.0,
