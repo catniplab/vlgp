@@ -285,6 +285,13 @@ def hstep(trials, params, config):
     gp.optimize(trials, params, config)
 
 
+def infer(trials, params, config):
+    Eniter = config['Eniter']
+    config['Eniter'] = config['Initer']
+    estep(trials, params, config)
+    config['Eniter'] = Eniter
+
+
 def vem(trials, params, config):
     """Variational EM
     This function implements the algorithm.
@@ -315,7 +322,7 @@ def vem(trials, params, config):
 
     # disable gabbage collection during the iterative procedure
     for it in range(niter):
-        print("EM iteration", it + 1)
+        # print("EM iteration", it + 1)
         runtime['it'] += 1
 
         with timer() as em_elapsed:
