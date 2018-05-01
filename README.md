@@ -20,7 +20,7 @@ result = fit(y=y, lat_dim=2).
 
 ## Usage
 
-To get started, see the examples in the [tutorial](tutorial.ipynb).
+To get started, see the examples in the [tutorial](notebook/tutorial.ipynb).
 
 The default options controlling algorithm are recommended for the purpose of stability but not necessarily the optimal.
 If you encounter any numerical error (most likely singular matrix errors), try to change the prior and other options.
