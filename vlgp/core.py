@@ -155,8 +155,8 @@ def estep(trials, params, config):
         # center over all trials if not only infer posterior
         # constrain_mu(model)
 
-        if norm(dmu) < tol * norm(mu):
-            break
+        # if norm(dmu) < tol * norm(mu):
+        #     break
 
 
 def mstep(trials, params, config):
@@ -273,8 +273,8 @@ def mstep(trials, params, config):
         # normalize loading by latent and rescale latent
         # constrain_a(model)
 
-        if norm(da) < tol * norm(a) and norm(db) < tol * norm(b):
-            break
+        # if norm(da) < tol * norm(a) and norm(db) < tol * norm(b):
+        #     break
 
 
 def hstep(trials, params, config):
@@ -364,11 +364,13 @@ def vem(trials, params, config):
         da = params['da']
         db = params['db']
 
-        converged = norm(dmu) < tol * norm(mu) and \
-                    norm(da) < tol * norm(a) and \
-                    norm(db) < tol * norm(b)
+        # converged = norm(dmu) < tol * norm(mu) and \
+        #             norm(da) < tol * norm(a) and \
+        #             norm(db) < tol * norm(b)
+        #
+        # should_stop = converged
 
-        should_stop = converged
+        should_stop = False
 
         if should_stop:
             break
