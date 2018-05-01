@@ -53,16 +53,19 @@ def fit(trials, n_factors, **kwargs):
 
     # params['initial'] = copy.deepcopy(params)
     # VEM
-    print("Fitting")
+    print("Fitting...")
     vem(subtrials, params, config)
     # E step only for inference given above estimated parameters and hyperparameters
     make_cholesky(trials, params, config)
     update_w(trials, params, config)
     update_v(trials, params, config)
-    print("Inferring")
+    print("Inferring...")
+    config['Eniter'] = 20
     estep(trials, params, config)
+    print("Done")
 
-    return trials, params, config
+    model = {'trials': trials, 'params': params, 'config': config}
+    return model
 
 # def predict(**kwargs):
 #     """
