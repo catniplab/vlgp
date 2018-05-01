@@ -70,7 +70,7 @@ def get_params(trials, zdim, **kwargs):
         'b': kwargs.get('b', None),
         'noise': kwargs.get('noise', None),
         'sigma': kwargs.get('sigma', np.full(zdim, fill_value=1.0)),
-        'omega': kwargs.get('omega', np.full(zdim, fill_value=5e-3)),
+        'omega': kwargs.get('omega', np.full(zdim, fill_value=1e-4)),
         'rank': 50,  # TODO: consider merge with window in config
         'gp_noise': 1e-4,
         'dt': 1,
@@ -89,9 +89,9 @@ def get_config(**kwargs):
         'tol': 1e-5,  # loose
         'method': 'VB',
         'learning_rate': 1.0,  # no for hessian
-        'EMniter': 50,
-        'Eniter': 5,
-        'Mniter': 5,
+        'EMniter': 20,
+        'Eniter': 10,
+        'Mniter': 10,
         'Hstep': True,
         'da_bound': 5.0,
         'db_bound': 5.0,
