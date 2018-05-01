@@ -31,11 +31,8 @@ The data are expected to be spike counts (Poisson) or/and LFP channels (Gaussian
 
 | module     | function                                                                                      |
 |:-----------|-----------------------------------------------------------------------------------------------|
-| api        | *use it*                                                                                      |
+| api        | main entry                                                                                    |
 | core       | algorithm                                                                                     |
-| ~~selection~~ | ~~model selection, CV, leave-one-out~~                                                     |
-| gp         | hyperparameter optimization, kernel                                                           |
 | math       | link functions, incomplelte Cholesky decompostion, angle between subspaces, orthogonalization |
-| plot       | raster and dynamics                                                                           |
 | simulation | simulation of Gaussian process, Lorenz dynamics and spike trains                              |
 | util       | lag matrix construction, rotation, load and save                                              |

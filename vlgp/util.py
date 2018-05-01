@@ -1,9 +1,12 @@
 """
 Tool functions
 """
+
+
 import math
 import os
 import warnings
+
 
 import h5py
 import numpy as np
@@ -14,6 +17,8 @@ from scipy.linalg import svd, lstsq, toeplitz, solve
 from scipy.ndimage.filters import gaussian_filter1d
 
 from .math import ichol_gauss
+
+
 
 
 def makeregressor(obs, p):
@@ -161,6 +166,17 @@ def lagmat(x, lag):
 def save(path, result):
     """Save result
 
+
+
+
+
+
+
+
+
+
+
+
     Parameters
     ----------
     path: string
@@ -172,9 +188,35 @@ def save(path, result):
     path = path.with_suffix('.npy')  # enforce npy
     np.save(os.fspath(path), result)
 
+# def load(fname: str):
+#     with h5py.File(fname, 'r') as fin:
+#         obj = hdf5_to_dict(fin)
+#     return obj
 
 def load(path):
     return np.load(path).tolist()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 def orthomax(A, gamma=1.0, normalize=True, rtol=1e-8, maxit=250):
@@ -359,7 +401,7 @@ def dict_to_hdf5(d: dict, hdf):
                     hdf.create_dataset(key, data=value, compression="gzip")
                 else:
                     hdf.create_dataset(key, data=value)
-            except:
+            finally:
                 pass
 
 
@@ -369,23 +411,32 @@ def hdf5_to_dict(hdf):
         if isinstance(value, h5py.Group):
             d[key] = hdf5_to_dict(value)
         else:
-            d[key] = np.asarray(value)
+            d[key] = value[()]
     return d
 
 
 def cut_trials(nbin, ntrial, seg_len):
+
+
+
+
+
+
+
+
+
     """
-    Cut trials into small segments of equal length
+    Transform timescale to omega
 
     Parameters
     ----------
-    nbin
-    ntrial
-    seg_len
+    timescale : float or array
+    dt : float
+
 
     Returns
     -------
-
+    float
     """
     # TODO: Allow different indexing among trials. Now all trials use the same indexing.
     if nbin <= seg_len:
@@ -399,3 +450,37 @@ def cut_trials(nbin, ntrial, seg_len):
     else:
         offset = np.cumsum(np.append([0], np.random.multinomial(overlap, np.ones(nseg - 1) / (nseg - 1))))
         return np.array([np.arange(s, s + seg_len) for s in start - offset])
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
