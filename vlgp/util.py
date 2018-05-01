@@ -3,7 +3,6 @@ Tool functions
 """
 import functools
 import logging
-import math
 import pathlib
 import warnings
 from typing import List, Optional, Callable
