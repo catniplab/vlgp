@@ -1,10 +1,10 @@
 """
 Tool functions
 """
+import functools
+import logging
+import pathlib
 
-
-import math
-import os
 import warnings
 
 
@@ -17,6 +17,7 @@ from scipy.linalg import svd, lstsq, toeplitz, solve
 from scipy.ndimage.filters import gaussian_filter1d
 
 from .math import ichol_gauss
+
 
 
 
@@ -177,6 +178,11 @@ def save(path, result):
 
 
 
+
+
+
+
+
     Parameters
     ----------
     path: string
@@ -195,6 +201,41 @@ def save(path, result):
 
 def load(path):
     return np.load(path).tolist()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -425,6 +466,8 @@ def cut_trials(nbin, ntrial, seg_len):
 
 
 
+
+
     """
     Transform timescale to omega
 
@@ -450,6 +493,47 @@ def cut_trials(nbin, ntrial, seg_len):
     else:
         offset = np.cumsum(np.append([0], np.random.multinomial(overlap, np.ones(nseg - 1) / (nseg - 1))))
         return np.array([np.arange(s, s + seg_len) for s in start - offset])
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
