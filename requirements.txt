@@ -1,6 +1,5 @@
 fire
-sklearn
-matplotlib>=1.5
 numpy>=1.10.4
 scipy>=0.17.0
 h5py
+scikit-learn
