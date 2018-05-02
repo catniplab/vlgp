@@ -2,9 +2,9 @@ from distutils.core import setup
 
 setup(
     name='vlgp',
-    version='',
+    version='0.9.0',
     packages=['vlgp'],
-    url='0.9',
+    url='https://github.com/catniplab/vlgp',
     license='MIT',
     author='yuan',
     author_email='yuan.zhao@stonybrook.edu',
