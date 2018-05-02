@@ -8,7 +8,7 @@ from numpy.random import random, multivariate_normal
 from scipy import stats
 from scipy.linalg import toeplitz
 
-from .math import sexp, identity, ichol_gauss
+from .math import trunc_exp, identity, ichol_gauss
 
 
 def sqexp(t, omega):
@@ -79,7 +79,7 @@ def gp_mvn(omega, std, nbin, ndim, eps=1e-8):
     return x
 
 
-def spikes(x, a, b, link=sexp, seed=None):
+def spikes(x, a, b, link=trunc_exp, seed=None):
     """Simulate spike trains driven by latent processes
 
     Args:
@@ -121,7 +121,7 @@ def spikes(x, a, b, link=sexp, seed=None):
     return y, h, rate
 
 
-def spike(x, a, b, link=sexp, seed=None):
+def spike(x, a, b, link=trunc_exp, seed=None):
     """Simulate spike trains driven by latent processes
 
     Args:
@@ -211,50 +211,6 @@ def lfp(x, a, b, K, link=identity, seed=None):
                 h[:, m, t + 1, 1] = y[m, t, :]
 
     return y, h, mu
-
-
-# def observation(x, a, b, dist=multivariate_normal, link=identity, seed=None, *args):
-#     """Simulate observations driven by latent processes
-#
-#     Args:
-#         x: latent processes (ntrial, ntime, nlatent)
-#         a: coefficients of x (nlatent, nchannel)
-#         b: coefficients of regression (1 + lag*nchannel, nchannel)
-#         dist: distribution
-#         link: link function
-#         seed: random seed
-#         args: arguments for random number generation
-#     Returns:
-#         y: observations (ntrial, ntime, nchannel)
-#         h: autoregressor (nchannel, ntrial, ntime, 1 + lag*nchannel)
-#         mu: mean (ntrial, ntime, nchannel)
-#     """
-#     if seed is not None:
-#         np.random.seed(seed)
-#
-#     x = np.asarray(x)
-#     if x.ndim < 3:
-#         x = np.atleast_3d(x)
-#         x = np.rollaxis(x, axis=-1)
-#
-#     ntrial, ntime, nlatent = x.shape
-#     nchannel = a.shape[1]
-#     lag = b.shape[0] - 1
-#
-#     y = np.empty((ntrial, ntime, nchannel), dtype=float)
-#     h = np.zeros((nchannel, ntrial, ntime, 1 + lag), dtype=float)
-#     h[:, :, :, 0] = 1
-#     mu = np.empty_like(y, dtype=float)
-#
-#     for m in range(ntrial):
-#         for t in range(ntime):
-#             mu[m, t, :] = link(x[m, t, :] @ a + np.einsum('ij, ji -> i', h[:, m, t, :], b))
-#             y[m, t, :] = dist(mu[m, t, :], *args)
-#             if t + 1 < ntime and lag > 0:
-#                 h[:, m, t + 1, 2:] = h[:, m, t, 1:lag]  # roll rightward
-#                 h[:, m, t + 1, 1] = y[m, t, :]
-#
-#     return y, h, mu
 
 
 def lorenz(n, dt=0.01, s=10, r=28, b=2.667, x0=None, regular=True):
