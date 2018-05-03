@@ -4,14 +4,14 @@ Gaussian process
 Spike train
 """
 import numpy as np
-from numpy.random import random, multivariate_normal
+from numpy.random import multivariate_normal
 from scipy import stats
 from scipy.linalg import toeplitz
 
 from .math import trunc_exp, identity, ichol_gauss
 
 
-def sqexp(t, omega):
+def squared_exponential(t, omega):
     """Squared exponential correlation
 
     Args:
@@ -23,21 +23,6 @@ def sqexp(t, omega):
     """
 
     return np.exp(- omega * t ** 2)
-
-
-# def spectral(f, omega):
-#     """Spectral density of squared exponential covariance function
-#
-#     Args:
-#         f: frequency
-#         omega: inverse of squared lengthscale
-#
-#     Returns:
-#         power
-#     """
-#
-#     return 0.5 * np.exp(- 0.25 * f * f / omega) / np.sqrt(np.pi * omega)
-#     # return np.exp(- f * f / omega)
 
 
 def gp_ichol(omega, nbin, std, r=None, tol=1e-6, seed=None):
@@ -77,48 +62,6 @@ def gp_mvn(omega, std, nbin, ndim, eps=1e-8):
     cov = toeplitz(np.exp(- omega * np.arange(nbin) ** 2)) + eps * np.identity(nbin)
     x = std * np.random.multivariate_normal(np.zeros(nbin), cov, ndim).T
     return x
-
-
-def spikes(x, a, b, link=trunc_exp, seed=None):
-    """Simulate spike trains driven by latent processes
-
-    Args:
-        x: latent processes (T, L)
-        a: coefficients of x (L, N)
-        b: coefficients of regression (1 + lag*N, N)
-        link: link function
-        seed: random seed
-
-    Returns:
-        y: spike trains (T, N)
-        h: autoregressor (T, 1 + lag*N)
-        rate: firing rates (T, N)
-    """
-
-    if seed is not None:
-        np.random.seed(seed)
-
-    T, L = x.shape
-    _, N = a.shape
-    lag = b.shape[0] - 1
-
-    y = np.empty((T, N), dtype=float)
-    h = np.zeros((N, T, b.shape[0]), dtype=float)
-    h[:, :, 0] = 1
-    rate = np.empty_like(y, dtype=float)
-
-    for t in range(T):
-        eta = x[t, :] @ a + np.einsum('ij, ji -> i', h[:, t, :], b)
-        rate[t, :] = link(eta)
-        # truncate y to 1 if y > 1
-        # equivalent to Bernoulli P(1) = (1 - e^-(lam_t))
-        # y[t, :] = stats.bernoulli.rvs(1.0 - exp(-rate[t, :]))
-        y[t, :] = stats.poisson.rvs(rate[t, :]).clip(0, 1)
-        if t + 1 < T and lag > 0:
-            h[:, t + 1, 2:] = h[:, t, 1:lag]  # roll rightward
-            h[:, t + 1, 1] = y[t, :]
-
-    return y, h, rate
 
 
 def spike(x, a, b, link=trunc_exp, seed=None):
