@@ -156,7 +156,7 @@ def lfp(x, a, b, K, link=identity, seed=None):
     return y, h, mu
 
 
-def lorenz(n, dt=0.01, s=10, r=28, b=2.667, x0=None, regular=True):
+def lorenz(n, dt=0.01, s=10, r=28, b=2.667, x0=None, standardize=False):
     """Lorenz attractor
 
     Args:
@@ -166,15 +166,15 @@ def lorenz(n, dt=0.01, s=10, r=28, b=2.667, x0=None, regular=True):
         r:
         b:
         x0: initial values
-        regular: demean, rescale
+        standardize: demean, scale
 
     Returns:
-        3-dimenional dynamics
+        3D dynamics
     """
     from numpy import empty, inf
     from numpy.linalg import norm
 
-    def dlorenz(x, y, z):
+    def dot(x, y, z):
         x_dot = s * (y - x)
         y_dot = r * x - y - x * z
         z_dot = x * y - b * z
@@ -189,11 +189,11 @@ def lorenz(n, dt=0.01, s=10, r=28, b=2.667, x0=None, regular=True):
 
     for i in range(n - 1):
         # Derivatives of the X, Y, Z state
-        dx, dy, dz = dlorenz(xs[i, 0], xs[i, 1], xs[i, 2])
+        dx, dy, dz = dot(xs[i, 0], xs[i, 1], xs[i, 2])
         xs[i + 1, 0] = xs[i, 0] + dx * dt
         xs[i + 1, 1] = xs[i, 1] + dy * dt
         xs[i + 1, 2] = xs[i, 2] + dz * dt
 
-    if regular:
+    if standardize:
         xs = (xs - xs.mean(axis=0)) / norm(xs, axis=0, ord=inf)
     return xs
