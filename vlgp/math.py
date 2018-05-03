@@ -30,7 +30,7 @@ def trunc_exp(x, bound=10):
     Returns
     -------
     ndarray
-        exp(min(x, ubound))
+        exp(min(x, bound))
     """
     return np.exp(np.minimum(x, bound))
 
