@@ -8,5 +8,15 @@ setup(
     license='MIT',
     author='yuan',
     author_email='yuan.zhao@stonybrook.edu',
-    description=''
+    description='variational Latent Gaussian Process',
+    python_requires='>=3.5.0',
+    install_requires=['numpy', 'scipy', 'scikit-learn'],
+    classifiers=[
+        # Trove classifiers
+        # Full list: https://pypi.python.org/pypi?%3Aaction=list_classifiers
+        'License :: OSI Approved :: MIT License',
+        'Programming Language :: Python',
+        'Programming Language :: Python :: 3',
+        'Programming Language :: Python :: 3.5',
+    ],
 )
