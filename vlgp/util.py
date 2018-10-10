@@ -29,7 +29,6 @@ def makeregressor(obs, p: int):
     Returns:
         full design matrix (T, 1 + p*N)
     """
-
     T, N = obs.shape
     regressor = ones((T, 1 + p * N), dtype=float)
     for t in range(T):

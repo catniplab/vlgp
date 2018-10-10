@@ -1,85 +1,32 @@
 """
 Functions of simulation
-Gaussian process
-Spike train
 """
 import numpy as np
 from numpy.random import multivariate_normal
 from scipy import stats
-from scipy.linalg import toeplitz
 
-from .math import trunc_exp, identity, ichol_gauss
-
-
-def squared_exponential(t, omega):
-    """Squared exponential correlation
-
-    Args:
-        t: lag
-        omega: inverse of squared lengthscale
-
-    Returns:
-        correlation
-    """
-
-    return np.exp(- omega * t ** 2)
-
-
-def gp_ichol(omega, nbin, std, r=None, tol=1e-6, seed=None):
-    """Simulate Gaussian processes by incomplete Choleksy factorization
-
-    Args:
-        omega: scale
-        nbin: # of time bins
-        std: standard deviation
-        r: rank of incomplete Cholesky
-        tol: numerical tolerance for incomplete Cholelsy
-        seed: random number seed
-
-    Returns:
-        x: simulation (nbin,)
-    """
-    if seed is not None:
-        np.random.seed(seed)
-    if r is None:
-        r = int(np.log(nbin))
-
-    G = ichol_gauss(nbin, omega, r, tol)
-    z = np.random.randn(r)
-    x = std * G @ z
-    return x
-
-
-def gp_mvn(omega, std, nbin, ndim, eps=1e-8):
-    """Simulate GP using multivariate normal random variable
-    :param omega: 1/s^2
-    :param std: standard deviation
-    :param nbin: size
-    :param ndim: # dimensions
-    :param eps: tiny positive number
-    :return: (nbin, ndim)
-    """
-    cov = toeplitz(np.exp(- omega * np.arange(nbin) ** 2)) + eps * np.identity(nbin)
-    x = std * np.random.multivariate_normal(np.zeros(nbin), cov, ndim).T
-    return x
+from .math import trunc_exp, identity
 
 
 def spike(x, a, b, link=trunc_exp, seed=None):
-    """Simulate spike trains driven by latent processes
+    """Simulate spike trains
 
-    Args:
-        x: latent processes (ntrial, ntime, nlatent)
-        a: coefficients of x (nlatent, nchannel)
-        b: coefficients of regression (1 + lag*nchannel, nchannel)
-        link: link function
-        seed: random seed
+        firing rate = exp(latent process . loading matrix + spike history * history filter + bias)
+        where . represents matrix multiplication and * represents convolution
 
-    Returns:
-        y: spike trains (ntrial, ntime, nchannel)
-        h: autoregressor (nchannel, ntrial, ntime, 1 + lag*nchannel)
-        rate: firing rates (ntrial, ntime, nchannel)
+    :param x: latent process
+    :type x: ndarray
+    :param a: loading matrix (right)
+    :type a: ndarray
+    :param b: history filter and bias
+    :type b: ndarray
+    :param link: link function
+    :type link: callable
+    :param seed: random number seed
+    :type seed: optional[int]
+    :return: spike train, spike history, firing rate
+    :rtype: ndarray, ndarray, ndarray
     """
-
     if seed is not None:
         np.random.seed(seed)
 
@@ -156,20 +103,22 @@ def lfp(x, a, b, K, link=identity, seed=None):
     return y, h, mu
 
 
-def lorenz(n, dt=0.01, s=10, r=28, b=2.667, x0=None, standardize=False):
-    """Lorenz attractor
+def lorenz(n, dt=0.01, s=10, r=28, b=2.667, x0=None, normalized=False):
+    """Generate a trajectory of Lorenz attractor
 
-    Args:
-        n: the number of steps
-        dt: step length, smoothness
-        s:
-        r:
-        b:
-        x0: initial values
-        standardize: demean, scale
-
-    Returns:
-        3D dynamics
+    :param n: length
+    :type n: int
+    :param dt: time step
+    :type dt: float
+    :param s: parameter
+    :param r: parameter
+    :param b: parameter
+    :param x0: initial state
+    :type x0: (float, float, float)
+    :param normalized: z-score
+    :type normalized: bool
+    :return: a trajectory
+    :rtype: ndarray
     """
     from numpy import empty, inf
     from numpy.linalg import norm
@@ -194,6 +143,7 @@ def lorenz(n, dt=0.01, s=10, r=28, b=2.667, x0=None, standardize=False):
         xs[i + 1, 1] = xs[i, 1] + dy * dt
         xs[i + 1, 2] = xs[i, 2] + dz * dt
 
-    if standardize:
+    if normalized:
         xs = (xs - xs.mean(axis=0)) / norm(xs, axis=0, ord=inf)
+
     return xs
