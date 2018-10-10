@@ -13,3 +13,6 @@ scikit-learn = "*"
 [dev-packages]
 pytest = "*"
 ipykernel = "*"
+mypy = "*"
+typeshed = "*"
+reno = "*"
