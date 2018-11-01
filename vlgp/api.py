@@ -25,11 +25,11 @@ def fit(trials, n_factors, **kwargs):
     config = get_config(**kwargs)
 
     # add built-in callbacks
-    callbacks = config['callbacks']
-    if config.get('path', None) is not None:
+    callbacks = config["callbacks"]
+    if config.get("path", None) is not None:
         saver = Saver()
         callbacks.extend([show, saver.save])
-    config['callbacks'] = callbacks
+    config["callbacks"] = callbacks
 
     # prepare parameters
     params = get_params(trials, n_factors, **kwargs)
@@ -51,7 +51,7 @@ def fit(trials, n_factors, **kwargs):
 
     fill_trials(subtrials)
 
-    params['initial'] = copy.deepcopy(params)
+    params["initial"] = copy.deepcopy(params)
     # VEM
     print("Fitting...")
     vem(subtrials, params, config)
@@ -63,6 +63,5 @@ def fit(trials, n_factors, **kwargs):
     infer(trials, params, config)
     print("Done")
 
-    model = {'trials': trials, 'params': params, 'config': config}
+    model = {"trials": trials, "params": params, "config": config}
     return model
-

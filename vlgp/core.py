@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 def estep(trials, params, config):
     """Update variational distribution q (E step)"""
-    niter = config['Eniter']  # maximum number of iterations
+    niter = config["Eniter"]  # maximum number of iterations
     if niter < 1:
         return
 
@@ -29,26 +29,26 @@ def estep(trials, params, config):
     # constrain_loading(trials, params, config)
 
     # dimenionalities
-    zdim = params['zdim']
-    rank = params['rank']  # rank of prior covariance
-    likelihood = params['likelihood']
+    zdim = params["zdim"]
+    rank = params["rank"]  # rank of prior covariance
+    likelihood = params["likelihood"]
 
     # misc
-    dmu_bound = config['dmu_bound']
-    tol = config['tol']
-    method = config['method']
+    dmu_bound = config["dmu_bound"]
+    tol = config["tol"]
+    method = config["method"]
 
-    poiss_mask = (likelihood == "poisson")
-    gauss_mask = (likelihood == "gaussian")
+    poiss_mask = likelihood == "poisson"
+    gauss_mask = likelihood == "gaussian"
     ###
     # print(poiss_mask)
     # print(gauss_mask)
     ##
 
     # parameters
-    a = params['a']
-    b = params['b']
-    noise = params['noise']
+    a = params["a"]
+    b = params["b"]
+    noise = params["noise"]
     gauss_noise = noise[gauss_mask]
 
     Ir = identity(rank)
@@ -58,14 +58,16 @@ def estep(trials, params, config):
     for i in range(niter):
         # TODO: parallel trials ?
         for trial in trials:
-            y = trial['y']
-            x = trial['x']
-            mu = trial['mu']
-            w = trial['w']
-            v = trial['v']
-            dmu = trial['dmu']
+            y = trial["y"]
+            x = trial["x"]
+            mu = trial["mu"]
+            w = trial["w"]
+            v = trial["v"]
+            dmu = trial["dmu"]
 
-            prior = params['cholesky'][y.shape[0]]  # TODO: adapt unequal lengths, move into trials
+            prior = params["cholesky"][
+                y.shape[0]
+            ]  # TODO: adapt unequal lengths, move into trials
 
             residual = np.empty_like(y, dtype=float)
             U = np.empty_like(y, dtype=float)
@@ -78,7 +80,7 @@ def estep(trials, params, config):
             # print(y_gauss.shape)
             ###
 
-            xb = einsum('ijk, jk -> ik', x, b)
+            xb = einsum("ijk, jk -> ik", x, b)
             eta = mu @ a + xb
             r = trunc_exp(eta + 0.5 * v @ (a ** 2))
 
@@ -134,23 +136,22 @@ def estep(trials, params, config):
             U[:, poiss_mask] = r[:, poiss_mask]
             U[:, gauss_mask] = 1 / gauss_noise
             w = U @ (a.T ** 2)
-            if method == 'VB':
+            if method == "VB":
                 for l in range(zdim):
                     G = prior[l]
                     GtWG = G.T @ (w[:, l, np.newaxis] * G)
                     try:
                         M = solve(Ir + GtWG, GtWG, sym_pos=True)
-                        v[:, l] = np.sum(
-                            G * (G - G @ GtWG + G @ (GtWG @ M)), axis=1)
+                        v[:, l] = np.sum(G * (G - G @ GtWG + G @ (GtWG @ M)), axis=1)
                     except Exception as e:
                         logger.exception(repr(e), exc_info=True)
 
             # make sure save all changes
             # TODO: make inline modification
-            trial['mu'] = mu
-            trial['w'] = w
-            trial['v'] = v
-            trial['dmu'] = dmu
+            trial["mu"] = mu
+            trial["w"] = w
+            trial["v"] = v
+            trial["dmu"] = dmu
 
         # center over all trials if not only infer posterior
         # constrain_mu(model)
@@ -161,7 +162,7 @@ def estep(trials, params, config):
 
 def mstep(trials, params, config):
     """Optimize loading and regression (M step)"""
-    niter = config['Mniter']  # maximum number of iterations
+    niter = config["Mniter"]  # maximum number of iterations
     if niter < 1:
         return
 
@@ -171,38 +172,40 @@ def mstep(trials, params, config):
     # constrain_latent(trials, params, config)
 
     # dimenionalities
-    ydim = params['ydim']
-    xdim = params['xdim']
-    zdim = params['zdim']
-    rank = params['rank']  # rank of prior covariance
+    ydim = params["ydim"]
+    xdim = params["xdim"]
+    zdim = params["zdim"]
+    rank = params["rank"]  # rank of prior covariance
     ntrial = len(trials)  # number of trials
 
     # parameters
-    a = params['a']
-    b = params['b']
-    likelihood = params['likelihood']
-    noise = params['noise']
-    poiss_mask = (likelihood == "poisson")
-    gauss_mask = (likelihood == "gaussian")
+    a = params["a"]
+    b = params["b"]
+    likelihood = params["likelihood"]
+    noise = params["noise"]
+    poiss_mask = likelihood == "poisson"
+    gauss_mask = likelihood == "gaussian"
     gauss_noise = noise[gauss_mask]
-    da = params['da']
-    db = params['db']
+    da = params["da"]
+    db = params["db"]
 
     # misc
-    use_hessian = config['use_hessian']
-    da_bound = config['da_bound']
-    db_bound = config['db_bound']
-    tol = config['tol']
-    method = config['method']
-    learning_rate = config['learning_rate']
+    use_hessian = config["use_hessian"]
+    da_bound = config["da_bound"]
+    db_bound = config["db_bound"]
+    tol = config["tol"]
+    method = config["method"]
+    learning_rate = config["learning_rate"]
 
-    y = np.concatenate([trial['y'] for trial in trials], axis=0)
-    x = np.concatenate([trial['x'] for trial in trials], axis=0)  # TODO: check dimensionality of x
-    mu = np.concatenate([trial['mu'] for trial in trials], axis=0)
-    v = np.concatenate([trial['v'] for trial in trials], axis=0)
+    y = np.concatenate([trial["y"] for trial in trials], axis=0)
+    x = np.concatenate(
+        [trial["x"] for trial in trials], axis=0
+    )  # TODO: check dimensionality of x
+    mu = np.concatenate([trial["mu"] for trial in trials], axis=0)
+    v = np.concatenate([trial["v"] for trial in trials], axis=0)
 
     for i in range(niter):
-        eta = mu @ a + einsum('ijk, jk -> ik', x, b)
+        eta = mu @ a + einsum("ijk, jk -> ik", x, b)
         # (time, regression, neuron) x (regression, neuron) -> (time, neuron)  # TODO: use matmul broadcast
         r = trunc_exp(eta + 0.5 * v @ (a ** 2))
         noise = np.var(y - eta, axis=0, ddof=0)  # MLE
@@ -215,7 +218,8 @@ def mstep(trials, params, config):
 
                 if use_hessian:
                     nhess_a = mu_plus_v_times_a.T @ (
-                            r[:, n, np.newaxis] * mu_plus_v_times_a)
+                        r[:, n, np.newaxis] * mu_plus_v_times_a
+                    )
                     nhess_a[np.diag_indices_from(nhess_a)] += r[:, n] @ v
 
                     try:
@@ -251,15 +255,15 @@ def mstep(trials, params, config):
                 # (m'm + diag(j'v))^-1 m'(y - Hb)
                 M = mu.T @ mu
                 M[np.diag_indices_from(M)] += np.sum(v, axis=0)
-                a[:, n] = solve(M, mu.T @ (
-                        y[:, n] - x[..., n] @ b[:, n]),
-                                sym_pos=True)
+                a[:, n] = solve(M, mu.T @ (y[:, n] - x[..., n] @ b[:, n]), sym_pos=True)
 
                 # b's least squares solution for Gaussian channel
                 # (H'H)^-1 H'(y - ma)
-                b[:, n] = solve(x[..., n].T @ x[..., n],
-                                x[..., n].T @ (y[:, n] - mu @ a[:, n]),
-                                sym_pos=True)
+                b[:, n] = solve(
+                    x[..., n].T @ x[..., n],
+                    x[..., n].T @ (y[:, n] - mu @ a[:, n]),
+                    sym_pos=True,
+                )
                 b[1:, n] = 0
                 # TODO: only make history filter components zeros
             else:
@@ -267,9 +271,9 @@ def mstep(trials, params, config):
 
         # update parameters in fit
         # TODO: make inline modification
-        params['a'] = a
-        params['b'] = b
-        params['noise'] = noise
+        params["a"] = a
+        params["b"] = b
+        params["noise"] = noise
         # normalize loading by latent and rescale latent
         # constrain_a(model)
 
@@ -279,17 +283,17 @@ def mstep(trials, params, config):
 
 def hstep(trials, params, config):
     """Wrapper of hyperparameters tuning"""
-    if not config['Hstep']:
+    if not config["Hstep"]:
         return
 
     gp.optimize(trials, params, config)
 
 
 def infer(trials, params, config):
-    Eniter = config['Eniter']
-    config['Eniter'] = config['Initer']
+    Eniter = config["Eniter"]
+    config["Eniter"] = config["Initer"]
     estep(trials, params, config)
-    config['Eniter'] = Eniter
+    config["Eniter"] = Eniter
 
 
 def vem(trials, params, config):
@@ -301,19 +305,19 @@ def vem(trials, params, config):
     # pass segments to speed up estimation and hyperparameter tuning
     # the caller gets runtime
 
-    callbacks = config['callbacks']
+    callbacks = config["callbacks"]
 
-    tol = config['tol']
-    niter = config['EMniter']
+    tol = config["tol"]
+    niter = config["EMniter"]
 
     # profile and debug purpose
     # invalid every new run
     runtime = {
-        'it': 0,
-        'e_elapsed': [],
-        'm_elapsed': [],
-        'h_elapsed': [],
-        'em_elapsed': []
+        "it": 0,
+        "e_elapsed": [],
+        "m_elapsed": [],
+        "h_elapsed": [],
+        "em_elapsed": [],
     }
 
     #######################
@@ -323,7 +327,7 @@ def vem(trials, params, config):
     # disable gabbage collection during the iterative procedure
     for it in range(niter):
         # print("EM iteration", it + 1)
-        runtime['it'] += 1
+        runtime["it"] += 1
 
         with timer() as em_elapsed:
             ##########
@@ -348,12 +352,12 @@ def vem(trials, params, config):
 
         # print("Iter {:d}, ELBO: {:.3f}".format(it, lbound))
 
-        runtime['e_elapsed'].append(estep_elapsed())
-        runtime['m_elapsed'].append(mstep_elapsed())
-        runtime['h_elapsed'].append(hstep_elapsed())
-        runtime['em_elapsed'].append(em_elapsed())
+        runtime["e_elapsed"].append(estep_elapsed())
+        runtime["m_elapsed"].append(mstep_elapsed())
+        runtime["h_elapsed"].append(hstep_elapsed())
+        runtime["em_elapsed"].append(em_elapsed())
 
-        config['runtime'] = runtime
+        config["runtime"] = runtime
 
         for callback in callbacks:
             try:
@@ -364,12 +368,12 @@ def vem(trials, params, config):
         #####################
         # convergence check #
         #####################
-        mu = np.concatenate([trial['mu'] for trial in trials], axis=0)
-        a = params['a']
-        b = params['b']
-        dmu = np.concatenate([trial['dmu'] for trial in trials], axis=0)
-        da = params['da']
-        db = params['db']
+        mu = np.concatenate([trial["mu"] for trial in trials], axis=0)
+        a = params["a"]
+        b = params["b"]
+        dmu = np.concatenate([trial["dmu"] for trial in trials], axis=0)
+        da = params["da"]
+        db = params["db"]
 
         # converged = norm(dmu) < tol * norm(mu) and \
         #             norm(da) < tol * norm(a) and \
@@ -389,100 +393,106 @@ def vem(trials, params, config):
 
 def constrain_latent(trials, params, config):
     """Center and scale latent mean"""
-    constraint = config['constrain_latent']
+    constraint = config["constrain_latent"]
 
-    if not constraint or constraint == 'none':
+    if not constraint or constraint == "none":
         return
 
-    mu = np.concatenate([trial['mu'] for trial in trials], axis=0)
+    mu = np.concatenate([trial["mu"] for trial in trials], axis=0)
     mean_over_trials = mu.mean(axis=0, keepdims=True)
     std_over_trials = mu.std(axis=0, keepdims=True)
 
-    if constraint in ('location', 'both'):
+    if constraint in ("location", "both"):
         for trial in trials:
-            trial['mu'] -= mean_over_trials
+            trial["mu"] -= mean_over_trials
         # compensate bias
         # commented to isolated from changing external variables
-        params['b'][0, :] += np.squeeze(mean_over_trials @ params['a'])
+        params["b"][0, :] += np.squeeze(mean_over_trials @ params["a"])
 
-    if constraint in ('scale', 'both'):
+    if constraint in ("scale", "both"):
         for trial in trials:
-            trial['mu'] /= std_over_trials
+            trial["mu"] /= std_over_trials
         # compensate loading
         # commented to isolated from changing external variables
-        params['a'] *= std_over_trials.T
+        params["a"] *= std_over_trials.T
 
 
 def constrain_loading(trials, params, config):
     """Normalize loading matrix"""
-    constraint = config['constrain_loading']
+    constraint = config["constrain_loading"]
 
-    if not constraint or constraint == 'none':
+    if not constraint or constraint == "none":
         return
 
-    eps = config['eps']
-    a = params['a']
+    eps = config["eps"]
+    a = params["a"]
 
-    if constraint == 'svd':
+    if constraint == "svd":
         u, s, v = svd(a, full_matrices=False)
         # A = USV
         us = a @ v.T
         for trial in trials:
-            trial['mu'] = trial['mu'] @ us
-        params['a'] = v
+            trial["mu"] = trial["mu"] @ us
+        params["a"] = v
     else:
-        if constraint == 'fro':
-            s = norm(a, ord='fro') + eps
+        if constraint == "fro":
+            s = norm(a, ord="fro") + eps
         else:
             s = norm(a, ord=constraint, axis=1, keepdims=True) + eps
-        params['a'] /= s
+        params["a"] /= s
         for trial in trials:
-            trial['mu'] *= s.T
+            trial["mu"] *= s.T
 
 
 def update_w(trials, params, config):
-    likelihood = params['likelihood']
-    poiss_mask = (likelihood == "poisson")
-    gauss_mask = (likelihood == "gaussian")
+    likelihood = params["likelihood"]
+    poiss_mask = likelihood == "poisson"
+    gauss_mask = likelihood == "gaussian"
 
-    a = params['a']
-    b = params['b']
-    noise = params['noise']
+    a = params["a"]
+    b = params["b"]
+    noise = params["noise"]
     gauss_noise = noise[gauss_mask]
 
     for trial in trials:
-        y = trial['y']
-        x = trial['x']
-        mu = trial['mu']
-        w = trial.setdefault('w', np.zeros_like(mu))
-        v = trial.setdefault('v', np.zeros_like(mu))
+        y = trial["y"]
+        x = trial["x"]
+        mu = trial["mu"]
+        w = trial.setdefault("w", np.zeros_like(mu))
+        v = trial.setdefault("v", np.zeros_like(mu))
 
         # (neuron, time, regression) x (regression, neuron) -> (time, neuron)
-        eta = mu @ a + einsum('ijk, jk -> ik', x, b)
+        eta = mu @ a + einsum("ijk, jk -> ik", x, b)
         r = trunc_exp(eta + 0.5 * v @ (a ** 2))
         U = np.empty_like(r)
         U[:, poiss_mask] = r[:, poiss_mask]
         U[:, gauss_mask] = 1 / gauss_noise
-        trial['w'] = U @ (a.T ** 2)
+        trial["w"] = U @ (a.T ** 2)
 
 
 def update_v(trials, params, config):
-    if config['method'] != "VB":
+    if config["method"] != "VB":
         return
 
     for trial in trials:
-        zdim = params['zdim']
-        mu = trial['mu']
-        w = trial.setdefault('w', np.zeros_like(mu))
-        v = trial.setdefault('v', np.zeros_like(mu))
+        zdim = params["zdim"]
+        mu = trial["mu"]
+        w = trial.setdefault("w", np.zeros_like(mu))
+        v = trial.setdefault("v", np.zeros_like(mu))
 
-        prior = params['cholesky'][mu.shape[0]]
+        prior = params["cholesky"][mu.shape[0]]
         Ir = identity(prior[0].shape[-1])
 
         for l in range(zdim):
             G = prior[l]
             GtWG = G.T @ (w[:, [l]] * G)
             try:
-                v[:, l] = np.sum(G * (G - G @ GtWG + G @ (GtWG @ solve(Ir + GtWG, GtWG, sym_pos=True))), axis=1)
+                v[:, l] = np.sum(
+                    G
+                    * (
+                        G - G @ GtWG + G @ (GtWG @ solve(Ir + GtWG, GtWG, sym_pos=True))
+                    ),
+                    axis=1,
+                )
             except LinAlgError:
                 warnings.warn("singular I + G'WG")

@@ -4,18 +4,20 @@ import numpy as np
 from .api import fit
 
 
-def cv(y,
-       z_dim,
-       sigma,
-       omega,
-       rank,
-       mfold=0,
-       nfold=0,
-       path=None,
-       history=0,
-       callbacks=None,
-       random_state=None,
-       **kwargs):
+def cv(
+    y,
+    z_dim,
+    sigma,
+    omega,
+    rank,
+    mfold=0,
+    nfold=0,
+    path=None,
+    history=0,
+    callbacks=None,
+    random_state=None,
+    **kwargs
+):
     np.random.seed(random_state)
 
     ntrial, nbin, y_dim = y.shape
@@ -30,24 +32,37 @@ def cv(y,
         training_mask[fold] = False
         y_training = y[training_mask, :, :]
         y_test = y[~training_mask, :, :]
-        lik = ['spike'] * y_training.shape[2]
-        fold_path = '{}_fold_{}'.format(path, i)
+        lik = ["spike"] * y_training.shape[2]
+        fold_path = "{}_fold_{}".format(path, i)
         # DEBUG
         print(fold_path)
-        model_training = fit(y=y_training, z_dim=z_dim, lik=lik,
-                             history=history,
-                             sigma=sigma, omega=omega, rank=rank,
-                             path=fold_path,
-                             callbacks=callbacks,
-                             learn_param=True, learn_post=True,
-                             learn_hyper=True,
-                             # e_niter=5, m_niter=5,
-                             **kwargs)
-        with h5py.File(fold_path, 'a') as fout:
-            fout['fold'] = fold
+        model_training = fit(
+            y=y_training,
+            z_dim=z_dim,
+            lik=lik,
+            history=history,
+            sigma=sigma,
+            omega=omega,
+            rank=rank,
+            path=fold_path,
+            callbacks=callbacks,
+            learn_param=True,
+            learn_post=True,
+            learn_hyper=True,
+            # e_niter=5, m_niter=5,
+            **kwargs
+        )
+        with h5py.File(fold_path, "a") as fout:
+            fout["fold"] = fold
 
-        leave_out(y_test, model_training, path=fold_path,
-                  leave=y_test.shape[-1] // nfold, niter=50, e_niter=1)
+        leave_out(
+            y_test,
+            model_training,
+            path=fold_path,
+            leave=y_test.shape[-1] // nfold,
+            niter=50,
+            e_niter=1,
+        )
 
 
 def leave_out(y, model, path, leave=1, **kwargs):
@@ -65,14 +80,14 @@ def leave_out(y, model, path, leave=1, **kwargs):
     """
     from scipy.linalg import svd
 
-    _, nbin, z_dim = model['mu'].shape
+    _, nbin, z_dim = model["mu"].shape
     y_dim = y.shape[-1]
 
     # Z = USV'
     # Za = USV'a = (US)(V'a) = (USV'V)(V'a)
-    u, s, vt = svd(model['mu'].reshape(-1, z_dim), full_matrices=False)
-    a_orth = vt @ model['a']
-    b = model['b']
+    u, s, vt = svd(model["mu"].reshape(-1, z_dim), full_matrices=False)
+    a_orth = vt @ model["a"]
+    b = model["b"]
 
     nfold = y_dim // leave
 
@@ -81,7 +96,7 @@ def leave_out(y, model, path, leave=1, **kwargs):
     elif nfold == y_dim:
         y_perm = np.arange(y_dim)
     else:
-        raise ValueError('invalid leave: {}'.format(leave))
+        raise ValueError("invalid leave: {}".format(leave))
 
     folds = np.array_split(y_perm, nfold)  # k-fold
 
@@ -91,24 +106,26 @@ def leave_out(y, model, path, leave=1, **kwargs):
         y_in = y[:, :, in_mask]
         a_in = a_orth[:, in_mask]  # orth
         b_in = b[:, in_mask]
-        lik = ['spike'] * y_in.shape[-1]
-        fold_path = '{}_leave_{}_out_{}'.format(path, leave, i)
+        lik = ["spike"] * y_in.shape[-1]
+        fold_path = "{}_leave_{}_out_{}".format(path, leave, i)
         # DEBUG
-        print('{}'.format(fold_path))
-        fit(y=y_in,
+        print("{}".format(fold_path))
+        fit(
+            y=y_in,
             z_dim=z_dim,
             lik=lik,
             a=a_in,
             b=b_in,
-            history=model['history'],
-            sigma=model['sigma'],
-            omega=model['omega'],
-            rank=model['rank'],
+            history=model["history"],
+            sigma=model["sigma"],
+            omega=model["omega"],
+            rank=model["rank"],
             path=fold_path,
             learn_param=False,
             learn_post=True,
             learn_hyper=False,
-            **kwargs)
+            **kwargs
+        )
 
-        with h5py.File(fold_path, 'a') as fout:
-            fout['fold'] = fold
+        with h5py.File(fold_path, "a") as fout:
+            fout["fold"] = fold

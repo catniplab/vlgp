@@ -104,14 +104,16 @@ def ichol_gauss(n, omega, r, dt=1.0, tol=1e-6):
             jast = d[i:].argmax()
             jast += i
             pvec[[i, jast]] = pvec[[jast, i]]
-            G[[i, jast], :i + 1] = G[[jast, i], :i + 1]  # avoid copy
+            G[[i, jast], : i + 1] = G[[jast, i], : i + 1]  # avoid copy
         else:
             jast = 0
 
         G[i, i] = np.sqrt(d[jast])
-        nextcol = np.exp(- omega * (x[pvec[i + 1:]] - x[pvec[i]]) ** 2)  # compute next column
-        G[i + 1:, i] = (nextcol - np.dot(G[i + 1:, :i], G[i, :i])) / G[i, i]
-        d[i + 1:] = 1 - np.sum(np.square(G[i + 1:, :i + 1]), axis=1)
+        nextcol = np.exp(
+            -omega * (x[pvec[i + 1 :]] - x[pvec[i]]) ** 2
+        )  # compute next column
+        G[i + 1 :, i] = (nextcol - np.dot(G[i + 1 :, :i], G[i, :i])) / G[i, i]
+        d[i + 1 :] = 1 - np.sum(np.square(G[i + 1 :, : i + 1]), axis=1)
 
         i += 1
 
@@ -139,7 +141,9 @@ def ichol(a, tol=1e-6):
     """
 
     n = a.shape[0]
-    d = np.diagonal(a).copy()  # Don't forget copy. diagonal() returns a read-only vector.
+    d = np.diagonal(
+        a
+    ).copy()  # Don't forget copy. diagonal() returns a read-only vector.
     pvec = np.arange(n, dtype=int)
     i = 0
     G = np.zeros((n, n), dtype=float)
@@ -149,14 +153,14 @@ def ichol(a, tol=1e-6):
             jast += i
             # Be caseful! numpy indexing returns a view instead of a copy.
             pvec[[i, jast]] = pvec[[jast, i]]
-            G[[i, jast], :i + 1] = G[[jast, i], :i + 1]  # avoid copy
+            G[[i, jast], : i + 1] = G[[jast, i], : i + 1]  # avoid copy
         else:
             jast = 0
 
         G[i, i] = np.sqrt(d[jast])
-        nextcol = a[pvec[i + 1:], pvec[i]]
-        G[i + 1:, i] = (nextcol - np.dot(G[i + 1:, :i], G[i, :i])) / G[i, i]
-        d[i + 1:] = 1 - np.sum((G[i + 1:, :i + 1]) ** 2, axis=1)
+        nextcol = a[pvec[i + 1 :], pvec[i]]
+        G[i + 1 :, i] = (nextcol - np.dot(G[i + 1 :, :i], G[i, :i])) / G[i, i]
+        d[i + 1 :] = 1 - np.sum((G[i + 1 :, : i + 1]) ** 2, axis=1)
 
         i += 1
     return G[pvec.argsort(), :i]
@@ -179,7 +183,9 @@ def subspace(a, b, deg=True):
     double
         angle
     """
-    warnings.warn("Deprecated. Use scipy.linalg.subspace_angles instead.", FutureWarning)
+    warnings.warn(
+        "Deprecated. Use scipy.linalg.subspace_angles instead.", FutureWarning
+    )
     oa = linalg.orth(a)
     ob = linalg.orth(b)
     if oa.shape[1] < ob.shape[1]:

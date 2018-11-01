@@ -46,7 +46,7 @@ def spike(x, a, b, link=trunc_exp, seed=None):
 
     for m in range(ntrial):
         for t in range(ntime):
-            eta = x[m, t, :] @ a + np.einsum('ij, ji -> i', h[:, m, t, :], b)
+            eta = x[m, t, :] @ a + np.einsum("ij, ji -> i", h[:, m, t, :], b)
             rate[m, t, :] = link(eta)
             # truncate y to 1 if y > 1
             # equivalent to Bernoulli P(1) = (1 - e^-(lam_t))
@@ -94,7 +94,9 @@ def lfp(x, a, b, K, link=identity, seed=None):
 
     for m in range(ntrial):
         for t in range(ntime):
-            mu[m, t, :] = link(x[m, t, :] @ a + np.einsum('ij, ji -> i', h[:, m, t, :], b))
+            mu[m, t, :] = link(
+                x[m, t, :] @ a + np.einsum("ij, ji -> i", h[:, m, t, :], b)
+            )
             y[m, t, :] = multivariate_normal(mu[m, t, :], K)
             if t + 1 < ntime and lag > 0:
                 h[:, m, t + 1, 2:] = h[:, m, t, 1:lag]  # roll rightward
@@ -133,7 +135,7 @@ def lorenz(n, dt=0.01, s=10, r=28, b=2.667, x0=None, normalized=False):
 
     # Setting initial values
     if x0 is None:
-        x0 = (0., 1., 1.05)
+        x0 = (0.0, 1.0, 1.05)
     xs[0, :] = x0
 
     for i in range(n - 1):

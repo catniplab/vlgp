@@ -25,8 +25,8 @@ def elbo(params, mask, *args):
         mu = mu[:, np.newaxis]
 
     alpha = cho_solve((L, True), mu)
-    ll_dims = -0.5 * np.einsum('ik,ik->k', mu, alpha)
-    tmp = np.einsum('ik,jk->ijk', alpha, alpha)
+    ll_dims = -0.5 * np.einsum("ik,ik->k", mu, alpha)
+    tmp = np.einsum("ik,jk->ijk", alpha, alpha)
     tmp -= Kinv[:, :, np.newaxis]
 
     for i in range(post_cov.shape[-1]):
@@ -37,7 +37,7 @@ def elbo(params, mask, *args):
     ll_dims -= np.log(np.diag(L)).sum()
     ll = ll_dims.sum(-1)
 
-    dll_dims = 0.5 * np.einsum('ijl,ijk->kl', tmp, dK)
+    dll_dims = 0.5 * np.einsum("ijl,ijk->kl", tmp, dK)
     dll = dll_dims.sum(-1)
 
     return ll, dll
@@ -47,13 +47,15 @@ def kernel(x, params):
     """kernel matrix and derivatives"""
     sigmasq, omega, eps = params
 
-    dists = pdist(x.reshape(-1, 1), metric='sqeuclidean')  # vector of pairwise squared distance
+    dists = pdist(
+        x.reshape(-1, 1), metric="sqeuclidean"
+    )  # vector of pairwise squared distance
     Dsq = squareform(dists)  # distance matrix
-    K = np.exp(- omega * Dsq)  # kernel matrix
+    K = np.exp(-omega * Dsq)  # kernel matrix
     dK_dsigmasq = K
     # K *= 1.0 - eps  # fix variance = 1 - eps (noise variance)
     K *= sigmasq
-    dK_dlnomega = - K * Dsq * omega
+    dK_dlnomega = -K * Dsq * omega
     K[np.diag_indices_from(K)] += eps
     dK_deps = np.eye(K.shape[0]) * eps
     dK = np.dstack([dK_dsigmasq, dK_dlnomega, dK_deps])
@@ -62,45 +64,43 @@ def kernel(x, params):
 
 def optimize(trials, params, config):
     """Optimize hyperparameters"""
-    zdim = params['zdim']
-    rank = params['rank']
-    dt = params['dt']  # binwidth, set to 1 temporarily
+    zdim = params["zdim"]
+    rank = params["rank"]
+    dt = params["dt"]  # binwidth, set to 1 temporarily
 
     # priors
-    sigma = params['sigma']
-    omega = params['omega']
-    gp_noise = params['gp_noise']
+    sigma = params["sigma"]
+    omega = params["omega"]
+    gp_noise = params["gp_noise"]
 
     # trials
-    mu = np.stack([trial['mu'] for trial in trials])
-    w = np.stack([trial['w'] for trial in trials])
-    window = config['window']
+    mu = np.stack([trial["mu"] for trial in trials])
+    w = np.stack([trial["w"] for trial in trials])
+    window = config["window"]
     t = np.arange(window) * dt  # absolute time
 
     for l in range(zdim):
         initial = (sigma[l] ** 2, omega[l], gp_noise)
-        bounds = ((1e-3, 1), config['omega_bound'], (gp_noise / 2, gp_noise * 2))
+        bounds = ((1e-3, 1), config["omega_bound"], (gp_noise / 2, gp_noise * 2))
         mask = np.array([0, 1, 0])
 
         # transpose each latent dimension to (window, #trials/segments)
-        (sigmasq, omega_new, _), fun = optimze1d(t,
-                                                 mu[:, :, l].T,
-                                                 w[:, :, l].T,
-                                                 initial,
-                                                 bounds,
-                                                 mask=mask)
-        if not np.any(np.isclose(omega_new, config['omega_bound'])):
+        (sigmasq, omega_new, _), fun = optimze1d(
+            t, mu[:, :, l].T, w[:, :, l].T, initial, bounds, mask=mask
+        )
+        if not np.any(np.isclose(omega_new, config["omega_bound"])):
             omega[l] = omega_new
         sigma[l] = np.sqrt(sigmasq)
 
-    params['sigma'] = sigma
-    params['omega'] = omega
+    params["sigma"] = sigma
+    params["omega"] = omega
     make_cholesky(trials, params, config)
 
 
 def optimze1d(t, mu, w, params, bounds, mask):
     """Optimize hyperparameters of a single dimension"""
     from scipy.optimize import minimize
+
     log_params = np.log(params)
     log_bounds = np.log(bounds)
 
@@ -149,12 +149,14 @@ def construct_posterior_cov(t, w, params):
 
 def make_cholesky(trials, params, config):
     """Make incomplate Cholesky decomposition"""
-    zdim = params['zdim']
-    rank = params['rank']
-    sigma = params['sigma']
-    omega = params['omega']
-    lengths = np.array([trial['y'].shape[0] for trial in trials])
+    zdim = params["zdim"]
+    rank = params["rank"]
+    sigma = params["sigma"]
+    omega = params["omega"]
+    lengths = np.array([trial["y"].shape[0] for trial in trials])
     unique_lengths = np.unique(lengths)
     for t in unique_lengths:
-        params['cholesky'] = dict()
-        params['cholesky'][t] = np.array([ichol_gauss(t, omega[l], rank) * sigma[l] for l in range(zdim)])
+        params["cholesky"] = dict()
+        params["cholesky"][t] = np.array(
+            [ichol_gauss(t, omega[l], rank) * sigma[l] for l in range(zdim)]
+        )
