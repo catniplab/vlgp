@@ -1,0 +1,19 @@
+[tool.poetry]
+name = "vlgp"
+version = "2018.12.25"
+description = "Variational Latent Gaussian Process"
+authors = ["yuan <yuanz271@gmail.com>"]
+license = "MIT"
+
+[tool.poetry.dependencies]
+python = "^3.5"
+fire = "^0.1.3"
+numpy = "^1.15"
+scipy = "^1.2"
+
+[tool.poetry.dev-dependencies]
+pytest = "^4.0"
+
+[build-system]
+requires = ["poetry>=0.12"]
+build-backend = "poetry.masonry.api"
