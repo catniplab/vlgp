@@ -23,6 +23,7 @@ def fit(trials, n_factors, **kwargs):
     """
     print("\nvLGP")
     config = get_config(**kwargs)
+    print("Configuration\n", config)
 
     # add built-in callbacks
     callbacks = config["callbacks"]
