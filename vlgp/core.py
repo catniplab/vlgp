@@ -503,7 +503,7 @@ class VLGP(Model):
     def __init__(self, n_factors, random_state=0, **kwargs):
         self.n_factors = n_factors
 
-    def fit(self, trials):
+    def fit(self, trials, **kwargs):
         """Fit the vLGP model to data using vEM
         :param trials: list of trials
         :return: the trials containing the latent factors
@@ -513,8 +513,9 @@ class VLGP(Model):
     def infer(self, trials):
         raise NotImplementedError()
 
-    def save(self):
-        raise NotImplementedError()
-
-    def load(self):
-        raise NotImplementedError()
+    def __eq__(self, other):
+        if not isinstance(other, VLGP):
+            return False
+        elif self.n_factors == other.n_factors:
+            return True
+        return False
