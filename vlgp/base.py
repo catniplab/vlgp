@@ -27,18 +27,3 @@ class Model(metaclass=ABCMeta):
         with open(file, "rb") as f:
             model = pickle.load(f)
         return model
-
-
-class VLGP(Model):
-    def __init__(self, n_factors, random_state=0, **kwargs):
-        self.n_factors = n_factors
-
-    def fit(self, trials, **kwargs):
-        """Fit the vLGP model to data using vEM
-        :param trials: list of trials
-        :return: the trials containing the latent factors
-        """
-        return trials
-
-    def infer(self, trials):
-        raise NotImplementedError()

@@ -1,4 +1,4 @@
-from vlgp.base import VLGP
+from vlgp.core import VLGP
 
 
 def test_save_load(tmp_path):
@@ -7,4 +7,4 @@ def test_save_load(tmp_path):
     model1.save(file)
 
     model2 = VLGP.load(file)
-    assert model1.n_factors == model2.n_factors
+    assert model1 == model2

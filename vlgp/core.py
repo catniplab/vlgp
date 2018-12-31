@@ -12,6 +12,7 @@ from numpy import identity, einsum
 from scipy.linalg import solve, norm, svd, LinAlgError
 
 from . import gp
+from .base import Model
 from .util import clip
 from .evaluation import timer
 from .math import trunc_exp
@@ -496,3 +497,25 @@ def update_v(trials, params, config):
                 )
             except LinAlgError:
                 warnings.warn("singular I + G'WG")
+
+
+class VLGP(Model):
+    def __init__(self, n_factors, random_state=0, **kwargs):
+        self.n_factors = n_factors
+
+    def fit(self, trials, **kwargs):
+        """Fit the vLGP model to data using vEM
+        :param trials: list of trials
+        :return: the trials containing the latent factors
+        """
+        return trials
+
+    def infer(self, trials):
+        raise NotImplementedError()
+
+    def __eq__(self, other):
+        if not isinstance(other, VLGP):
+            return False
+        elif self.n_factors == other.n_factors:
+            return True
+        return False
