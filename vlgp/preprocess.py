@@ -87,7 +87,7 @@ def get_config(**kwargs):
         "method": "VB",
         "learning_rate": 1.0,  # no for hessian
         "EMniter": 20,  # outer
-        "Initer": 50,  # infer
+        "Initer": 20,  # infer
         "Eniter": 20,  # E
         "Mniter": 20,  # M
         "Hstep": True,
