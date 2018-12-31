@@ -27,7 +27,7 @@ def fit(trials, n_factors, **kwargs):
 
     # add built-in callbacks
     callbacks = config["callbacks"]
-    if config.get("path", None) is not None:
+    if "path" in config:
         saver = Saver()
         callbacks.extend([show, saver.save])
     config["callbacks"] = callbacks
