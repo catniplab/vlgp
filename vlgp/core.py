@@ -4,6 +4,7 @@ introduce a new format of fit
 trial isolation
 unequal trial ready
 """
+import copy
 import logging
 import warnings
 
@@ -13,7 +14,10 @@ from scipy.linalg import solve, norm, svd, LinAlgError
 
 from . import gp
 from .base import Model
-from .util import clip
+from .callback import Saver, show
+from .preprocess import get_config, get_params, fill_trials, fill_params, initialize
+from .util import cut_trials, clip
+from .gp import make_cholesky
 from .evaluation import timer
 from .math import trunc_exp
 
@@ -502,20 +506,89 @@ def update_v(trials, params, config):
 class VLGP(Model):
     def __init__(self, n_factors, random_state=0, **kwargs):
         self.n_factors = n_factors
+        self.random_state = random_state
+        self._weight = None
+        self._bias = None
+        self.setup(**kwargs)
 
     def fit(self, trials, **kwargs):
         """Fit the vLGP model to data using vEM
         :param trials: list of trials
         :return: the trials containing the latent factors
         """
+        config = get_config(**kwargs)
+
+        # add built-in callbacks
+        callbacks = config["callbacks"]
+        if "path" in config:
+            saver = Saver()
+            callbacks.extend([show, saver.save])
+        config["callbacks"] = callbacks
+
+        params = get_params(trials, self.n_factors, **kwargs)
+
+        print("Initializing...")
+        initialize(trials, params, config)
+
+        # fill arrays
+        fill_params(params)
+
+        fill_trials(trials)
+        make_cholesky(trials, params, config)
+        update_w(trials, params, config)
+        update_v(trials, params, config)
+
+        subtrials = cut_trials(trials, params, config)
+        make_cholesky(subtrials, params, config)
+
+        fill_trials(subtrials)
+
+        params["initial"] = copy.deepcopy(params)
+        # VEM
+        print("Fitting...")
+        vem(subtrials, params, config)
+        # E step only for inference given above estimated parameters and hyperparameters
+        make_cholesky(trials, params, config)
+        update_w(trials, params, config)
+        update_v(trials, params, config)
+        print("Inferring...")
+        infer(trials, params, config)
+        print("Done")
+
+        self._weight = params["a"]
+        self._bias = params["b"]
+
         return trials
 
     def infer(self, trials):
+        if not self.isfiited:
+            raise ValueError(
+                "This model is not fitted yet. Call 'fit' with "
+                "appropriate arguments before using this method."
+            )
         raise NotImplementedError()
 
     def __eq__(self, other):
-        if not isinstance(other, VLGP):
-            return False
-        elif self.n_factors == other.n_factors:
+        if (
+            isinstance(other, VLGP)
+            and self.n_factors == other.n_factors
+            and np.array_equal(self.weight, other.weight)
+            and np.array_equal(self.bias, other.bias)
+        ):
             return True
         return False
+
+    def setup(self, **kwargs):
+        pass
+
+    @property
+    def isfitted(self):
+        return self.weight is not None
+
+    @property
+    def weight(self):
+        return self._weight
+
+    @property
+    def bias(self):
+        return self._bias
