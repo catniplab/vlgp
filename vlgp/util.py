@@ -3,6 +3,7 @@ Tool functions
 """
 import functools
 import logging
+import numbers
 import pathlib
 import warnings
 from typing import List, Optional, Callable
@@ -510,3 +511,14 @@ def cut_trial(trial, window: int):
         for s in slices
     ]
     return segments
+
+
+def check_random_state(seed):
+    """Turn seed into a np.random.RandomState instance"""
+    if seed is None or seed is np.random:
+        return np.random.get_state()
+    if isinstance(seed, (numbers.Integral, np.integer)):
+        return np.random.RandomState(seed)
+    if isinstance(seed, np.random.RandomState):
+        return seed
+    raise ValueError('%r cannot be used to seed a numpy.random.RandomState instance' % seed)
