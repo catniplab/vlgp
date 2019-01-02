@@ -1,11 +1,10 @@
 import copy
 
-from .preprocess import get_params, get_config, fill_trials, fill_params
+from .preprocess import get_params, get_config, fill_trials, fill_params, initialize
 from .callback import Saver, show
 from .core import vem, update_w, update_v, infer
 from .util import cut_trials
 from .gp import make_cholesky
-from .preprocess import initialize
 
 __all__ = ["fit"]
 
