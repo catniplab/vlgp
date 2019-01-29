@@ -82,22 +82,21 @@ def get_config(**kwargs):
         "constrain_loading": "fro",
         "constrain_latent": False,
         "use_hessian": True,
-        "eps": 1e-8,
-        "tol": 1e-5,  # loose
-        "method": "VB",
-        "learning_rate": 1.0,  # no for hessian
-        "EMniter": 20,  # outer
-        "Initer": 50,  # infer
-        "Eniter": 20,  # E
-        "Mniter": 20,  # M
-        "Hstep": True,
-        "da_bound": 5.0,
-        "db_bound": 5.0,
-        "dmu_bound": 5.0,
-        "omega_bound": (1e-5, 1e-3),
-        "window": 50,
-        "saving_interval": 60 * 30,  # sec
-        "callbacks": [],
+        "eps": 1e-8,  # small value in the denominator
+        "tol": 1e-5,  # relative tolerance to check convergence
+        "method": "VB",  # VB or MAP
+        "learning_rate": 1.0,  # not used for Hessian
+        "EMniter": 20,  # number of iterations of EM
+        "Eniter": 20,  # number of interations inside E step
+        "Mniter": 20,  # number of interations inside M step
+        "Hstep": True,  # learn hyperparameters
+        "da_bound": 5.0,  # clip the update to loading matrix
+        "db_bound": 5.0,  # clip the update to bias
+        "dmu_bound": 5.0,  # clip the update to posterior mean
+        "omega_bound": (1e-5, 1e-3),  # limits of lengthscale
+        "window": 50,  # window size that the trials are cut into
+        "saving_interval": 60 * 30,  # time interval of saving snapshots
+        "callbacks": [],  # functions are called every iteration
     }
 
     updates = {k: v for k, v in kwargs.items() if k in config}  # discard unknown args
