@@ -3,6 +3,7 @@ Tool functions
 """
 import functools
 import logging
+import numbers
 import pathlib
 import warnings
 from typing import List, Optional, Callable
@@ -29,14 +30,13 @@ def makeregressor(obs, p: int):
     Returns:
         full design matrix (T, 1 + p*N)
     """
-
     T, N = obs.shape
     regressor = ones((T, 1 + p * N), dtype=float)
     for t in range(T):
         if t - p >= 0:
-            regressor[t, 1:] = obs[t - p:t, :].flatten()  # by row
+            regressor[t, 1:] = obs[t - p : t, :].flatten()  # by row
         else:
-            regressor[t, 1 + (p - t) * N:] = obs[:t, :].flatten()
+            regressor[t, 1 + (p - t) * N :] = obs[:t, :].flatten()
     return regressor
 
 
@@ -153,7 +153,7 @@ def lagmat(x, lag: int):
         raise ValueError("lag should be < nrow")
     mat = zeros((nrow + lag, ncol * (lag + 1)))
     for k in range(0, int(lag + 1)):
-        mat[lag - k:nrow + lag - k, ncol * (lag - k):ncol * (lag - k + 1)] = x
+        mat[lag - k : nrow + lag - k, ncol * (lag - k) : ncol * (lag - k + 1)] = x
     startrow = 0
     stoprow = nrow + lag - k
 
@@ -184,15 +184,15 @@ def lagmat(x, lag: int):
 def save(result, path=None, code="npy"):
     """Save *ANYTHING*"""
     if path is None:
-        path = result['path']
+        path = result["path"]
     else:
-        result['path'] = path
+        result["path"] = path
     path = pathlib.Path(path)
 
     if code == "h5":
         path = path.with_suffix(".h5")
-        with h5py.File(path, 'w') as fout:
-                dict_to_hdf5(result, fout)
+        with h5py.File(path, "w") as fout:
+            dict_to_hdf5(result, fout)
     elif code == "npy":
         path = path.with_suffix(".npy")
         np.save(path, result)
@@ -208,7 +208,7 @@ def load(path):
         raise FileNotFoundError(path.as_posix())
 
     if path.suffix == ".h5":
-        with h5py.File(path.as_posix(), 'r') as fin:
+        with h5py.File(path.as_posix(), "r") as fin:
             rez = hdf5_to_dict(fin)
     elif path.suffix == ".npy":
         rez = np.load(path)
@@ -239,16 +239,21 @@ def orthomax(A, gamma=1.0, normalize=True, rtol=1e-8, maxit=250):
 
     converged = False
     if 0 <= gamma <= 1:
-        L, _, M = svd(A.T @ (n * B ** 3 - gamma * B @ diag(sum(B ** 2, axis=0))),
-                      full_matrices=False)  # the sum of each column
+        L, _, M = svd(
+            A.T @ (n * B ** 3 - gamma * B @ diag(sum(B ** 2, axis=0))),
+            full_matrices=False,
+        )  # the sum of each column
         T = L @ M
         if norm(T - eye(m)) < rtol:
-            T, _ = qr(randn(m, m));
+            T, _ = qr(randn(m, m))
             B = A @ T
         s = 0
         for k in range(maxit):
             s_old = s
-            L, s, M = svd(A.T @ (n * B ** 3 - gamma * B @ diag(sum(B ** 2, axis=0))), full_matrices=False)
+            L, s, M = svd(
+                A.T @ (n * B ** 3 - gamma * B @ diag(sum(B ** 2, axis=0))),
+                full_matrices=False,
+            )
             T = L @ M
             s = sum(s)
             B = A @ T
@@ -257,7 +262,7 @@ def orthomax(A, gamma=1.0, normalize=True, rtol=1e-8, maxit=250):
                 break
 
     if not converged:
-        warnings.warn('iteration limit')
+        warnings.warn("iteration limit")
 
     if normalize:
         B *= h
@@ -329,12 +334,13 @@ def varimax(x, normalize=True, tol=1e-5, niter=1000):
 
 def trial_slices(trial_lengths: List[int]):
     from numpy import cumsum, s_
+
     ntrial = len(trial_lengths)
     endpoints = [0] + trial_lengths
     endpoints = cumsum(endpoints)
     slices = []
     for i in range(ntrial):
-        slices.append(s_[endpoints[i]:endpoints[i + 1]])
+        slices.append(s_[endpoints[i] : endpoints[i + 1]])
     return slices
 
 
@@ -352,13 +358,20 @@ def auto(y, lag):
     array[y_ndim, time, lag + 1]
     """
     assert len(y) > 0
-    return np.concatenate([np.stack([add_constant(lagmat(col, lag)) for col in trial.T]) for trial in y], axis=1)
+    return np.concatenate(
+        [np.stack([add_constant(lagmat(col, lag)) for col in trial.T]) for trial in y],
+        axis=1,
+    )
 
 
 def sparse_prior(sigma, omega, trial_lengths, rank):
     # [diagonal(G1, G2, ..., Gq)]
     from scipy import sparse
-    return [sparse.block_diag([s * ichol_gauss(l, w, rank) for s, w in zip(sigma, omega)]) for l in trial_lengths]
+
+    return [
+        sparse.block_diag([s * ichol_gauss(l, w, rank) for s, w in zip(sigma, omega)])
+        for l in trial_lengths
+    ]
 
 
 def regmat(y, x: Optional[list], lag=0):
@@ -385,7 +398,7 @@ def regmat(y, x: Optional[list], lag=0):
 
 def smooth_1d(x, sigma=10):
     assert x.ndim == 1
-    y = gaussian_filter1d(x, sigma=sigma, mode='constant', cval=0.0)
+    y = gaussian_filter1d(x, sigma=sigma, mode="constant", cval=0.0)
     return y
 
 
@@ -421,7 +434,7 @@ def hdf5_to_dict(hdf):
 def log(f: Callable):
     @functools.wraps(f)
     def wrapper(*args, **kwargs):
-        logger.info('{:s} is called'.format(f.__name__))
+        logger.info("{:s} is called".format(f.__name__))
         return f(*args, **kwargs)
 
     return wrapper
@@ -457,9 +470,11 @@ def clip(a, lbound, ubound=None):
 
 def cut_trials(trials, params, config):
     """Cut all trials"""
-    window = config['window']
+    window = config["window"]
     if window and window is not None:
-        return np.concatenate([cut_trial(trial, window) for trial in trials])  # concatenate segments
+        return np.concatenate(
+            [cut_trial(trial, window) for trial in trials]
+        )  # concatenate segments
     else:
         return trials
 
@@ -468,11 +483,11 @@ def cut_trial(trial, window: int):
     """Cut a trial into small segments"""
     import math
 
-    y = trial['y']
-    x = trial['x']
-    mu = trial['mu']
-    w = trial['w']
-    v = trial['v']
+    y = trial["y"]
+    x = trial["x"]
+    mu = trial["mu"]
+    w = trial["w"]
+    v = trial["v"]
 
     length = y.shape[0]
 
@@ -481,8 +496,29 @@ def cut_trial(trial, window: int):
     num_segments = math.ceil(length / window)
     overlap = num_segments * window - length  # number of overlapping segments
     start = np.cumsum(np.full(num_segments, fill_value=window, dtype=int)) - window
-    offset = np.cumsum(np.append([0], np.random.multinomial(overlap, np.ones(num_segments - 1) / (num_segments - 1))))
+    offset = np.cumsum(
+        np.append(
+            [0],
+            np.random.multinomial(
+                overlap, np.ones(num_segments - 1) / (num_segments - 1)
+            ),
+        )
+    )
     start -= offset
-    slices = [np.s_[s:s + window] for s in start]
-    segments = [{'y': y[s, :], 'x': x[s, ...], 'mu': mu[s, :], 'w': w[s, :], 'v': v[s, :]} for s in slices]
+    slices = [np.s_[s : s + window] for s in start]
+    segments = [
+        {"y": y[s, :], "x": x[s, ...], "mu": mu[s, :], "w": w[s, :], "v": v[s, :]}
+        for s in slices
+    ]
     return segments
+
+
+def check_random_state(seed):
+    """Turn seed into a np.random.RandomState instance"""
+    if seed is None or seed is np.random:
+        return np.random.get_state()
+    if isinstance(seed, (numbers.Integral, np.integer)):
+        return np.random.RandomState(seed)
+    if isinstance(seed, np.random.RandomState):
+        return seed
+    raise ValueError('%r cannot be used to seed a numpy.random.RandomState instance' % seed)

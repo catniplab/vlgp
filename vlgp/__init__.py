@@ -8,7 +8,7 @@ logger = logging.getLogger(__name__)
 # logger.setLevel(logging.INFO)
 
 # # create a logging format
-formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 
 # # create a file file_handler
 # # file_handler = logging.FileHandler('vlgp.log')
@@ -23,5 +23,4 @@ logger.addHandler(stdout_handler)
 
 if sys.version_info[0] < 3 or sys.version_info[1] < 5:
     logger.warning(str(sys.version_info))
-    warnings.warn('Python 3.5 or later is required.')
-
+    warnings.warn("Python 3.5 or later is required.")
