@@ -295,10 +295,7 @@ def hstep(trials, params, config):
 
 
 def infer(trials, params, config):
-    Eniter = config["Eniter"]
-    config["Eniter"] = config["Initer"]
     estep(trials, params, config)
-    config["Eniter"] = Eniter
 
 
 def vem(trials, params, config):
