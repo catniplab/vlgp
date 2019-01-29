@@ -23,6 +23,8 @@ def fit(trials, n_factors, **kwargs):
     print("\nvLGP")
     config = get_config(**kwargs)
 
+    print(config)
+
     # add built-in callbacks
     callbacks = config["callbacks"]
     if config.get("path", None) is not None:
