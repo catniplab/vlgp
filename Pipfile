@@ -11,4 +11,3 @@ scikit-learn = "*"
 
 [dev-packages]
 pytest = "*"
-black = "*"

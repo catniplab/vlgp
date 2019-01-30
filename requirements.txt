@@ -1,5 +1,4 @@
 fire
-numpy>=1.10.4
-scipy>=0.17.0
-h5py
+numpy
+scipy
 scikit-learn
