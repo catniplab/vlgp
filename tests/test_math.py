@@ -8,7 +8,7 @@ def test_ichol_gauss():
     n = 500
     omega = 1
     dsq = np.arange(n) ** 2
-    k = np.exp(- omega * dsq)
+    k = np.exp(-omega * dsq)
     K = toeplitz(k)
     G = ichol_gauss(n, omega, n)
     assert np.allclose(K, G @ G.T)

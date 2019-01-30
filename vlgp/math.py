@@ -30,7 +30,7 @@ def trunc_exp(x, bound=10):
     Returns
     -------
     ndarray
-        exp(min(x, ubound))
+        exp(min(x, bound))
     """
     return np.exp(np.minimum(x, bound))
 
@@ -70,9 +70,9 @@ def log1exp(x):
     return np.log1p(np.exp(x))
 
 
-def ichol_gauss_old(n, omega, r, tol=1e-6):
+def ichol_gauss(n, omega, r, dt=1.0, tol=1e-6):
     """
-    Incomplete Cholesky factorization of squared exponential covariance matrix
+    Incomplete Cholesky factorization of squared exponential covariance matrix for limited memory
     A = GG' + E
 
     Parameters
@@ -83,52 +83,8 @@ def ichol_gauss_old(n, omega, r, tol=1e-6):
         1 / (2 * timescale^2)
     r : int
         rank
-    tol : double
-        numerical tolerance
-
-    Returns
-    -------
-    ndarray
-        (n, r) matrix
-    """
-    x = np.arange(n)
-    diag = np.ones(n, dtype=float)
-    pvec = np.arange(n, dtype=int)
-    i = 0
-    G = np.zeros((n, r), dtype=float)  # preallocation
-    while i < r and np.sum(diag[i:]) > tol * n:
-        if i > 0:
-            jast = diag[i:].argmax()
-            jast += i
-            # Be caseful! numpy indexing returns a view instead of a copy.
-            pvec[i], pvec[jast] = pvec[jast].copy(), pvec[i].copy()
-            G[jast, :i + 1], G[i, :i + 1] = G[i, :i + 1].copy(), G[jast, :i + 1].copy()
-        else:
-            jast = 0
-
-        G[i, i] = np.sqrt(diag[jast])
-        nextcol = np.exp(- omega * (x[pvec[i + 1:]] - x[pvec[i]]) ** 2)
-        G[i + 1:, i] = (nextcol - G[i + 1:, :i] @ G[i, :i].T) / G[i, i]
-        diag[i + 1:] = 1 - np.sum((G[i + 1:, :i + 1]) ** 2, axis=1)
-
-        i += 1
-
-    return G[pvec.argsort(), :]
-
-
-def ichol_gauss(n, omega, r, tol=1e-6):
-    """
-    Incomplete Cholesky factorization of squared exponential covariance matrix
-    A = GG' + E
-
-    Parameters
-    ----------
-    n : int
-        size of matrix
-    omega : double
-        1 / (2 * timescale^2)
-    r : int
-        rank
+    dt : float
+        bin size
     tol : double
         numerical tolerance
 
@@ -138,26 +94,31 @@ def ichol_gauss(n, omega, r, tol=1e-6):
         (n, r) matrix
     """
     # TODO: more effifient algorithm
-    x = np.arange(n)
-    diag = np.ones(n, dtype=float)
+    x = np.arange(n) * dt
+    d = np.ones(n, dtype=float)
     pvec = np.arange(n, dtype=int)  # pivot
     i = 0
     G = np.zeros((n, r), dtype=float)  # preallocation
-    while i < r and np.sum(diag[i:]) > tol * n:
+    while i < r and np.sum(d[i:]) > tol * n:
         if i > 0:
-            jast = diag[i:].argmax()
+            jast = d[i:].argmax()
             jast += i
             pvec[[i, jast]] = pvec[[jast, i]]
-            G[[i, jast], :i + 1] = G[[jast, i], :i + 1]  # avoid copy
+            G[[i, jast], : i + 1] = G[[jast, i], : i + 1]  # avoid copy
         else:
             jast = 0
 
-        G[i, i] = np.sqrt(diag[jast])
-        nextcol = np.exp(- omega * (x[pvec[i + 1:]] - x[pvec[i]]) ** 2)
-        G[i + 1:, i] = (nextcol - np.dot(G[i + 1:, :i], G[i, :i])) / G[i, i]
-        diag[i + 1:] = 1 - np.sum(np.square(G[i + 1:, :i + 1]), axis=1)
+        G[i, i] = np.sqrt(d[jast])
+        nextcol = np.exp(
+            -omega * (x[pvec[i + 1 :]] - x[pvec[i]]) ** 2
+        )  # compute next column
+        G[i + 1 :, i] = (nextcol - np.dot(G[i + 1 :, :i], G[i, :i])) / G[i, i]
+        d[i + 1 :] = 1 - np.sum(np.square(G[i + 1 :, : i + 1]), axis=1)
 
         i += 1
+
+    if i == r:
+        warnings.warn("The real rank may exceed the specified rank.")
 
     return G[pvec.argsort(), :]
 
@@ -180,24 +141,26 @@ def ichol(a, tol=1e-6):
     """
 
     n = a.shape[0]
-    diag = a.diagonal().copy()  # Don't forget copy. diagonal() returns a read-only vector.
+    d = np.diagonal(
+        a
+    ).copy()  # Don't forget copy. diagonal() returns a read-only vector.
     pvec = np.arange(n, dtype=int)
     i = 0
     G = np.zeros((n, n), dtype=float)
-    while i < n and np.sum(diag[i:]) > tol:
+    while i < n and np.sum(d[i:]) > tol:
         if i > 0:
-            jast = diag[i:].argmax()
+            jast = d[i:].argmax()
             jast += i
             # Be caseful! numpy indexing returns a view instead of a copy.
-            pvec[i], pvec[jast] = pvec[jast].copy(), pvec[i].copy()
-            G[jast, :i + 1], G[i, :i + 1] = G[i, :i + 1].copy(), G[jast, :i + 1].copy()
+            pvec[[i, jast]] = pvec[[jast, i]]
+            G[[i, jast], : i + 1] = G[[jast, i], : i + 1]  # avoid copy
         else:
             jast = 0
 
-        G[i, i] = np.sqrt(diag[jast])
-        nextcol = a[pvec[i + 1:], pvec[i]]
-        G[i + 1:, i] = (nextcol - G[i + 1:, :i] @ G[i, :i].T) / G[i, i]
-        diag[i + 1:] = 1 - np.sum((G[i + 1:, :i + 1]) ** 2, axis=1)
+        G[i, i] = np.sqrt(d[jast])
+        nextcol = a[pvec[i + 1 :], pvec[i]]
+        G[i + 1 :, i] = (nextcol - np.dot(G[i + 1 :, :i], G[i, :i])) / G[i, i]
+        d[i + 1 :] = 1 - np.sum((G[i + 1 :, : i + 1]) ** 2, axis=1)
 
         i += 1
     return G[pvec.argsort(), :i]
@@ -220,7 +183,9 @@ def subspace(a, b, deg=True):
     double
         angle
     """
-    warnings.warn("Deprecated. Use scipy.linalg.subspace_angles instead.", FutureWarning)
+    warnings.warn(
+        "Deprecated. Use scipy.linalg.subspace_angles instead.", FutureWarning
+    )
     oa = linalg.orth(a)
     ob = linalg.orth(b)
     if oa.shape[1] < ob.shape[1]:

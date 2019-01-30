@@ -11,13 +11,16 @@ Il Memming Park's ([memming.park@stonybrook.edu](memming.park@stonybrook.edu)) w
 It has been developed with the goal of recovering dynamics from population spike trains. 
 
 ## Changes
-May 2, 2018
-- Redesign data structure in an incremental way that keeps all trial-wise information (e.g. trial ID, stimuli and etc.)
-- Allow trials to have different lengths
-- Deprecate HDF5 format
-- Optimize running time
+
+2018
+
+- New uniform data structure
+- Support trials of unequal duration
+- Faster
+- Use NumPy data format
 
 2017
+
 - New ```fit``` function now only requires observation and the number of latent.
 - Save snapshots if *path* is passed to ```fit```.
 - You can access the iterations via *callback*.
@@ -25,33 +28,11 @@ May 2, 2018
 ## Installation
 
 ```bash
+git clone git@github.com:catniplab/vlgp.git
+cd vlgp
 pip install -e .
 ```
 
 ## Usage
 To get started, please see the [tutorial](notebook/tutorial.ipynb).
-
-The data are expected to be binned spike counts (Poisson) or/and LFP channels (Gaussian).
-The required data is a list of trials. 
-Each trial should be a dict that contains at least spike trains/LFP (key: ```"y"```) of shape (bin, neuron).
-
-```python
-import vlgp
-trials = [{'y': y}]
-result = vlgp.fit(trials, n_factors=2)  # 2D latent dyanmics
-```
-
-The function ```fit``` returns a dict that contains the latent dynamics, parameters and configuration. 
-
-The default options are recommended for the purpose of stability but not necessarily optimal.
-If any numerical error is raised, e.g. singular matrices, retry by changing the initial prior or other options.
  
-## Modules
-
-| module     | function                                                                                      |
-|:-----------|-----------------------------------------------------------------------------------------------|
-| api        | ```fit``` function                                                                            |
-| core       | algorithm                                                                                     |
-| math       | link functions, incomplelte Cholesky decompostion, angle between subspaces, orthogonalization |
-| simulation | simulation of Gaussian process, Lorenz dynamics and spike trains                              |
-| util       | lag matrix construction, rotation, load and save                                              |

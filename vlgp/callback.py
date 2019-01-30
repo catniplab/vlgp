@@ -12,10 +12,14 @@ class Saver:
 
     def save(self, trials, params, config, force=False):
         now = time.perf_counter()
-        path = config.get('path', None)
-        if path is not None and force or now - self.last_saving_time > config['saving_interval']:
-            logger.info('Saving model to {}'.format(path))
-            save({'trials': trials, 'params': params, 'config': config})
+        path = config.get("path", None)
+        if (
+            path is not None
+            and force
+            or now - self.last_saving_time > config["saving_interval"]
+        ):
+            logger.info("Saving model to {}".format(path))
+            save({"trials": trials, "params": params, "config": config})
             self.last_saving_time = time.perf_counter()
 
 
