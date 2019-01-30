@@ -2,7 +2,7 @@
 name = "vlgp"
 version = "2018.12.25"
 description = "Variational Latent Gaussian Process"
-authors = ["yuan <yuanz271@gmail.com>"]
+authors = ["yuan <yuan.zhao@stonybrook.edu>"]
 license = "MIT"
 
 [tool.poetry.dependencies]
