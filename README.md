@@ -46,12 +46,3 @@ The function ```fit``` returns a dict that contains the latent dynamics, paramet
 The default options are recommended for the purpose of stability but not necessarily optimal.
 If any numerical error is raised, e.g. singular matrices, retry by changing the initial prior or other options.
  
-## Modules
-
-| module     | function                                                                                      |
-|:-----------|-----------------------------------------------------------------------------------------------|
-| api        | ```fit``` function                                                                            |
-| core       | algorithm                                                                                     |
-| math       | link functions, incomplelte Cholesky decompostion, angle between subspaces, orthogonalization |
-| simulation | simulation of Gaussian process, Lorenz dynamics and spike trains                              |
-| util       | lag matrix construction, rotation, load and save                                              |
