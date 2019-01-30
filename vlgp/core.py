@@ -361,6 +361,12 @@ def vem(trials, params, config):
 
         config["runtime"] = runtime
 
+        logger.info(
+            "Iter {}, E step {:.2f}s, M step {:.2f}s.".format(
+                runtime["it"], runtime["e_elapsed"][-1], runtime["m_elapsed"][-1]
+            )
+        )
+
         for callback in callbacks:
             try:
                 callback(trials, params, config)

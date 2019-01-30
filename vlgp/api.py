@@ -1,4 +1,5 @@
 import copy
+import logging
 
 from .preprocess import get_params, get_config, fill_trials, fill_params, initialize
 from .callback import Saver, show
@@ -7,6 +8,8 @@ from .util import cut_trials
 from .gp import make_cholesky
 
 __all__ = ["fit"]
+
+logger = logging.getLogger(__name__)
 
 
 def fit(trials, n_factors, **kwargs):
@@ -20,11 +23,8 @@ def fit(trials, n_factors, **kwargs):
     :param kwargs: options
     :return:
     """
-    print("\nvLGP")
     config = get_config(**kwargs)
-    print("Configuration\n", config)
-
-    print(config)
+    logger.info("Started\n" + "\n".join(["{} : {}".format(k, v) for k, v in config.items()]))
 
     # add built-in callbacks
     callbacks = config["callbacks"]
@@ -37,8 +37,8 @@ def fit(trials, n_factors, **kwargs):
     params = get_params(trials, n_factors, **kwargs)
 
     # initialization
-    print("Initializing...")
     initialize(trials, params, config)
+    logger.info("Initialized")
 
     # fill arrays
     fill_params(params)
@@ -54,16 +54,17 @@ def fit(trials, n_factors, **kwargs):
     fill_trials(subtrials)
 
     params["initial"] = copy.deepcopy(params)
+
     # VEM
-    print("Fitting...")
     vem(subtrials, params, config)
+
     # E step only for inference given above estimated parameters and hyperparameters
     make_cholesky(trials, params, config)
     update_w(trials, params, config)
     update_v(trials, params, config)
-    print("Inferring...")
     infer(trials, params, config)
-    print("Done")
+    logger.info("Done")
 
     model = {"trials": trials, "params": params, "config": config}
+
     return model
