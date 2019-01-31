@@ -283,7 +283,7 @@ def vem(trials, params, config):
     callbacks = config["callbacks"]
 
     tol = config["tol"]
-    niter = config["EMniter"]
+    niter = config["max_iter"]
 
     # profile and debug purpose
     # invalid every new run
@@ -360,9 +360,7 @@ def vem(trials, params, config):
                     norm(da) < tol * norm_a and \
                     norm(db) < tol * norm_b
 
-        should_stop = converged
-
-        # should_stop = False
+        should_stop = converged and it + 1 >= config["min_iter"]
 
         if should_stop:
             break

@@ -84,9 +84,10 @@ def get_config(**kwargs):
         "use_hessian": True,
         "eps": 1e-8,  # small value in the denominator
         "tol": 1e-8,  # relative tolerance to check convergence
+        "min_iter": 5,  # always run at least so many iterations
         "method": "VB",  # VB or MAP
         "learning_rate": 1.0,  # not used for Hessian
-        "EMniter": 20,  # number of iterations of EM
+        "max_iter": 20,  # number of iterations of EM
         "Eniter": 25,  # number of interations inside E step
         "Mniter": 25,  # number of interations inside M step
         "Hstep": True,  # learn hyperparameters
