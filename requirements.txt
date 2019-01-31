@@ -1,4 +1,3 @@
-fire
 numpy
 scipy
 scikit-learn

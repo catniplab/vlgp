@@ -4,7 +4,6 @@ verify_ssl = true
 name = "pypi"
 
 [packages]
-fire = "*"
 numpy = ">=1.10.4"
 scipy = ">=0.17.0"
 scikit-learn = "*"
