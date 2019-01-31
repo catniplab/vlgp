@@ -6,7 +6,8 @@ unequal trial ready
 """
 import copy
 import logging
-import warnings
+
+import click
 
 import numpy as np
 from numpy import identity, einsum
@@ -45,10 +46,6 @@ def estep(trials, params, config):
 
     poiss_mask = likelihood == "poisson"
     gauss_mask = likelihood == "gaussian"
-    ###
-    # print(poiss_mask)
-    # print(gauss_mask)
-    ##
 
     # parameters
     a = params["a"]
@@ -80,47 +77,23 @@ def estep(trials, params, config):
             y_poiss = y[:, poiss_mask]
             y_gauss = y[:, gauss_mask]
 
-            ###
-            # print(y_poiss.shape)
-            # print(y_gauss.shape)
-            ###
-
             xb = einsum("ijk, jk -> ik", x, b)
             eta = mu @ a + xb
             r = trunc_exp(eta + 0.5 * v @ (a ** 2))
-
-            ###
-            # print(xb.shape)
-            ###
 
             # mean of y
             mean_gauss = eta[:, gauss_mask]
             mean_poiss = r[:, poiss_mask]
 
-            ###
-            # print(y_poiss.shape, mean_poiss.shape)
-            # print(y_gauss.shape, mean_gauss.shape, gauss_noise.shape)
-            ###
-
             for l in range(zdim):
                 G = prior[l]
-                ###
-                # print(G.shape)
-                ###
 
                 # working residuals
                 # extensible to many other distributions
                 # see GLM's working residuals
-
                 residual[:, poiss_mask] = y_poiss - mean_poiss
                 residual[:, gauss_mask] = (y_gauss - mean_gauss) / gauss_noise
-                ###
-                # print(w.shape)
-                ###
                 wadj = w[:, [l]]  # keep dimension
-                ###
-                # print(G.shape, wadj.shape)
-                ###
                 GtWG = G.T @ (wadj * G)
 
                 u = G @ (G.T @ (residual @ a[l, :])) - mu[:, l]
@@ -328,8 +301,13 @@ def vem(trials, params, config):
 
     # disable gabbage collection during the iterative procedure
     for it in range(niter):
-        # print("EM iteration", it + 1)
         runtime["it"] += 1
+        mu = np.concatenate([trial["mu"] for trial in trials], axis=0)
+        a = params["a"]
+        b = params["b"]
+        norm_mu = norm(mu)
+        norm_a = norm(a)
+        norm_b = norm(b)
 
         with timer() as em_elapsed:
             ##########
@@ -352,8 +330,6 @@ def vem(trials, params, config):
             with timer() as hstep_elapsed:
                 hstep(trials, params, config)
 
-        # print("Iter {:d}, ELBO: {:.3f}".format(it, lbound))
-
         runtime["e_elapsed"].append(estep_elapsed())
         runtime["m_elapsed"].append(mstep_elapsed())
         runtime["h_elapsed"].append(hstep_elapsed())
@@ -361,8 +337,8 @@ def vem(trials, params, config):
 
         config["runtime"] = runtime
 
-        logger.info(
-            "Iter {}, E step {:.2f}s, M step {:.2f}s.".format(
+        click.echo(
+            "Iteration {:4d}, E-step {:.2f}s, M-step {:.2f}s".format(
                 runtime["it"], runtime["e_elapsed"][-1], runtime["m_elapsed"][-1]
             )
         )
@@ -371,25 +347,22 @@ def vem(trials, params, config):
             try:
                 callback(trials, params, config)
             except:
-                pass
+                logger.error("Callback {} failed".format(callback))
 
         #####################
         # convergence check #
         #####################
-        mu = np.concatenate([trial["mu"] for trial in trials], axis=0)
-        a = params["a"]
-        b = params["b"]
         dmu = np.concatenate([trial["dmu"] for trial in trials], axis=0)
         da = params["da"]
         db = params["db"]
 
-        # converged = norm(dmu) < tol * norm(mu) and \
-        #             norm(da) < tol * norm(a) and \
-        #             norm(db) < tol * norm(b)
-        #
-        # should_stop = converged
+        converged = norm(dmu) < tol * norm_mu and \
+                    norm(da) < tol * norm_a and \
+                    norm(db) < tol * norm_b
 
-        should_stop = False
+        should_stop = converged
+
+        # should_stop = False
 
         if should_stop:
             break
@@ -503,7 +476,8 @@ def update_v(trials, params, config):
                     axis=1,
                 )
             except LinAlgError:
-                warnings.warn("singular I + G'WG")
+                logger.error("Singular I + G'WG")
+                # warnings.warn("Singular I + G'WG")
 
 
 class VLGP(Model):
@@ -530,7 +504,7 @@ class VLGP(Model):
 
         params = get_params(trials, self.n_factors, **kwargs)
 
-        print("Initializing...")
+        click.echo("Initializing...")
         initialize(trials, params, config)
 
         # fill arrays
@@ -548,15 +522,15 @@ class VLGP(Model):
 
         params["initial"] = copy.deepcopy(params)
         # VEM
-        print("Fitting...")
+        click.echo("Fitting...")
         vem(subtrials, params, config)
         # E step only for inference given above estimated parameters and hyperparameters
         make_cholesky(trials, params, config)
         update_w(trials, params, config)
         update_v(trials, params, config)
-        print("Inferring...")
+        click.echo("Inferring...")
         infer(trials, params, config)
-        print("Done")
+        click.echo("Done")
 
         self._weight = params["a"]
         self._bias = params["b"]
