@@ -1,6 +1,8 @@
 import copy
 import logging
 
+import click
+
 from .preprocess import get_params, get_config, fill_trials, fill_params, initialize
 from .callback import Saver, show
 from .core import vem, update_w, update_v, infer
@@ -24,7 +26,7 @@ def fit(trials, n_factors, **kwargs):
     :return:
     """
     config = get_config(**kwargs)
-    logger.info("Started\n" + "\n".join(["{} : {}".format(k, v) for k, v in config.items()]))
+    logger.info("\n".join(["{} : {}".format(k, v) for k, v in config.items()]))
 
     # add built-in callbacks
     callbacks = config["callbacks"]
@@ -37,8 +39,9 @@ def fit(trials, n_factors, **kwargs):
     params = get_params(trials, n_factors, **kwargs)
 
     # initialization
+    click.echo("Initializing")
     initialize(trials, params, config)
-    logger.info("Initialized")
+    click.secho("Initialized", fg="green")
 
     # fill arrays
     fill_params(params)
@@ -56,6 +59,7 @@ def fit(trials, n_factors, **kwargs):
     params["initial"] = copy.deepcopy(params)
 
     # VEM
+    click.echo("Fitting")
     vem(subtrials, params, config)
 
     # E step only for inference given above estimated parameters and hyperparameters
@@ -63,8 +67,9 @@ def fit(trials, n_factors, **kwargs):
     update_w(trials, params, config)
     update_v(trials, params, config)
     infer(trials, params, config)
-    logger.info("Done")
 
-    model = {"trials": trials, "params": params, "config": config}
+    click.secho("Done", fg="green")
 
-    return model
+    result = {"trials": trials, "params": params, "config": config}
+
+    return result
