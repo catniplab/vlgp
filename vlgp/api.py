@@ -36,6 +36,7 @@ def fit(trials, n_factors, **kwargs):
     config["callbacks"] = callbacks
 
     # prepare parameters
+    kwargs["omega_bound"] = config["omega_bound"]
     params = get_params(trials, n_factors, **kwargs)
 
     # initialization

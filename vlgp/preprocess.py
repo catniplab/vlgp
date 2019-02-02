@@ -67,7 +67,7 @@ def get_params(trials, zdim, **kwargs):
         "b": kwargs.get("b", None),
         "noise": kwargs.get("noise", None),
         "sigma": kwargs.get("sigma", np.full(zdim, fill_value=1.0)),
-        "omega": kwargs.get("omega", np.full(zdim, fill_value=1e-4)),
+        "omega": kwargs.get("omega", np.full(zdim, fill_value=kwargs["omega_bound"][1])),
         "rank": 50,  # TODO: consider merge with window in config
         "gp_noise": 1e-4,
         "dt": 1,
@@ -94,7 +94,7 @@ def get_config(**kwargs):
         "da_bound": 5.0,  # clip the update to loading matrix
         "db_bound": 5.0,  # clip the update to bias
         "dmu_bound": 5.0,  # clip the update to posterior mean
-        "omega_bound": (1e-5, 1e-3),  # limits of lengthscale
+        "omega_bound": (5e-4, 5e-2),  # limits of lengthscale
         "window": 50,  # window size that the trials are cut into
         "saving_interval": 60 * 30,  # time interval of saving snapshots
         "callbacks": [],  # functions are called every iteration
