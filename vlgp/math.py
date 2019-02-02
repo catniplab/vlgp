@@ -118,7 +118,7 @@ def ichol_gauss(n, omega, r, dt=1.0, tol=1e-6):
         i += 1
 
     if i == r:
-        warnings.warn("The real rank may exceed the specified rank.")
+        warnings.warn("You might need to increase the rank of the decomposition.")
 
     return G[pvec.argsort(), :]
 

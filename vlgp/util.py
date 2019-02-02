@@ -181,22 +181,18 @@ def lagmat(x, lag: int):
 #     return obj
 
 
-def save(result, path=None, code="npy"):
+def save(result, path, ext="npy"):
     """Save *ANYTHING*"""
-    if path is None:
-        path = result["path"]
-    else:
-        result["path"] = path
     path = pathlib.Path(path)
 
-    if code == "h5":
+    if ext == "h5":
         path = path.with_suffix(".h5")
         with h5py.File(path, "w") as fout:
             dict_to_hdf5(result, fout)
-    elif code == "npy":
+    elif ext == "npy":
         path = path.with_suffix(".npy")
         np.save(path, result)
-    elif code == "npz":
+    elif ext == "npz":
         path = path.with_suffix(".npz")
         np.savez(path, **result)
 

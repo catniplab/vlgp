@@ -10,7 +10,11 @@ setup(
     author_email="yuan.zhao@stonybrook.edu",
     description="variational Latent Gaussian Process",
     python_requires=">=3.5.0",
-    install_requires=["numpy", "scipy", "scikit-learn"],
+    install_requires=["numpy", "scipy", "scikit-learn", "click"],
+    entry_points="""
+    [console_scripts]
+    vlgp=vlgp.__main__:cli
+    """,
     classifiers=[
         # Trove classifiers
         # Full list: https://pypi.python.org/pypi?%3Aaction=list_classifiers
