@@ -70,7 +70,7 @@ def log1exp(x):
     return np.log1p(np.exp(x))
 
 
-def ichol_gauss(n, omega, r, dt=1.0, tol=1e-6):
+def ichol_gauss(n, omega, r, dt=1.0, tol=1e-6, check_rank=False):
     """
     Incomplete Cholesky factorization of squared exponential covariance matrix for limited memory
     A = GG' + E
@@ -117,7 +117,7 @@ def ichol_gauss(n, omega, r, dt=1.0, tol=1e-6):
 
         i += 1
 
-    if i == r:
+    if i == r and check_rank:
         warnings.warn("You might need to increase the rank of the decomposition.")
 
     return G[pvec.argsort(), :]
