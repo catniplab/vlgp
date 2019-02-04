@@ -67,6 +67,7 @@ def fit(trials, n_factors, **kwargs):
     make_cholesky(trials, params, config)
     update_w(trials, params, config)
     update_v(trials, params, config)
+    click.echo("Inferring")
     infer(trials, params, config)
 
     click.secho("Done", fg="green")
