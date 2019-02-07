@@ -16,7 +16,7 @@ def initialize(trials, params, config):
     fa = FactorAnalysis(n_components=zdim, random_state=0)
     z = fa.fit_transform(y[subsample, :])
     a = fa.components_
-    b = np.log(np.mean(y, axis=0, keepdims=True))
+    b = np.log(np.maximum(np.mean(y, axis=0, keepdims=True), config["eps"]))
     noise = np.var(y[subsample, :] - z @ a, ddof=0, axis=0)
 
     # stupid way of update
