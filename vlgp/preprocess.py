@@ -11,7 +11,7 @@ def initialize(trials, params, config):
 
     # TODO: use only a subsample of trials?
     y = np.concatenate([trial["y"] for trial in trials], axis=0)
-    subsample = np.random.choice(y.shape[0], y.shape[0] // 10)
+    subsample = np.random.choice(y.shape[0], max(y.shape[0] // 10, 50))
     ydim = y.shape[-1]
     fa = FactorAnalysis(n_components=zdim, random_state=0)
     z = fa.fit_transform(y[subsample, :])
