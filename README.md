@@ -10,7 +10,7 @@ This repo contains the implementation of [variational Latent Gaussian Process (v
 ([video](https://youtu.be/CrY5AfNH1ik)) by 
 Yuan Zhao ([yuan.zhao@stonybrook.edu](yuan.zhao@stonybrook.edu])) and 
 Il Memming Park ([memming.park@stonybrook.edu](memming.park@stonybrook.edu)).
-It has been developed with the goal of recovering dynamics from population spike trains. 
+It has been developed with the goal of recovering low-dimensional dynamics from neural population recordings. 
 
 ## Changes
 
