@@ -36,7 +36,7 @@ pip install vlgp
 
 #### from source
 ```bash
-git clone git@github.com:catniplab/vlgp.git
+git clone https://github.com/catniplab/vlgp.git
 cd vlgp
 pip install -e .
 ```
