@@ -5,7 +5,9 @@
 
 ## Introduction
 
-It contains the method of variational Latent Gaussian Process (vLGP) based on 
+This repo contains the implementation of [variational Latent Gaussian Process (vLGP)](https://doi.org/10.1162/NECO_a_00953) 
+([arXiv](https://arxiv.org/abs/1604.03053)) 
+([video](https://youtu.be/CrY5AfNH1ik)) by 
 Yuan Zhao ([yuan.zhao@stonybrook.edu](yuan.zhao@stonybrook.edu])) and 
 Il Memming Park's ([memming.park@stonybrook.edu](memming.park@stonybrook.edu)) work.
 It has been developed with the goal of recovering dynamics from population spike trains. 
@@ -27,6 +29,12 @@ It has been developed with the goal of recovering dynamics from population spike
 
 ## Installation
 
+#### pip
+```bash
+pip install vlgp
+```
+
+#### from source
 ```bash
 git clone git@github.com:catniplab/vlgp.git
 cd vlgp
@@ -35,4 +43,19 @@ pip install -e .
 
 ## Usage
 To get started, please see the [tutorial](notebook/tutorial.ipynb).
- 
+
+## Citation
+```
+@Article{Zhao2017,
+  author    = {Yuan Zhao and Il Memming Park},
+  title     = {Variational Latent Gaussian Process for Recovering Single-Trial Dynamics from Population Spike Trains},
+  journal   = {Neural Computation},
+  year      = {2017},
+  volume    = {29},
+  number    = {5},
+  pages     = {1293--1316},
+  month     = {may},
+  doi       = {10.1162/neco_a_00953},
+  publisher = {{MIT} Press - Journals},
+}
+```
