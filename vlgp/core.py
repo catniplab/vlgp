@@ -201,7 +201,8 @@ def mstep(trials, params, config):
                     nhess_a[np.diag_indices_from(nhess_a)] += r[:, n] @ v
 
                     try:
-                        delta_a = solve(nhess_a, grad_a, sym_pos=True)
+                        jitter = np.diag(np.full_like(grad_a, fill_value=config["eps"]))
+                        delta_a = solve(nhess_a + jitter, grad_a, sym_pos=True)
                     except Exception as e:
                         logger.exception(repr(e), exc_info=True)
                         delta_a = learning_rate * grad_a
@@ -218,7 +219,8 @@ def mstep(trials, params, config):
                 if use_hessian:
                     nhess_b = x[..., n].T @ (r[:, np.newaxis, n] * x[..., n])
                     try:
-                        delta_b = solve(nhess_b, grad_b, sym_pos=True)
+                        jitter = np.diag(np.full_like(grad_b, fill_value=config["eps"]))
+                        delta_b = solve(nhess_b + jitter, grad_b, sym_pos=True)
                     except Exception as e:
                         logger.exception(repr(e), exc_info=True)
                         delta_b = learning_rate * grad_b
@@ -268,6 +270,7 @@ def hstep(trials, params, config):
 
 
 def infer(trials, params, config):
+    config["Eniter"] = config["max_iter"]
     estep(trials, params, config)
 
 
@@ -346,7 +349,7 @@ def vem(trials, params, config):
         for callback in callbacks:
             try:
                 callback(trials, params, config)
-            except:
+            except RuntimeError:
                 logger.error("Callback {} failed".format(callback))
 
         #####################
@@ -356,9 +359,7 @@ def vem(trials, params, config):
         da = params["da"]
         db = params["db"]
 
-        converged = norm(dmu) < tol * norm_mu and \
-                    norm(da) < tol * norm_a and \
-                    norm(db) < tol * norm_b
+        converged = norm(dmu) < tol * norm_mu and norm(da) < tol * norm_a and norm(db) < tol * norm_b
 
         should_stop = converged and it + 1 >= config["min_iter"]
 
