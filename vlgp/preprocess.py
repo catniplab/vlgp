@@ -82,7 +82,7 @@ def get_config(**kwargs):
         "constrain_loading": "fro",
         "constrain_latent": False,
         "use_hessian": True,
-        "eps": 1e-8,  # small value in the denominator
+        "eps": 1e-8,  # small constant preventing numerical instability
         "tol": 1e-8,  # relative tolerance to check convergence
         "min_iter": 5,  # always run at least so many iterations
         "method": "VB",  # VB or MAP
