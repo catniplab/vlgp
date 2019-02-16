@@ -6,6 +6,9 @@ unequal trial ready
 """
 import copy
 import logging
+import concurrent.futures
+import os
+from itertools import repeat
 
 import click
 
@@ -25,16 +28,11 @@ from .math import trunc_exp
 logger = logging.getLogger(__name__)
 
 
-def estep(trials, params, config):
-    """Update variational distribution q (E step)"""
-    niter = config["Eniter"]  # maximum number of iterations
-    if niter < 1:
+def infer_single_trial(trial, params, config):
+    max_iter = config["Eniter"]
+    if max_iter < 1:
         return
 
-    # See the explanation in mstep.
-    # constrain_loading(trials, params, config)
-
-    # dimenionalities
     zdim = params["zdim"]
     rank = params["rank"]  # rank of prior covariance
     likelihood = params["likelihood"]
@@ -57,85 +55,88 @@ def estep(trials, params, config):
     # boolean indexing creates copies
     # pull indexing out of the loop for performance
 
-    for i in range(niter):
-        # TODO: parallel trials ?
-        for trial in trials:
-            y = trial["y"]
-            x = trial["x"]
-            mu = trial["mu"]
-            w = trial["w"]
-            v = trial["v"]
-            dmu = trial["dmu"]
+    y = trial["y"]
+    x = trial["x"]
+    mu = trial["mu"]
+    w = trial["w"]
+    v = trial["v"]
+    dmu = trial["dmu"]
 
-            prior = params["cholesky"][
-                y.shape[0]
-            ]  # TODO: adapt unequal lengths, move into trials
+    prior = params["cholesky"][
+        y.shape[0]
+    ]  # TODO: adapt unequal lengths, move into trials
 
-            residual = np.empty_like(y, dtype=float)
-            U = np.empty_like(y, dtype=float)
+    residual = np.empty_like(y, dtype=float)
+    U = np.empty_like(y, dtype=float)
 
-            y_poiss = y[:, poiss_mask]
-            y_gauss = y[:, gauss_mask]
+    y_poiss = y[:, poiss_mask]
+    y_gauss = y[:, gauss_mask]
 
-            xb = einsum("ijk, jk -> ik", x, b)
-            eta = mu @ a + xb
-            r = trunc_exp(eta + 0.5 * v @ (a ** 2))
+    xb = einsum("ijk, jk -> ik", x, b)
 
-            # mean of y
-            mean_gauss = eta[:, gauss_mask]
-            mean_poiss = r[:, poiss_mask]
+    for i in range(max_iter):
+        eta = mu @ a + xb
+        r = trunc_exp(eta + 0.5 * v @ (a ** 2))
 
+        # mean of y
+        mean_gauss = eta[:, gauss_mask]
+        mean_poiss = r[:, poiss_mask]
+
+        for l in range(zdim):
+            G = prior[l]
+
+            # working residuals
+            # extensible to many other distributions
+            # see GLM's working residuals
+            residual[:, poiss_mask] = y_poiss - mean_poiss
+            residual[:, gauss_mask] = (y_gauss - mean_gauss) / gauss_noise
+            wadj = w[:, [l]]  # keep dimension
+            GtWG = G.T @ (wadj * G)
+
+            u = G @ (G.T @ (residual @ a[l, :])) - mu[:, l]
+            try:
+                M = solve(Ir + GtWG, (wadj * G).T @ u, sym_pos=True)
+                delta_mu = u - G @ ((wadj * G).T @ u) + G @ (GtWG @ M)
+                clip(delta_mu, dmu_bound)
+            except Exception as e:
+                logger.exception(repr(e), exc_info=True)
+                delta_mu = 0
+
+            dmu[:, l] = delta_mu
+            mu[:, l] += delta_mu
+
+        # TODO: remove duplicated computation
+        eta = mu @ a + xb
+        r = trunc_exp(eta + 0.5 * v @ (a ** 2))
+        U[:, poiss_mask] = r[:, poiss_mask]
+        U[:, gauss_mask] = 1 / gauss_noise
+        w = U @ (a.T ** 2)
+        if method == "VB":
             for l in range(zdim):
                 G = prior[l]
-
-                # working residuals
-                # extensible to many other distributions
-                # see GLM's working residuals
-                residual[:, poiss_mask] = y_poiss - mean_poiss
-                residual[:, gauss_mask] = (y_gauss - mean_gauss) / gauss_noise
-                wadj = w[:, [l]]  # keep dimension
-                GtWG = G.T @ (wadj * G)
-
-                u = G @ (G.T @ (residual @ a[l, :])) - mu[:, l]
+                GtWG = G.T @ (w[:, l, np.newaxis] * G)
                 try:
-                    M = solve(Ir + GtWG, (wadj * G).T @ u, sym_pos=True)
-                    delta_mu = u - G @ ((wadj * G).T @ u) + G @ (GtWG @ M)
-                    clip(delta_mu, dmu_bound)
+                    M = solve(Ir + GtWG, GtWG, sym_pos=True)
+                    v[:, l] = np.sum(G * (G - G @ GtWG + G @ (GtWG @ M)), axis=1)
                 except Exception as e:
                     logger.exception(repr(e), exc_info=True)
-                    delta_mu = 0
 
-                dmu[:, l] = delta_mu
-                mu[:, l] += delta_mu
+        # make sure save all changes
+        # TODO: make inline modification
+    trial["mu"] = mu
+    trial["w"] = w
+    trial["v"] = v
+    trial["dmu"] = dmu
 
-            # TODO: remove duplicated computation
-            eta = mu @ a + xb
-            r = trunc_exp(eta + 0.5 * v @ (a ** 2))
-            U[:, poiss_mask] = r[:, poiss_mask]
-            U[:, gauss_mask] = 1 / gauss_noise
-            w = U @ (a.T ** 2)
-            if method == "VB":
-                for l in range(zdim):
-                    G = prior[l]
-                    GtWG = G.T @ (w[:, l, np.newaxis] * G)
-                    try:
-                        M = solve(Ir + GtWG, GtWG, sym_pos=True)
-                        v[:, l] = np.sum(G * (G - G @ GtWG + G @ (GtWG @ M)), axis=1)
-                    except Exception as e:
-                        logger.exception(repr(e), exc_info=True)
 
-            # make sure save all changes
-            # TODO: make inline modification
-            trial["mu"] = mu
-            trial["w"] = w
-            trial["v"] = v
-            trial["dmu"] = dmu
-
-        # center over all trials if not only infer posterior
-        # constrain_mu(model)
-
-        # if norm(dmu) < tol * norm(mu):
-        #     break
+def estep(trials, params, config):
+    """Update variational distribution q (E step)"""
+    if config["parallel"]:
+        with concurrent.futures.ProcessPoolExecutor() as executor:
+            list(executor.map(infer_single_trial, trials, repeat(params), repeat(config)))
+    else:
+        for trial in trials:
+            infer_single_trial(trial, params, config)
 
 
 def mstep(trials, params, config):
