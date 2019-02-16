@@ -98,6 +98,7 @@ def get_config(**kwargs):
         "window": 50,  # window size that the trials are cut into
         "saving_interval": 60 * 30,  # time interval of saving snapshots
         "callbacks": [],  # functions are called every iteration
+        "parallel": False,
     }
 
     updates = {k: v for k, v in kwargs.items() if k in config}  # discard unknown args
@@ -108,7 +109,8 @@ def get_config(**kwargs):
 
 
 def fill_trials(trials):
-    for trial in trials:
+    for i, trial in enumerate(trials):
+        trial["cut"] = i
         trial.setdefault("w", np.zeros_like(trial["mu"]))
         trial.setdefault("v", np.zeros_like(trial["mu"]))
         trial.setdefault("dmu", np.zeros_like(trial["mu"]))
