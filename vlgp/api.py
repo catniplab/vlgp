@@ -52,16 +52,15 @@ def fit(trials, n_factors, **kwargs):
     update_w(trials, params, config)
     update_v(trials, params, config)
 
-    subtrials = cut_trials(trials, params, config)
-    make_cholesky(subtrials, params, config)
-
-    fill_trials(subtrials)
+    splits = cut_trials(trials, params, config)
+    make_cholesky(splits, params, config)
+    fill_trials(splits)
 
     params["initial"] = copy.deepcopy(params)
 
     # VEM
     click.echo("Fitting")
-    vem(subtrials, params, config)
+    vem(splits, params, config)
 
     # E step only for inference given above estimated parameters and hyperparameters
     make_cholesky(trials, params, config)
