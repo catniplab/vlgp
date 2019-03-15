@@ -520,3 +520,29 @@ def check_random_state(seed):
     raise ValueError(
         "%r cannot be used to seed a numpy.random.RandomState instance" % seed
     )
+
+
+def count(t, binwidth, start=None, stop=None):
+    """Bin spike times
+    :param t: array of spike times
+    :param binwidth: bin size
+    :param start: start time
+    :param stop: end time
+    :return: binned spike times
+    """
+    import math
+    if start is None:
+        start = np.min(t)
+
+    if stop is None:
+        stop = np.max(t)
+
+    duration = stop - start
+    try:
+        nbin = math.ceil(duration / binwidth)
+    except ValueError:
+        return np.array([np.nan])
+
+    bins = start + np.arange(nbin + 1) * binwidth  # add the last bin edge
+
+    return np.histogram(t, bins=bins)[0]
