@@ -1,7 +1,9 @@
 # variational Latent Gaussian Process
 
-[![python 3.5](https://img.shields.io/badge/python-3.5-blue.svg?style=flat-square)]()
 [![license](https://img.shields.io/github/license/mashape/apistatus.svg?style=flat-square)]()
+[![python 3.5](https://img.shields.io/badge/python-3.5-blue.svg?style=flat-square)]()
+[![python 3.6](https://img.shields.io/badge/python-3.6-blue.svg?style=flat-square)]()
+[![pip](https://img.shields.io/badge/install-pip-blue.svg?style=flat-square)]()
 
 ## Introduction
 
