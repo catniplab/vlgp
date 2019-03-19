@@ -2,7 +2,7 @@ from distutils.core import setup
 
 setup(
     name="vlgp",
-    version="2019.1.30",
+    version="2019.3.19",
     packages=["vlgp"],
     url="https://github.com/catniplab/vlgp",
     license="MIT",

@@ -4,14 +4,12 @@ introduce a new format of fit
 trial isolation
 unequal trial ready
 """
+import concurrent.futures
 import copy
 import logging
-import concurrent.futures
-import os
 from itertools import repeat
 
 import click
-
 import numpy as np
 from numpy import identity, einsum
 from scipy.linalg import solve, norm, svd, LinAlgError
@@ -19,11 +17,11 @@ from scipy.linalg import solve, norm, svd, LinAlgError
 from . import gp
 from .base import Model
 from .callback import Saver, show
+from .evaluation import timer
+from .gp import make_cholesky
+from .math import trunc_exp
 from .preprocess import get_config, get_params, fill_trials, fill_params, initialize
 from .util import cut_trials, clip
-from .gp import make_cholesky
-from .evaluation import timer
-from .math import trunc_exp
 
 logger = logging.getLogger(__name__)
 
