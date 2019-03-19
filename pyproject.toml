@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "vlgp"
-version = "2019.1.30"
+version = "2019.3.19"
 description = "Variational Latent Gaussian Process"
 authors = ["yuan <yuan.zhao@stonybrook.edu>"]
 license = "MIT"
