@@ -8,7 +8,6 @@ import pathlib
 import warnings
 from typing import List, Optional, Callable
 
-import h5py
 import numpy as np
 from numpy import exp, column_stack, roll
 from numpy import zeros, ones, diag, arange, eye, asarray
@@ -185,11 +184,7 @@ def save(result, path, ext="npy"):
     """Save *ANYTHING*"""
     path = pathlib.Path(path)
 
-    if ext == "h5":
-        path = path.with_suffix(".h5")
-        with h5py.File(path, "w") as fout:
-            dict_to_hdf5(result, fout)
-    elif ext == "npy":
+    if ext == "npy":
         path = path.with_suffix(".npy")
         np.save(path, result)
     elif ext == "npz":
@@ -203,10 +198,7 @@ def load(path):
     if not path.exists():
         raise FileNotFoundError(path.as_posix())
 
-    if path.suffix == ".h5":
-        with h5py.File(path.as_posix(), "r") as fin:
-            rez = hdf5_to_dict(fin)
-    elif path.suffix == ".npy":
+    if path.suffix == ".npy":
         rez = np.load(path)
         rez = rez[()]
     elif path.suffix == ".npz":
@@ -402,29 +394,29 @@ def smooth(x, sigma=10):
     return np.stack([smooth_1d(row, sigma) for row in x.T]).T
 
 
-def dict_to_hdf5(d: dict, hdf):
-    for key, value in d.items():
-        if isinstance(value, dict):
-            group = hdf.create_group(key)
-            dict_to_hdf5(value, group)
-        else:
-            try:
-                if isinstance(value, np.ndarray):
-                    hdf.create_dataset(key, data=value, compression="gzip")
-                else:
-                    hdf.create_dataset(key, data=value)
-            finally:
-                pass
+# def dict_to_hdf5(d: dict, hdf):
+#     for key, value in d.items():
+#         if isinstance(value, dict):
+#             group = hdf.create_group(key)
+#             dict_to_hdf5(value, group)
+#         else:
+#             try:
+#                 if isinstance(value, np.ndarray):
+#                     hdf.create_dataset(key, data=value, compression="gzip")
+#                 else:
+#                     hdf.create_dataset(key, data=value)
+#             finally:
+#                 pass
 
 
-def hdf5_to_dict(hdf):
-    d = dict()
-    for key, value in hdf.items():
-        if isinstance(value, h5py.Group):
-            d[key] = hdf5_to_dict(value)
-        else:
-            d[key] = value[()]
-    return d
+# def hdf5_to_dict(hdf):
+#     d = dict()
+#     for key, value in hdf.items():
+#         if isinstance(value, h5py.Group):
+#             d[key] = hdf5_to_dict(value)
+#         else:
+#             d[key] = value[()]
+#     return d
 
 
 def log(f: Callable):
