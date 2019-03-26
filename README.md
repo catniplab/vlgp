@@ -41,7 +41,7 @@ result = vlgp.fit(
 )
 ```
 
-The `fit` function returns a dictionary of `trials`, `parameters` and `config` as the fitted model.
+The `fit` function returns a dictionary of `trials`, `params` and `config` as the fitted model.
 
 
 Please see the [tutorial](notebook/tutorial.ipynb) for details.
