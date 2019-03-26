@@ -1,12 +1,15 @@
-def make_toy_data():
+import pytest
+
+
+@pytest.fixture()
+def data():
     import numpy as np
 
     ydim = 5
-    xdim = 0
     zdim = 2
 
     length = 100
-    ntrial = 20
+    ntrial = 5
 
     a = np.random.randn(zdim, ydim)
     b = -2
@@ -25,8 +28,6 @@ def make_toy_data():
     return trials
 
 
-def test_fit():
+def test_fit(data):
     from vlgp.api import fit
-
-    data = make_toy_data()
     fit(data, n_factors=2)
