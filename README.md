@@ -14,21 +14,6 @@ Yuan Zhao ([yuan.zhao@stonybrook.edu](yuan.zhao@stonybrook.edu])) and
 Il Memming Park ([memming.park@stonybrook.edu](memming.park@stonybrook.edu)).
 It has been developed with the goal of recovering low-dimensional dynamics from neural population recordings. 
 
-## Changes
-
-2018
-
-- New uniform data structure
-- Support trials of unequal duration
-- Faster
-- Use NumPy data format
-
-2017
-
-- New ```fit``` function now only requires observation and the number of latent.
-- Save snapshots if *path* is passed to ```fit```.
-- You can access the iterations via *callback*.
-
 ## Installation
 
 #### pip
@@ -44,7 +29,24 @@ pip install -e .
 ```
 
 ## Usage
-To get started, please see the [tutorial](notebook/tutorial.ipynb).
+The main entry is `vlgp.fit`. The `fit` function requires two arguments `trials` and `n_factors`. 
+The former is expected as a *list* of *dictionaries*, each of which stores on trial and 
+at least contains a identifier `ID` and the observation `y` in the shape of (bin, channel).
+The later specifies the number of factors (latent processes).
+
+```python
+result = vlgp.fit(
+    trials,       # list of dictionaries
+    n_factors=3,  # dimensionality
+)
+```
+
+The `fit` function returns a dictionary of `trials`, `parameters` and `config` as the fitted model.
+
+
+Please see the [tutorial](notebook/tutorial.ipynb) for details.
+
+
 
 ## Citation
 ```
@@ -61,3 +63,18 @@ To get started, please see the [tutorial](notebook/tutorial.ipynb).
   publisher = {{MIT} Press - Journals},
 }
 ```
+
+## Changes
+
+2018
+
+- New uniform data structure
+- Support trials of unequal duration
+- Faster
+- Use NumPy data format
+
+2017
+
+- New ```fit``` function now only requires observation and the number of latent.
+- Save snapshots if *path* is passed to ```fit```.
+- You can access the iterations via *callback*.
