@@ -155,8 +155,8 @@ def make_cholesky(trials, params, config):
     omega = params["omega"]
     lengths = np.array([trial["y"].shape[0] for trial in trials])
     unique_lengths = np.unique(lengths)
+    params["cholesky"] = dict()
     for t in unique_lengths:
-        params["cholesky"] = dict()
         params["cholesky"][t] = np.array(
             [ichol_gauss(t, omega[l], rank) * sigma[l] for l in range(zdim)]
         )
