@@ -269,8 +269,12 @@ def hstep(trials, params, config):
 
 
 def infer(trials, params, config):
+    niter = config["Eniter"]
     config["Eniter"] = config["max_iter"]
-    estep(trials, params, config)
+    with timer() as elapsed:
+        estep(trials, params, config)
+    click.echo(f"{elapsed():.2f}s")
+    config["Eniter"] = niter
 
 
 def vem(trials, params, config):
