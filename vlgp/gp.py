@@ -160,3 +160,12 @@ def make_cholesky(trials, params, config):
         params["cholesky"][t] = np.array(
             [ichol_gauss(t, omega[l], rank) * sigma[l] for l in range(zdim)]
         )
+
+
+def sekernel(x, var, scale, jitter=1e-6):
+    d = pdist(x.reshape(-1, 1) / scale, metric="sqeuclidean")  # vector of pairwise squared distance
+    d2 = squareform(d)
+    cov = var * np.exp(-0.5 * d2)
+    cov += np.eye(x.shape[0]) * jitter
+
+    return cov
