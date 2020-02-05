@@ -5,7 +5,6 @@ trial isolation
 unequal trial ready
 """
 import concurrent.futures
-import copy
 import logging
 from itertools import repeat
 
@@ -15,13 +14,9 @@ from numpy import identity, einsum
 from scipy.linalg import solve, norm, svd, LinAlgError
 
 from . import gp
-from .base import Model
-from .callback import Saver, show
 from .evaluation import timer
-from .gp import make_cholesky
 from .math import trunc_exp
-from .preprocess import get_config, get_params, fill_trials, fill_params, initialize
-from .util import cut_trials, clip
+from .util import clip
 
 logger = logging.getLogger(__name__)
 
