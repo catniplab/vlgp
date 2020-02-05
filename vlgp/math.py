@@ -4,6 +4,9 @@ Math functions
 import warnings
 
 import numpy as np
+# import jax
+# from jax import numpy as np
+
 from scipy import linalg
 from scipy.linalg import svd
 
@@ -110,10 +113,10 @@ def ichol_gauss(n, omega, r, dt=1.0, tol=1e-6, check_rank=False):
 
         G[i, i] = np.sqrt(d[jast])
         nextcol = np.exp(
-            -omega * (x[pvec[i + 1 :]] - x[pvec[i]]) ** 2
+            -omega * (x[pvec[i + 1:]] - x[pvec[i]]) ** 2
         )  # compute next column
-        G[i + 1 :, i] = (nextcol - np.dot(G[i + 1 :, :i], G[i, :i])) / G[i, i]
-        d[i + 1 :] = 1 - np.sum(np.square(G[i + 1 :, : i + 1]), axis=1)
+        G[i + 1:, i] = (nextcol - np.dot(G[i + 1:, :i], G[i, :i])) / G[i, i]
+        d[i + 1:] = 1 - np.sum(np.square(G[i + 1:, : i + 1]), axis=1)
 
         i += 1
 
@@ -158,9 +161,9 @@ def ichol(a, tol=1e-6):
             jast = 0
 
         G[i, i] = np.sqrt(d[jast])
-        nextcol = a[pvec[i + 1 :], pvec[i]]
-        G[i + 1 :, i] = (nextcol - np.dot(G[i + 1 :, :i], G[i, :i])) / G[i, i]
-        d[i + 1 :] = 1 - np.sum((G[i + 1 :, : i + 1]) ** 2, axis=1)
+        nextcol = a[pvec[i + 1:], pvec[i]]
+        G[i + 1:, i] = (nextcol - np.dot(G[i + 1:, :i], G[i, :i])) / G[i, i]
+        d[i + 1:] = 1 - np.sum((G[i + 1:, : i + 1]) ** 2, axis=1)
 
         i += 1
     return G[pvec.argsort(), :i]

@@ -1,5 +1,6 @@
 from distutils.core import setup
 
+
 setup(
     name="vlgp",
     version="2019.3.19",
