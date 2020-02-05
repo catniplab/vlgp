@@ -14,8 +14,6 @@ from numpy import zeros, ones, diag, arange, eye, asarray
 from scipy.linalg import svd, lstsq, toeplitz, solve
 from scipy.ndimage.filters import gaussian_filter1d
 
-from .math import ichol_gauss
-
 logger = logging.getLogger(__name__)
 
 
@@ -352,14 +350,14 @@ def auto(y, lag):
     )
 
 
-def sparse_prior(sigma, omega, trial_lengths, rank):
-    # [diagonal(G1, G2, ..., Gq)]
-    from scipy import sparse
-
-    return [
-        sparse.block_diag([s * ichol_gauss(l, w, rank) for s, w in zip(sigma, omega)])
-        for l in trial_lengths
-    ]
+# def sparse_prior(sigma, omega, trial_lengths, rank):
+#     # [diagonal(G1, G2, ..., Gq)]
+#     from scipy import sparse
+#
+#     return [
+#         sparse.block_diag([s * ichol_gauss(l, w, rank) for s, w in zip(sigma, omega)])
+#         for l in trial_lengths
+#     ]
 
 
 def regmat(y, x: Optional[list], lag=0):
