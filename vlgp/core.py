@@ -264,7 +264,7 @@ def infer(trials, params, config):
     config["Eniter"] = config["max_iter"]
     with timer() as elapsed:
         estep(trials, params, config)
-    click.echo(f"{elapsed():.2f}s")
+    click.echo("{:.2f}s".format(elapsed()))
     config["Eniter"] = niter
 
 
