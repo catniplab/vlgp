@@ -35,14 +35,14 @@ def infer_single_trial(trial, params, config):
     tol = config["tol"]
     method = config["method"]
 
-    poiss_mask = likelihood == "poisson"
-    gauss_mask = likelihood == "gaussian"
+    poisson_channel = likelihood == "poisson"
+    gaussian_channel = likelihood == "gaussian"
 
     # parameters
     a = params["a"]
     b = params["b"]
     noise = params["noise"]
-    gauss_noise = noise[gauss_mask]
+    gauss_noise = noise[gaussian_channel]
 
     Ir = identity(rank)
     # boolean indexing creates copies
@@ -62,8 +62,8 @@ def infer_single_trial(trial, params, config):
     residual = np.empty_like(y, dtype=float)
     U = np.empty_like(y, dtype=float)
 
-    y_poiss = y[:, poiss_mask]
-    y_gauss = y[:, gauss_mask]
+    y_poiss = y[:, poisson_channel]
+    y_gauss = y[:, gaussian_channel]
 
     xb = einsum("ijk, jk -> ik", x, b)
 
@@ -72,8 +72,8 @@ def infer_single_trial(trial, params, config):
         r = trunc_exp(eta + 0.5 * v @ (a ** 2))
 
         # mean of y
-        mean_gauss = eta[:, gauss_mask]
-        mean_poiss = r[:, poiss_mask]
+        mean_gauss = eta[:, gaussian_channel]
+        mean_poiss = r[:, poisson_channel]
 
         for l in range(zdim):
             G = prior[l]
@@ -81,8 +81,8 @@ def infer_single_trial(trial, params, config):
             # working residuals
             # extensible to many other distributions
             # see GLM's working residuals
-            residual[:, poiss_mask] = y_poiss - mean_poiss
-            residual[:, gauss_mask] = (y_gauss - mean_gauss) / gauss_noise
+            residual[:, poisson_channel] = y_poiss - mean_poiss
+            residual[:, gaussian_channel] = (y_gauss - mean_gauss) / gauss_noise
             wadj = w[:, [l]]  # keep dimension
             GtWG = G.T @ (wadj * G)
 
@@ -101,8 +101,8 @@ def infer_single_trial(trial, params, config):
         # TODO: remove duplicated computation
         eta = mu @ a + xb
         r = trunc_exp(eta + 0.5 * v @ (a ** 2))
-        U[:, poiss_mask] = r[:, poiss_mask]
-        U[:, gauss_mask] = 1 / gauss_noise
+        U[:, poisson_channel] = r[:, poisson_channel]
+        U[:, gaussian_channel] = 1 / gauss_noise
         w = U @ (a.T ** 2)
         if method == "VB":
             for l in range(zdim):
