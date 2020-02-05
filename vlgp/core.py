@@ -129,12 +129,8 @@ def infer_single_trial(trial, params, config):
 
 def estep(trials, params, config):
     """Update variational distribution q (E step)"""
-    if config["parallel"]:
-        with concurrent.futures.ProcessPoolExecutor() as executor:
-            list(executor.map(infer_single_trial, trials, repeat(params), repeat(config)))
-    else:
-        for trial in trials:
-            infer_single_trial(trial, params, config)
+    for trial in trials:
+        infer_single_trial(trial, params, config)
 
 
 def mstep(trials, params, config):
