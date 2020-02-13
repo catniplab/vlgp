@@ -98,6 +98,28 @@ def fit(trials, n_factors, **kwargs):
     :param kwargs
     :return:
     """
+    y, C, d, R, K = prepare(trials, n_factors, **kwargs)
+
+    # EM
+    click.echo("Fitting")
+    z, C, d, R = em(y, C, d, R, K, kwargs['max_iter'])
+    # params['a'], params['b'], params['R'] = C, d, R
+
+    # Inference
+    # click.echo("Inferring")
+    # infer(trials, C, d, R)
+    # click.secho("Done", fg="green")
+
+    return y, z, C, d, R
+
+
+def prepare(trials, n_factors, **kwargs):
+    """
+    :param trials: list of trials
+    :param n_factors: number of latent factors
+    :param kwargs
+    :return:
+    """
     config = get_config(**kwargs)
     kwargs["omega_bound"] = config["omega_bound"]
     params = get_params(trials, n_factors, **kwargs)
@@ -120,21 +142,9 @@ def fit(trials, n_factors, **kwargs):
     segments = cut_trials(trials, params, config)
     y = np.stack([segment['y'] for segment in segments])
 
-    # fill_trials(segments)
-    # make_prior(segments, n_factors=n_factors, dt=kwargs['dt'], var=kwargs['var'], scale=kwargs['scale'])
-
-    # EM
-    click.echo("Fitting")
     C, d, R = params['a'], params['b'], params['R']
     n = config["window"]
     t = np.arange(n) * dt
     K = sekernel(t, var, scale)
-    z, C, d, R = em(y, C, d, R, K, config['max_iter'])
-    params['a'], params['b'], params['R'] = C, d, R
 
-    # Inference
-    # click.echo("Inferring")
-    # infer(trials, C, d, R)
-    # click.secho("Done", fg="green")
-
-    return y, z, C, d, R
+    return y, C, d, R, K
