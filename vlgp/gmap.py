@@ -132,7 +132,8 @@ def prepare(trials, n_factors, **kwargs):
 
     # fill arrays
     fill_params(params)
-    params['R'] = kwargs['R']
+    params['R'] = np.eye(trials[0]['y'].shape[1])
+
     dt = kwargs['dt']
     var = kwargs['var']
     scale = kwargs['scale']
