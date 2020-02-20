@@ -18,9 +18,9 @@ def speckled_cv(y, C, d, R, K, test_ratio, max_iter):
 
 
 def elementwise_error(yhat, y, R, eps=1e-16):
-    G = 1 / (eps + np.sqrt(R))
+    # G = 1 / (eps + np.sqrt(R))
     r = yhat - y
-    return (r @ G) ** 2
+    return r ** 2
 
 
 def gmap_speckled_cv(trials, max_n_factors, test_ratio=0.1, **kwargs):
