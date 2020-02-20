@@ -5,6 +5,7 @@ from . import gmap
 
 def speckled_cv(y, C, d, R, K, test_ratio, max_iter):
     test_mask = np.random.rand(*y.shape) < test_ratio  # mask matrix
+    y = y - y.mean()
     y_training = (1 - test_mask) * y
 
     z, C, d, R = gmap.em(y_training, C, d, R, K, max_iter)
