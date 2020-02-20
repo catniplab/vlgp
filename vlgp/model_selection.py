@@ -32,8 +32,8 @@ def gmap_speckled_cv(trials, max_n_factors, test_ratio=0.1, **kwargs):
     training_errors = []
     test_errors = []
     for n_factors in range(1, max_n_factors + 1):
-        y, C, d, R, K = gmap.prepare(trials, n_factors, dt=dt, var=var, scale=scale, max_iter=max_iter)
-        training_error, test_error = speckled_cv(y, C, d, R, K, test_ratio=test_ratio, max_iter=1)
+        y, C, d, R, K = gmap.prepare(trials, n_factors, dt=dt, var=var, scale=scale)
+        training_error, test_error = speckled_cv(y, C, d, R, K, test_ratio=test_ratio, max_iter=max_iter)
         training_errors.append(training_error)
         test_errors.append(test_error)
 
