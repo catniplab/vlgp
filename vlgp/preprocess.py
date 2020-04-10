@@ -65,7 +65,7 @@ def get_params(trials, zdim, **kwargs):
         "xdim": xdim,
         "a": kwargs.get("a", None),
         "b": kwargs.get("b", None),
-        "noise": kwargs.get("noise", None),
+        "noise": kwargs.get("noise", np.full(ydim, fill_value=1.0)),
         "sigma": kwargs.get("sigma", np.full(zdim, fill_value=1.0)),
         "omega": kwargs.get("omega", np.full(zdim, fill_value=kwargs["omega_bound"][1])),
         "rank": 50,  # TODO: consider merge with window in config
