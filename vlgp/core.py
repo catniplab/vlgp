@@ -4,13 +4,11 @@ introduce a new format of fit
 trial isolation
 unequal trial ready
 """
-import concurrent.futures
 import logging
-from itertools import repeat
 
 import click
 import numpy as np
-from numpy import identity, einsum
+from numpy import identity, einsum, trace
 from scipy.linalg import solve, norm, svd, LinAlgError
 
 from . import gp
