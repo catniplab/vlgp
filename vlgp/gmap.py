@@ -1,13 +1,15 @@
 import click
 # import jax
-import numpy as onp
-import jax.numpy as np
-from jax.numpy import linalg
+import numpy as np
+from numpy import linalg
+# import jax.numpy as np
+# from jax.numpy import linalg
 
 from .evaluation import timer
 from .gp import sekernel
+from .math import trunc_exp
 from .preprocess import get_config, get_params, initialize, fill_params, fill_trials
-from .util import cut_trials
+from .util import cut_trials, clip
 
 
 def make_prior(trials, n_factors, dt, var, scale):
