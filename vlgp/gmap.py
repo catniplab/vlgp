@@ -17,7 +17,8 @@ def make_prior(trials, n_factors, dt, var, scale):
         n, ydim = trial['y'].shape
         t = np.arange(n) * dt
         K = sekernel(t, var, scale)
-        trial['bigK'] = np.kron(np.eye(n_factors), K)
+        trial['K'] = K
+        # trial['bigK'] = np.kron(np.eye(n_factors), K)
 
 
 def em(y, C, d, R, K, max_iter):
@@ -54,26 +55,28 @@ def em(y, C, d, R, K, max_iter):
 
 
 def infer(trials, C, d, R):
-    for trial in trials:
-        n, ydim = trial['y'].shape
-        _, zdim = trial['mu'].shape
+    for i, trial in enumerate(trials):
+        with timer() as elapsed:
+            n, ydim = trial['y'].shape
+            _, zdim = trial['mu'].shape
 
-        y = trial['y'] - d[None, :]
-        y = y.T.reshape(-1, 1)
-        bigC = np.kron(C.T, np.eye(n))
-        bigK = trial['bigK']
-        bigR = np.kron(np.eye(n), R)
+            y = trial['y'] - d[None, :]
+            y = y.T.reshape(-1, 1)
+            bigC = np.kron(C.T, np.eye(n))
+            bigK = np.kron(np.eye(zdim), trial['K'])
+            bigR = np.kron(np.eye(n), R)
 
-        A = bigK @ bigC.T
+            A = bigK @ bigC.T
 
-        z = A @ linalg.solve(bigC @ A + bigR, y)
-        trial['mu'] = z.reshape((zdim, -1)).T
+            z = A @ linalg.solve(bigC @ A + bigR, y)
+            trial['mu'] = z.reshape((zdim, -1)).T
+        click.echo("Trial {:d}, {:.2f}s".format(i, elapsed()))
 
 
 def leastsq(Y, Z, constant=True):
     if constant:
         Z = np.column_stack([Z, np.ones(Z.shape[0])])
-    C, r, *_ = onp.linalg.lstsq(Z, Y, rcond=None)
+    C, r, *_ = linalg.lstsq(Z, Y, rcond=None)
     # C = linalg.solve(Z.T @ Z, Z.T @ Y)
     return C[:-1, :], C[[-1], :], r
 
