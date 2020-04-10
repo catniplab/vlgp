@@ -119,3 +119,16 @@ def map2vi(trials, C, d, **kwargs):
 
     return result
 
+
+def fastfit(trials, n_factors, dt, var, scale, max_iter=20, **kwargs):
+    import numpy as np
+    omega = np.full(n_factors, 0.5 / ((scale/dt) ** 2))
+
+    # MAP
+    y, C, d, R, K = gmap.prepare(trials, n_factors, dt=dt, var=var, scale=scale)
+    z, C, d, R = gmap.em(y, C, d, R, K, max_iter)
+
+    # vLGP
+    result = map2vi(trials, C, d, omega=omega, **kwargs)
+
+    return result
