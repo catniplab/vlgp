@@ -560,3 +560,58 @@ def update_v(trials, params, config):
 #     @property
 #     def bias(self):
 #         return self._bias
+
+
+def fast_estep(y, z, xB, C, d, K, *, max_iter):
+    # assume equal length
+    # assume Poisson
+    # MAP estimation
+    if max_iter < 1:
+        return
+
+    ydim = y.shape[-1]
+    zdim = z.shape[-1]
+
+    # reshape
+    y = y.T.reshape(-1, 1)
+    z = z.T.reshape(-1, 1)
+    xB = xB + d[None, :]
+    xB = xB.T.reshape(-1, 1)
+    bigC = np.kron(C.T, np.eye(ydim))
+    bigK = np.kron(np.eye(zdim), K)
+
+    for i in range(max_iter):
+        lam = trunc_exp(xB + bigC @ z)
+        grad = bigC @ (y - lam) - solve(bigK, z)
+        A = diag(1 / lam) - np.linalg.multi_dot((bigC, bigK, bigC.T))
+        Hi = np.linalg.multi_dot((bigK, bigC.T, solve(A, bigC), bigK))
+        dz = Hi @ grad
+        z += dz
+    return z
+
+
+def fast_mstep(y, z, x, B, C, d, K, *, max_iter):
+    # assume equal length
+    # assume Poisson
+    # MAP estimation
+    if max_iter < 1:
+        return
+
+    ydim = y.shape[-1]
+    zdim = z.shape[-1]
+
+    # X = concatenate((x, z, 1), axis=-1)
+    # b = concatenate((B, C, d), axis=0)
+
+    # for i in range(max_iter):
+    #     lam = exp(X @ b)
+    #     grad = (y - lam) @ X
+    #     H = multi_dot((X.T, diag(lam), X))
+    #     b -= solve(H, grad)
+
+
+def diag(a):
+    if a.ndim > 1:
+        return np.stack([np.diag(v) for v in a])
+    else:
+        return np.diag(a)

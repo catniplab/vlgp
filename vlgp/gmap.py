@@ -154,3 +154,56 @@ def prepare(trials, n_factors, **kwargs):
     K = sekernel(t, var, scale)
 
     return y, C, d, R, K
+
+
+def mpoiss(trials, y, z, C, d, R, K, max_iter, tol=1e-6, lr=1.0, eps=1e-6):
+    """Optimize loading and regression (M step)"""
+    if max_iter < 1:
+        return
+
+    # dimenionalities
+    ydim = y.shape[-1]
+    zdim = z.shape[-1]
+
+    # parameters
+    a = C
+    b = d
+    da = np.zeros_like(a)
+    db = np.zeros_like(b)
+
+    # misc
+    learning_rate = lr
+
+    y = y.reshape(-1, ydim)
+
+    mu = z.reshape(-1, zdim)
+
+    for i in range(max_iter):
+        eta = mu @ a + b
+        r = trunc_exp(eta)
+
+        for n in range(ydim):
+            mu_plus_v_times_a = mu
+            grad_a = mu.T @ y[:, n] - mu_plus_v_times_a.T @ r[:, n]
+
+            nhess_a = mu_plus_v_times_a.T @ (
+                r[:, n, np.newaxis] * mu_plus_v_times_a
+            )
+            try:
+                jitter = np.diag(np.full_like(grad_a, fill_value=eps))
+                delta_a = linalg.solve(nhess_a + jitter, grad_a, sym_pos=True)
+            except:
+                delta_a = learning_rate * grad_a
+
+            clip(delta_a, 5.0)
+            da[:, n] = delta_a
+            a[:, n] += delta_a
+
+            # regression
+            grad_b = np.sum((y[:, n] - r[:, n]))
+            nhess_b = np.sum(r[:, n])
+            delta_b = grad_b / (nhess_b + eps)
+
+            clip(delta_b, 5.0)
+            db[:, n] = delta_b
+            b[:, n] += delta_b
