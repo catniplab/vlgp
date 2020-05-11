@@ -2,7 +2,7 @@ import logging
 
 import numpy as np
 
-from . import gmap
+from . import gpfa
 
 
 logger = logging.getLogger(__name__)
@@ -13,7 +13,7 @@ def speckled_cv(y, C, d, R, K, test_ratio, max_iter):
     y = y - y.mean()  # otherwise meaningless to impute test set as 0
     y_training = (1 - test_mask) * y
 
-    z, C, d, R = gmap.em(y_training, C, d, R, K, max_iter)
+    z, C, d, R = gpfa.em(y_training, C, d, R, K, max_iter)
     yhat = z @ C + d[None, :]
     error = elementwise_error(yhat, y, R)
 
@@ -38,7 +38,7 @@ def gmap_speckled_cv(trials, n_factors_list, test_ratio=0.1, **kwargs):
     test_errors = []
     for n_factors in n_factors_list:
         logger.info('{} factor(s)'.format(n_factors))
-        y, C, d, R, K = gmap.prepare(trials, n_factors, dt=dt, var=var, scale=scale)
+        y, C, d, R, K = gpfa.prepare(trials, n_factors, dt=dt, var=var, scale=scale)
         try:
             training_error, test_error = speckled_cv(y, C, d, R, K, test_ratio=test_ratio, max_iter=max_iter)
         except Exception as e:

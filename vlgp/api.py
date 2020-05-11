@@ -3,7 +3,7 @@ import logging
 
 import click
 
-from . import gmap
+from . import gpfa
 from .preprocess import get_params, get_config, fill_trials, fill_params, initialize
 from .callback import Saver, show
 from .core import vem, update_w, update_v, infer
@@ -125,8 +125,8 @@ def fastfit(trials, n_factors, dt, var, scale, max_iter=20, **kwargs):
     omega = np.full(n_factors, 0.5 / ((scale/dt) ** 2))
 
     # MAP
-    y, C, d, R, K = gmap.prepare(trials, n_factors, dt=dt, var=var, scale=scale)
-    z, C, d, R = gmap.em(y, C, d, R, K, max_iter)
+    y, C, d, R, K = gpfa.prepare(trials, n_factors, dt=dt, var=var, scale=scale)
+    z, C, d, R = gpfa.em(y, C, d, R, K, max_iter)
 
     # vLGP
     result = map2vi(trials, C, d, omega=omega, **kwargs)
