@@ -99,7 +99,27 @@ def map2vi(trials, C, d, **kwargs):
     make_cholesky(trials, params, config)
     update_w(trials, params, config)
     update_v(trials, params, config)
+    config['max_iter'] = 5
+    result = resume(trials, params, config)
 
+    return result
+
+
+def fastfit(trials, n_factors, dt, var, scale, max_iter=20, **kwargs):
+    import numpy as np
+    omega = np.full(n_factors, 0.5 / ((scale/dt) ** 2))
+
+    # MAP
+    y, C, d, R, K = gpfa.prepare(trials, n_factors, dt=dt, var=var, scale=scale)
+    z, C, d, R = gpfa.em(y, C, d, R, K, max_iter)
+
+    # vLGP
+    result = map2vi(trials, C, d, omega=omega, **kwargs)
+
+    return result
+
+
+def resume(trials, params, config):
     click.echo("Inferring")
     infer(trials, params, config)
     click.secho("Done", fg="green")
@@ -116,19 +136,5 @@ def map2vi(trials, C, d, **kwargs):
     click.secho("Done", fg="green")
 
     result = {"trials": trials, "params": params, "config": config}
-
-    return result
-
-
-def fastfit(trials, n_factors, dt, var, scale, max_iter=20, **kwargs):
-    import numpy as np
-    omega = np.full(n_factors, 0.5 / ((scale/dt) ** 2))
-
-    # MAP
-    y, C, d, R, K = gpfa.prepare(trials, n_factors, dt=dt, var=var, scale=scale)
-    z, C, d, R = gpfa.em(y, C, d, R, K, max_iter)
-
-    # vLGP
-    result = map2vi(trials, C, d, omega=omega, **kwargs)
 
     return result
