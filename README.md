@@ -18,14 +18,7 @@ It has been developed with the goal of recovering low-dimensional dynamics from 
 
 #### pip
 ```bash
-pip install vlgp
-```
-
-#### from source
-```bash
-git clone https://github.com/catniplab/vlgp.git
-cd vlgp
-pip install -e .
+pip install git+https://github.com/catniplab/vlgp.git
 ```
 
 ## Usage
