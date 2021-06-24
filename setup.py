@@ -8,7 +8,7 @@ setup(
     url="https://github.com/catniplab/vlgp",
     license="MIT",
     author="yuan",
-    author_email="yuan.zhao@stonybrook.edu",
+    author_email="yuanz271@gmail.com",
     description="variational Latent Gaussian Process",
     python_requires=">=3.5.0",
     install_requires=["numpy", "scipy", "scikit-learn", "click"],

@@ -536,3 +536,12 @@ def count(t, binwidth, start=None, stop=None):
     bins = start + np.arange(nbin + 1) * binwidth  # add the last bin edge
 
     return np.histogram(t, bins=bins)[0]
+
+
+def _posterior_cov(W, K):
+    # Woodbury identity
+    return K - K @ np.linalg.solve(1 / W + K, K)
+
+
+def posterior_cov(w, L):
+    return _posterior_cov(np.diag(w), L @ L.T)
