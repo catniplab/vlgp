@@ -544,4 +544,4 @@ def _posterior_cov(W, K):
 
 
 def posterior_cov(w, L):
-    return _posterior_cov(np.diag(w), L @ L)
+    return _posterior_cov(np.diag(w), L @ L.T)
