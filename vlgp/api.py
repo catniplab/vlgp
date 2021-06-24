@@ -9,11 +9,11 @@ from .callback import Saver, show
 from .core import vem, update_w, update_v, infer
 from .util import cut_trials
 from .gp import make_cholesky
+import numpy as np
 
-__all__ = ["fit"]
+__all__ = ["fit", "sample_posterior"]
 
 logger = logging.getLogger(__name__)
-
 
 def fit(trials, n_factors, **kwargs):
     """
@@ -138,3 +138,31 @@ def resume(trials, params, config):
     result = {"trials": trials, "params": params, "config": config}
 
     return result
+
+def sample_posterior(trial, params, nsamples, reg = 1e-6):
+    '''Sample from the posterior for a single trial.
+    It computes large covariance matrices, so it may be slow.
+    If you only need the marginal variance, just use 'v'.
+
+    Returns:
+        ndarray of size (nsamples, bins, nfactors)
+    '''
+
+    chol = params['cholesky']
+    #v = trial['v']  # marginal variance
+    mu = trial['mu']
+    w = trial['w']
+
+    nbins, nfactors = mu.shape
+    chol = chol[nbins]    # for the trials with length nbins
+
+    samples = np.empty((nsamples, nbins, nfactors))
+
+    for kfactor in range(nfactors):
+        L = chol[kfactor,...]
+        K = L @ L.T
+        W = np.diag(w[:, kfactor])
+        KK1 = np.linalg.inv(np.linalg.inv(K + reg * np.eye(K.shape[0])) + W)
+        samples[:, :, kfactor] = np.random.multivariate_normal(mu[:, kfactor], KK1, size=nsamples)
+
+    return samples
