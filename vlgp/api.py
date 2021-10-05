@@ -11,7 +11,7 @@ from .util import cut_trials
 from .gp import make_cholesky
 import numpy as np
 
-__all__ = ["fit", "sample_posterior"]
+__all__ = ["fit", "sample_posterior", "infer"]
 
 logger = logging.getLogger(__name__)
 
