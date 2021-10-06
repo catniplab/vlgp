@@ -11,7 +11,7 @@ from .util import cut_trials
 from .gp import make_cholesky
 import numpy as np
 
-__all__ = ["fit", "sample_posterior", "infer"]
+__all__ = ["fit", "sample_posterior", "transform"]
 
 logger = logging.getLogger(__name__)
 
@@ -166,3 +166,19 @@ def sample_posterior(trial, params, nsamples, reg = 1e-6):
         samples[:, :, kfactor] = np.random.multivariate_normal(mu[:, kfactor], KK1, size=nsamples)
 
     return samples
+
+
+def transform(trials, params, config):
+    """Infer latent factors using fitted model
+    
+    :param trials: list of trials
+    :param params: parameters returned by fit
+    :param config: configuration returned by fit
+
+    :return:
+        trials: trials containing latent factors
+    """
+    initialize(trials, params, config)
+    fill_trials(trials)
+    infer(trials, params, config)
+    return trials

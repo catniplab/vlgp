@@ -13,9 +13,14 @@ def initialize(trials, params, config):
     y = np.concatenate([trial["y"] for trial in trials], axis=0)
     subsample = np.random.choice(y.shape[0], max(y.shape[0] // 10, 50))
     ydim = y.shape[-1]
-    fa = FactorAnalysis(n_components=zdim, random_state=0)
-    z = fa.fit_transform(y[subsample, :])
-    a = fa.components_
+
+    if params.get('transform') is None:
+        fa = FactorAnalysis(n_components=zdim, random_state=0)
+        z = fa.fit_transform(y[subsample, :])
+        a = fa.components_
+    params['transform'] = fa.transform
+    transform = params['transform']
+    
     b = np.log(np.maximum(np.mean(y, axis=0, keepdims=True), config["eps"]))
     noise = np.var(y[subsample, :] - z @ a, ddof=0, axis=0)
 
@@ -34,7 +39,7 @@ def initialize(trials, params, config):
         length = trial["y"].shape[0]
 
         if trial.get("mu") is None:
-            trial.update(mu=fa.transform(trial["y"]))
+            trial.update(mu=transform(trial["y"]))
 
         if trial.get("x") is None:
             trial.update(x=np.ones((length, xdim, ydim)))
