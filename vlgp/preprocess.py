@@ -18,7 +18,7 @@ def initialize(trials, params, config):
         fa = FactorAnalysis(n_components=zdim, random_state=0)
         z = fa.fit_transform(y[subsample, :])
         a = fa.components_
-    params['transform'] = fa.transform
+        params['transform'] = fa.transform
     transform = params['transform']
     
     b = np.log(np.maximum(np.mean(y, axis=0, keepdims=True), config["eps"]))
