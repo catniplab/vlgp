@@ -19,22 +19,20 @@ def initialize(trials, params, config):
         z = fa.fit_transform(y[subsample, :])
         a = fa.components_
         params['transform'] = fa.transform
-    transform = params['transform']
-    z = transform(y[subsample, :])
-    
-    b = np.log(np.maximum(np.mean(y, axis=0, keepdims=True), config["eps"]))
-    noise = np.var(y[subsample, :] - z @ a, ddof=0, axis=0)
+        b = np.log(np.maximum(np.mean(y, axis=0, keepdims=True), config["eps"]))
+        noise = np.var(y[subsample, :] - z @ a, ddof=0, axis=0)
 
-    # stupid way of update
-    # two cases
-    # 1) no key
-    # 2) empty value (None)
-    if params.get("a") is None:
-        params.update(a=a)
-    if params.get("b") is None:
-        params.update(b=b)
-    if params.get("noise") is None:
-        params.update(noise=noise)
+        # two cases
+        # 1) no key
+        # 2) empty value (None)
+        if params.get("a") is None:
+            params.update(a=a)
+        if params.get("b") is None:
+            params.update(b=b)
+        if params.get("noise") is None:
+            params.update(noise=noise)
+
+    transform = params['transform']
 
     for trial in trials:
         length = trial["y"].shape[0]
