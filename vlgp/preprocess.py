@@ -20,6 +20,7 @@ def initialize(trials, params, config):
         a = fa.components_
         params['transform'] = fa.transform
     transform = params['transform']
+    z = transform(y[subsample, :])
     
     b = np.log(np.maximum(np.mean(y, axis=0, keepdims=True), config["eps"]))
     noise = np.var(y[subsample, :] - z @ a, ddof=0, axis=0)
