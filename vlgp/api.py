@@ -5,7 +5,7 @@ import click
 
 from . import gpfa
 from .preprocess import get_params, get_config, fill_trials, fill_params, initialize
-from .callback import Saver, show
+# from .callback import Saver, show
 from .core import vem, update_w, update_v, infer
 from .util import cut_trials
 from .gp import make_cholesky
@@ -30,11 +30,11 @@ def fit(trials, n_factors, **kwargs):
     logger.info("\n".join(["{} : {}".format(k, v) for k, v in config.items()]))
 
     # add built-in callbacks
-    callbacks = config["callbacks"]
-    if "path" in config:
-        saver = Saver()
-        callbacks.extend([show, saver.save])
-    config["callbacks"] = callbacks
+    # callbacks = config["callbacks"]
+    # if "path" in config:
+    #     saver = Saver()
+    #     callbacks.extend([show, saver.save])
+    # config["callbacks"] = callbacks
 
     # prepare parameters
     kwargs["omega_bound"] = config["omega_bound"]
