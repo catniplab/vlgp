@@ -29,5 +29,10 @@ def data():
 
 
 def test_fit(data):
-    from vlgp.api import fit
-    fit(data, n_factors=2)
+    from vlgp.api import fit, transform
+    result = fit(data, n_factors=2)
+    trials = result['trials']
+    params = result['params']
+    config = result['config']
+
+    transform(trials, params, config)
